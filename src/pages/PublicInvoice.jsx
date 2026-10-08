@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/index.js';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import { Button, Icon, Spinner } from '../components/ui.jsx';
-import { buildInvoicePdf, imageBytes, pdfFileName } from '../lib/pdf.js';
+import { pdfFileName } from '../lib/pdf.js';
 import { buildInvoiceZip, downloadBlob } from '../lib/files.js';
 import { money, fmtLong, fmtShort, fmtTsDate, num } from '../lib/format.js';
 import { useRoute } from '../router.js';
@@ -36,10 +36,8 @@ export default function PublicInvoice({ token }) {
   const due = num(inv.total) - paid;
   const isQuote = inv.kind === 'quote';
 
-  const pdf = async () => {
-    const logo = biz.logo_url ? await imageBytes(biz.logo_url) : null;
-    return buildInvoicePdf({ business: biz, invoice: inv, client: data.client, lines: data.lines, payments: data.payments, logo });
-  };
+  // Made on the server from the saved invoice, so nothing changed on this page (e.g. with "Inspect") can end up in the PDF.
+  const pdf = () => api.publicPdf(token);
   const run = async (key, fn) => {
     setBusy(key);
     try { await fn(); } catch (e) { alert(`Sorry, that didn’t work: ${e.message}`); }
@@ -91,7 +89,10 @@ export default function PublicInvoice({ token }) {
             </div>
           </section>
         )}
-        <p className="small muted" style={{ textAlign: 'center' }}>Private link{isQuote ? '' : ' · active until this invoice is paid'}</p>
+        <p className="small muted" style={{ textAlign: 'center', lineHeight: 1.7 }}>
+          Private link{isQuote ? '' : ' · active until this invoice is paid'}
+          {inv.verify_code && <><br />Verification code <span className="num" style={{ fontWeight: 600, color: 'var(--ink-2)' }}>{inv.verify_code}</span> · a genuine PDF of this version shows the same code at the bottom of each page</>}
+        </p>
       </div>
     </div>
   );

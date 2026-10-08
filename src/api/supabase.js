@@ -155,4 +155,14 @@ export const api = {
   publicCall(action, payload = {}) {
     return call('public', { action, ...payload }, { auth: false });
   },
+  /** The invoice PDF, made on the server from the saved invoice. */
+  async publicPdf(token) {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/public`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      body: JSON.stringify({ action: 'pdf', token }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Download failed (${res.status})`);
+    return new Uint8Array(await res.arrayBuffer());
+  },
 };

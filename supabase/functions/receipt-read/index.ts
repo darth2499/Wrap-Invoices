@@ -1,4 +1,9 @@
-// receipt-read — reads a scanned receipt with Claude and returns vendor, date and the amount actually paid.
+// receipt-read — reads a receipt (or an old invoice for importing) and returns structured details.
+//
+// Readers, in order of preference:
+//   1. Cloudflare Workers AI — FREE (10,000 "neurons"/day ≈ 100+ receipts/day). Needs CF_AI_TOKEN (+ account id).
+//   2. Anthropic Claude — paid, most accurate. Used when ANTHROPIC_API_KEY is set and RECEIPT_PROVIDER isn't "cloudflare".
+// Set RECEIPT_PROVIDER to "cloudflare" or "anthropic" to force one.
 import { bytesToBase64, env, HttpError, json, r2Get, requireUser, serve } from "../_shared/util.ts";
 
 // Keep in sync with src/lib/categories.js
@@ -9,141 +14,209 @@ const CATEGORIES = [
   "Travel", "Meals", "Utilities", "Software & subscriptions", "Education", "Other",
 ];
 
-const TOOL = {
-  name: "save_receipt",
-  description: "Save the details read from the receipt image.",
-  input_schema: {
-    type: "object",
-    properties: {
-      is_receipt: { type: "boolean", description: "False if the image is not a receipt or invoice at all." },
-      vendor: { type: ["string", "null"], description: "Business name as a person would say it, e.g. 'Delta Hotels', 'McDonald's'." },
-      date: { type: ["string", "null"], description: "Purchase date as YYYY-MM-DD." },
-      total_paid: {
-        type: ["number", "null"],
-        description: "The FINAL amount the customer actually paid / was charged, including tax and tip. Never a subtotal, item price, change due, or 'amount tendered'.",
-      },
-      subtotal: { type: ["number", "null"] },
-      tax: { type: ["number", "null"] },
-      tip: { type: ["number", "null"], description: "Tip/gratuity, including a handwritten one." },
-      currency: { type: "string", description: "ISO code, usually USD." },
-      reasoning: { type: "string", description: "One short sentence: which line you used as total_paid and why." },
-      amounts: {
-        type: "array",
-        description: "Every other money amount on the receipt that someone might confuse with the total (subtotal, tax, tip, item lines, cash tendered, change, balance).",
-        items: {
-          type: "object",
-          properties: { label: { type: "string" }, amount: { type: "number" } },
-          required: ["label", "amount"],
-        },
-      },
-      category: { type: "string", enum: CATEGORIES },
-      confidence: { type: "string", enum: ["high", "medium", "low"] },
-    },
-    required: ["is_receipt", "vendor", "date", "total_paid", "reasoning", "amounts", "category", "confidence", "currency"],
-  },
-};
-
-const PROMPT = `You are reading a receipt for a freelance video/audio professional's business bookkeeping.
+const RECEIPT_RULES = `You are reading a receipt for a freelance video/audio professional's business bookkeeping.
 
 Find the amount that was ACTUALLY PAID. Rules:
 - Prefer the line labelled TOTAL, AMOUNT PAID, AMOUNT CHARGED, CARD TOTAL, or the card/payment line at the bottom.
 - If a tip was handwritten or added after the printed total, total_paid = printed total + tip (use a handwritten grand total if present).
 - Ignore SUBTOTAL, individual items, "cash tendered", "change", "you saved", "points", and pre-authorization amounts.
-- For hotel folios, use the total charges paid (payments line), not the remaining balance (often $0.00).
+- For hotel folios, use the total charges paid (payments line), not the remaining balance (often 0.00).
 - For parking stubs, use the amount paid.
-- If two copies of a total appear, they should match; if they don't, choose the one at the payment step and set confidence to "low".
-- Dates in US format MM/DD/YY should be converted to YYYY-MM-DD.
-Pick the best tax category for the expense. Call save_receipt exactly once.`;
+- If two totals disagree, choose the one at the payment step and set confidence to "low".
+- Convert US dates like MM/DD/YY to YYYY-MM-DD.
+Pick the best tax category for the expense from this list: ${CATEGORIES.join("; ")}.`;
 
-const INVOICE_TOOL = {
-  name: "save_invoice",
-  description: "Save the details of an invoice that was issued by the user (for importing old invoices).",
-  input_schema: {
-    type: "object",
-    properties: {
-      number: { type: "string", description: "Invoice number without '#'" },
-      client_name: { type: "string", description: "The 'Bill to' name" },
-      client_email: { type: ["string", "null"] },
-      client_address: { type: ["string", "null"], description: "Bill-to address, lines separated by \\n" },
-      issue_date: { type: "string", description: "YYYY-MM-DD" },
-      due_date: { type: ["string", "null"], description: "YYYY-MM-DD" },
-      lines: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            item: { type: "string" }, description: { type: ["string", "null"] }, note: { type: ["string", "null"] },
-            qty: { type: "number" }, rate: { type: "number" }, amount: { type: "number" },
-          },
-          required: ["item", "qty", "rate", "amount"],
-        },
-      },
-      total: { type: "number" },
-      payments: {
-        type: "array",
-        items: { type: "object", properties: { date: { type: "string" }, amount: { type: "number" }, method: { type: ["string", "null"] } }, required: ["amount"] },
-      },
-      amount_due: { type: "number" },
-      notes: { type: ["string", "null"], description: "Notes / terms text" },
-    },
-    required: ["number", "client_name", "issue_date", "lines", "total", "amount_due"],
-  },
+const RECEIPT_JSON = `Reply with ONLY one JSON object, no other text, in exactly this shape (use null when unknown):
+{"is_receipt": true, "vendor": "Business name", "date": "YYYY-MM-DD", "total_paid": 0.00, "subtotal": null, "tax": null, "tip": null,
+ "currency": "USD", "reasoning": "one short sentence: which line is the total and why",
+ "amounts": [{"label": "Subtotal", "amount": 0.00}], "category": "one of the categories", "confidence": "high|medium|low"}
+"amounts" lists every OTHER money amount someone might confuse with the total (subtotal, tax, tip, items, tendered, change).`;
+
+const INVOICE_RULES = `This is an invoice the user sent to a client (for example exported from Wave). Read every line item across all pages, keeping each item's description lines.`;
+
+const INVOICE_JSON = `Reply with ONLY one JSON object, no other text, in exactly this shape (use null when unknown):
+{"number": "193", "client_name": "Bill-to name", "client_email": null, "client_address": "line 1\\nline 2",
+ "issue_date": "YYYY-MM-DD", "due_date": "YYYY-MM-DD",
+ "lines": [{"item": "Camera Operator", "description": "Felicis (04/06)", "note": null, "qty": 1, "rate": 750.00, "amount": 750.00}],
+ "total": 0.00, "payments": [{"date": "YYYY-MM-DD", "amount": 0.00, "method": "bank payment"}], "amount_due": 0.00, "notes": "Month of April"}`;
+
+// ---------------------------------------------------------------- helpers
+const toNum = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? v : parseFloat(String(v).replace(/[$,\s]/g, ""));
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
 };
 
-serve(async (req) => {
-  const user = await requireUser(req);
-  const { key, mime, mode } = await req.json();
-  if (typeof key !== "string" || !key.startsWith(`${user.id}/`)) throw new HttpError(403, "Not your file");
+function toDate(v: unknown): string | null {
+  const s = String(v ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
+  if (m) return `${m[3].length === 2 ? "20" + m[3] : m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+  return null;
+}
 
-  const file = await r2Get(key);
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  if (bytes.length > 20 * 1024 * 1024) throw new HttpError(413, "File is too large to read (20 MB max)");
-  const type = (mime || file.headers.get("content-type") || "image/jpeg").toLowerCase();
-  const data = bytesToBase64(bytes);
+/** Pulls the first JSON object out of a model reply (handles ```json fences and chatter). */
+function parseJson(raw: unknown): Record<string, unknown> {
+  if (raw && typeof raw === "object") return raw as Record<string, unknown>;
+  const s = String(raw ?? "");
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new HttpError(502, "The receipt reader didn't return details");
+  return JSON.parse(s.slice(start, end + 1));
+}
 
-  const media = type.includes("pdf")
-    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data } }
-    : { type: "image", source: { type: "base64", media_type: type.includes("png") ? "image/png" : type.includes("webp") ? "image/webp" : "image/jpeg", data } };
+function cleanReceipt(r: Record<string, any>) {
+  const cat = CATEGORIES.find((c) => c.toLowerCase() === String(r.category ?? "").toLowerCase())
+    ?? CATEGORIES.find((c) => String(r.category ?? "").toLowerCase().includes(c.toLowerCase().split(" ")[0])) ?? "Other";
+  const out = {
+    is_receipt: r.is_receipt !== false,
+    vendor: r.vendor ? String(r.vendor).slice(0, 120) : null,
+    date: toDate(r.date),
+    total_paid: toNum(r.total_paid ?? r.total),
+    subtotal: toNum(r.subtotal),
+    tax: toNum(r.tax),
+    tip: toNum(r.tip),
+    currency: String(r.currency || "USD").slice(0, 3).toUpperCase(),
+    reasoning: String(r.reasoning ?? "").slice(0, 300),
+    amounts: (Array.isArray(r.amounts) ? r.amounts : [])
+      .map((a: any) => ({ label: String(a?.label ?? "").slice(0, 40), amount: toNum(a?.amount) }))
+      .filter((a: any) => a.amount !== null)
+      .slice(0, 12),
+    category: cat,
+    confidence: ["high", "medium", "low"].includes(r.confidence) ? r.confidence : "medium",
+    check: "unknown" as "ok" | "mismatch" | "unknown",
+  };
+  // Sanity check: subtotal + tax + tip should equal the total. Flag it if not.
+  if (out.total_paid != null && out.subtotal != null) {
+    const sum = out.subtotal + (out.tax ?? 0) + (out.tip ?? 0);
+    out.check = Math.abs(sum - out.total_paid) < 0.02 ? "ok" : "mismatch";
+    if (out.check === "mismatch" && out.confidence === "high") out.confidence = "medium";
+  }
+  return out;
+}
 
+function cleanInvoice(r: Record<string, any>) {
+  return {
+    number: String(r.number ?? "").replace(/^#/, ""),
+    client_name: r.client_name ?? "",
+    client_email: r.client_email ?? null,
+    client_address: r.client_address ?? null,
+    issue_date: toDate(r.issue_date),
+    due_date: toDate(r.due_date),
+    lines: (Array.isArray(r.lines) ? r.lines : []).map((l: any) => ({
+      item: String(l?.item ?? "Item"), description: l?.description ?? null, note: l?.note ?? null,
+      qty: toNum(l?.qty) ?? 1, rate: toNum(l?.rate) ?? 0, amount: toNum(l?.amount) ?? 0,
+    })),
+    total: toNum(r.total) ?? 0,
+    payments: (Array.isArray(r.payments) ? r.payments : []).map((p: any) => ({ date: toDate(p?.date), amount: toNum(p?.amount) ?? 0, method: p?.method ?? null })),
+    amount_due: toNum(r.amount_due) ?? 0,
+    notes: r.notes ?? null,
+  };
+}
+
+// ---------------------------------------------------------------- readers
+interface Input {
+  mode: "receipt" | "invoice";
+  text?: string; // text pulled from a PDF in the browser
+  image?: { mime: string; b64: string };
+  pdf?: string; // base64 PDF (Anthropic only)
+}
+
+async function readWithCloudflare(inp: Input) {
+  const account = Deno.env.get("CF_ACCOUNT_ID") || env("R2_ACCOUNT_ID");
+  const model = Deno.env.get("CF_AI_MODEL") || "@cf/meta/llama-4-scout-17b-16e-instruct";
+  if (!inp.text && !inp.image) throw new HttpError(400, "Nothing to read");
+  const rules = inp.mode === "invoice" ? INVOICE_RULES : RECEIPT_RULES;
+  const shape = inp.mode === "invoice" ? INVOICE_JSON : RECEIPT_JSON;
+  const content: unknown[] = [{ type: "text", text: `${rules}\n\n${shape}${inp.text ? `\n\nDocument text:\n"""\n${inp.text.slice(0, 24000)}\n"""` : ""}` }];
+  if (inp.image) content.push({ type: "image_url", image_url: { url: `data:${inp.image.mime};base64,${inp.image.b64}` } });
+
+  const call = async (jsonMode: boolean) => {
+    const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${model}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env("CF_AI_TOKEN")}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [
+          { role: "system", content: "You extract data from documents and reply with JSON only." },
+          { role: "user", content },
+        ],
+        max_tokens: inp.mode === "invoice" ? 4000 : 1000,
+        temperature: 0,
+        ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
+      }),
+    });
+    const body = await res.json().catch(() => ({}));
+    return { res, body };
+  };
+  let { res, body } = await call(true);
+  if (!res.ok && res.status === 400) ({ res, body } = await call(false)); // some models reject JSON mode
+  if (!res.ok || body.success === false) {
+    const msg = body?.errors?.[0]?.message ?? `status ${res.status}`;
+    if (res.status === 429 || /neuron|limit|quota/i.test(msg)) throw new HttpError(429, "Today's free receipt reading is used up (it resets every afternoon, Pacific time). You can type this one in.");
+    throw new HttpError(502, `Receipt reader failed: ${msg}`);
+  }
+  return parseJson(body?.result?.response ?? body?.result);
+}
+
+async function readWithAnthropic(inp: Input) {
+  const content: unknown[] = [];
+  if (inp.pdf) content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: inp.pdf } });
+  if (inp.image) content.push({ type: "image", source: { type: "base64", media_type: inp.image.mime, data: inp.image.b64 } });
+  const rules = inp.mode === "invoice" ? INVOICE_RULES : RECEIPT_RULES;
+  const shape = inp.mode === "invoice" ? INVOICE_JSON : RECEIPT_JSON;
+  content.push({ type: "text", text: `${rules}\n\n${shape}${inp.text && !inp.pdf ? `\n\nDocument text:\n"""\n${inp.text.slice(0, 60000)}\n"""` : ""}` });
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: {
-      "x-api-key": env("ANTHROPIC_API_KEY"),
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
+    headers: { "x-api-key": env("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({
-      model: env("RECEIPT_MODEL", "claude-sonnet-4-5"),
-      max_tokens: mode === "invoice" ? 8000 : 1024,
-      tools: [mode === "invoice" ? INVOICE_TOOL : TOOL],
-      tool_choice: { type: "tool", name: mode === "invoice" ? "save_invoice" : "save_receipt" },
-      messages: [{
-        role: "user",
-        content: [media, {
-          type: "text",
-          text: mode === "invoice"
-            ? "This is an invoice the user sent to a client (e.g. exported from Wave). Read every line item across all pages, keeping each item's description lines. Call save_invoice once."
-            : PROMPT,
-        }],
-      }],
+      model: Deno.env.get("RECEIPT_MODEL") || "claude-sonnet-4-5",
+      max_tokens: inp.mode === "invoice" ? 8000 : 1200,
+      messages: [{ role: "user", content }],
     }),
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new HttpError(502, `Receipt reader failed (${res.status}): ${text.slice(0, 300)}`);
-  }
+  if (!res.ok) throw new HttpError(502, `Receipt reader failed (${res.status}): ${(await res.text()).slice(0, 300)}`);
   const out = await res.json();
-  const call = (out.content ?? []).find((c: { type: string }) => c.type === "tool_use");
-  if (!call) throw new HttpError(502, "Receipt reader returned nothing");
-  const r = call.input;
-  if (mode === "invoice") return json(r);
+  const text = (out.content ?? []).filter((c: { type: string }) => c.type === "text").map((c: { text: string }) => c.text).join("");
+  return parseJson(text);
+}
 
-  // Sanity check: subtotal + tax + tip should equal the total. Flag it if not.
-  let check: "ok" | "mismatch" | "unknown" = "unknown";
-  if (r.total_paid != null && r.subtotal != null) {
-    const sum = Number(r.subtotal) + Number(r.tax ?? 0) + Number(r.tip ?? 0);
-    check = Math.abs(sum - Number(r.total_paid)) < 0.02 ? "ok" : "mismatch";
-    if (check === "mismatch" && r.confidence === "high") r.confidence = "medium";
+function provider(): "cloudflare" | "anthropic" {
+  const forced = Deno.env.get("RECEIPT_PROVIDER");
+  if (forced === "cloudflare" || forced === "anthropic") return forced;
+  if (Deno.env.get("CF_AI_TOKEN")) return "cloudflare";
+  if (Deno.env.get("ANTHROPIC_API_KEY")) return "anthropic";
+  throw new HttpError(501, "Automatic reading isn't set up yet (add CF_AI_TOKEN in Supabase secrets). You can type the details in.");
+}
+
+// ---------------------------------------------------------------- handler
+serve(async (req) => {
+  const user = await requireUser(req);
+  const { key, mime, mode = "receipt", text, image_b64, image_mime } = await req.json();
+  const p = provider();
+  const inp: Input = { mode: mode === "invoice" ? "invoice" : "receipt" };
+
+  if (typeof text === "string" && text.trim().length > 20) {
+    inp.text = text;
   }
-  return json({ ...r, check });
+  if (typeof image_b64 === "string" && image_b64.length > 100) {
+    // A small "reading copy" made in the browser (faster and uses less of the free allowance).
+    if (image_b64.length > 8 * 1024 * 1024) throw new HttpError(413, "Image is too large to read");
+    inp.image = { mime: String(image_mime || "image/jpeg"), b64: image_b64 };
+  } else if (typeof key === "string" && key) {
+    if (!key.startsWith(`${user.id}/`)) throw new HttpError(403, "Not your file");
+    const isPdf = String(mime || "").includes("pdf");
+    // Cloudflare's models can't open PDFs: the browser sends the PDF's text, or a picture of page 1 instead.
+    if (!(isPdf && (p === "cloudflare" || inp.text))) {
+      const file = await r2Get(key);
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (bytes.length > 15 * 1024 * 1024) throw new HttpError(413, "File is too large to read");
+      const type = (mime || file.headers.get("content-type") || "image/jpeg").toLowerCase();
+      if (type.includes("pdf")) inp.pdf = bytesToBase64(bytes);
+      else inp.image = { mime: type.includes("png") ? "image/png" : type.includes("webp") ? "image/webp" : "image/jpeg", b64: bytesToBase64(bytes) };
+    }
+  }
+  if (!inp.text && !inp.image && !inp.pdf) throw new HttpError(400, "This PDF has no readable text. Upload a photo or screenshot of it instead.");
+
+  const raw = p === "cloudflare" ? await readWithCloudflare(inp) : await readWithAnthropic(inp);
+  return json(inp.mode === "invoice" ? cleanInvoice(raw) : { ...cleanReceipt(raw), reader: p });
 });

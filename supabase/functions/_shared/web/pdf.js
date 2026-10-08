@@ -1,5 +1,6 @@
+// GENERATED from src/lib/pdf.js by scripts/sync-shared.mjs. Edit the original, not this copy.
 // Builds the invoice/quote PDF in the browser (pdf-lib). Matches components/InvoiceDoc.jsx.
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb } from 'npm:pdf-lib@1.17.1';
 import { money, fmtLong, num } from './format.js';
 import { depositAmount } from './calc.js';
 

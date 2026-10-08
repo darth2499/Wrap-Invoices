@@ -1,9 +1,13 @@
 // public — what clients see through a shared link (no sign-in).
 //   invoice:      /#/i/<token>   → invoice/quote, its lines and attached receipts
+//   pdf:          the invoice PDF, made here from the saved invoice (never from what's on the client's screen)
 //   accept_quote: client approves a quote
 //   statement:    /#/s/<token>   → every open invoice for one client
 //   ping:         keeps the free Supabase project awake
-import { admin, HttpError, json, presign, serve } from "../_shared/util.ts";
+import { admin, appUrl, cors, HttpError, json, presign, r2Get, serve } from "../_shared/util.ts";
+// @ts-ignore: plain JS shared with the app (copied by scripts/sync-shared.mjs)
+import { buildInvoicePdf as buildPdfJs, imageBytes, pdfFileName } from "../_shared/web/pdf.js";
+const buildInvoicePdf = buildPdfJs as unknown as (opts: Record<string, unknown>) => Promise<Uint8Array>;
 
 const TOKEN_RE = /^[a-f0-9]{48,64}$/;
 
@@ -14,6 +18,20 @@ async function business(db: ReturnType<typeof admin>, ownerId: string) {
   if (!p) return null;
   const logo_url = p.logo_key ? await presign(p.logo_key, "GET", 3600) : null;
   return { ...p, logo_key: undefined, logo_url };
+}
+
+/**
+ * Short code tied to this exact version and balance of the invoice. Signed with a server-only secret,
+ * so it can't be made up: the code on a PDF must match the one shown on the live link.
+ */
+// deno-lint-ignore no-explicit-any
+async function verifyCode(inv: any, paid: number): Promise<string> {
+  const secret = Deno.env.get("VERIFY_SECRET") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const msg = `${inv.id}|${inv.version}|${Number(inv.total).toFixed(2)}|${paid.toFixed(2)}`;
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg)));
+  const hex = [...sig.slice(0, 4)].map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+  return `${hex.slice(0, 4)}-${hex.slice(4)}`;
 }
 
 serve(async (req) => {
@@ -66,6 +84,32 @@ serve(async (req) => {
   if (inv.status === "void") return json({ ...base, state: "void" });
   if (inv.status === "paid") return json({ ...base, state: "paid", total: inv.total });
 
+  if (body.action === "pdf") {
+    const [{ data: lines }, { data: client }, { data: pays }, { data: prof }] = await Promise.all([
+      db.from("invoice_lines").select("item, description, note, qty, rate, amount, tax_rate, kind").eq("invoice_id", inv.id).order("position"),
+      inv.client_id ? db.from("clients").select("name, email, address").eq("id", inv.client_id).single() : Promise.resolve({ data: null }),
+      db.from("payments").select("paid_on, amount, method").eq("invoice_id", inv.id).order("paid_on"),
+      db.from("profiles").select("logo_key").eq("id", inv.owner_id).single(),
+    ]);
+    const paid = (pays ?? []).reduce((t, p) => t + Number(p.amount), 0);
+    let logo = null;
+    if (prof?.logo_key) {
+      try { logo = await imageBytes(new Blob([new Uint8Array(await (await r2Get(prof.logo_key)).arrayBuffer())])); } catch { logo = null; }
+    }
+    const bytes = await buildInvoicePdf({
+      business: biz ?? {}, invoice: inv, client, lines: lines ?? [], payments: pays ?? [], logo,
+      verify: { url: `${appUrl()}/#/i/${token}`, code: await verifyCode(inv, paid) },
+    });
+    return new Response(new Blob([bytes as unknown as BlobPart]), {
+      headers: {
+        ...cors,
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${pdfFileName(inv)}"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   if (!body.preview) {
     const now = new Date().toISOString();
     await db.from("invoices").update({
@@ -105,6 +149,7 @@ serve(async (req) => {
       terms: inv.terms, notes: inv.notes, subtotal: inv.subtotal, discount_total: inv.discount_total,
       tax_total: inv.tax_total, total: inv.total, deposit_percent: inv.deposit_percent, version: inv.version,
       updated_at: inv.updated_at,
+      verify_code: await verifyCode(inv, (pays ?? []).reduce((t, p) => t + Number(p.amount), 0)),
     },
     client,
     lines: lines ?? [],

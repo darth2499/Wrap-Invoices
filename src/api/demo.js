@@ -343,6 +343,18 @@ export const api = {
     return { ok: true };
   },
 
+  /** Demo stand-in for the server-made PDF (the real one is built in the "public" function). */
+  async publicPdf(token) {
+    const data = await api.publicCall('invoice', { token, preview: true });
+    if (data.state !== 'open') throw new Error('This link is no longer active');
+    const { buildInvoicePdf, imageBytes } = await import('../lib/pdf.js');
+    const logo = data.business?.logo_url ? await imageBytes(data.business.logo_url) : null;
+    return buildInvoicePdf({
+      business: data.business, invoice: data.invoice, client: data.client, lines: data.lines, payments: data.payments, logo,
+      verify: { url: `${window.location.href.split('#')[0]}#/i/${token}`, code: data.invoice.verify_code },
+    });
+  },
+
   async publicCall(action, payload) {
     load();
     await delay(200);
@@ -382,7 +394,7 @@ export const api = {
     return {
       ...base,
       state: 'open',
-      invoice: clone(inv),
+      invoice: { ...clone(inv), verify_code: 'DEMO-0000' },
       client: clone(state.clients.find((c) => c.id === inv.client_id) || null),
       lines: clone(state.invoice_lines.filter((l) => l.invoice_id === inv.id).sort((a, b) => a.position - b.position)),
       payments: clone(state.payments.filter((p) => p.invoice_id === inv.id)),
