@@ -2,11 +2,14 @@
 // (localStorage for data, IndexedDB for files). Used when no Supabase settings are configured.
 import { LIVE_CONFIGURED, setDemoMode } from '../config.js';
 import { TABLES } from './tables.js';
-import { seedDemo } from './demoSeed.js';
+import { seedDemo, SEED_VERSION } from './demoSeed.js';
 import { uid, todayISO, round2, num } from '../lib/format.js';
 
-const KEY = 'wrap_demo_v2';
-try { localStorage.removeItem('wrap_demo_v1'); } catch { /* old sample data */ }
+// The sample data's version lives in demoSeed.js: changing it there replaces old sample data everywhere.
+const KEY = `wrap_demo_${SEED_VERSION}`;
+try {
+  Object.keys(localStorage).filter((k) => /^wrap_demo_v\d+$/.test(k) && k !== KEY).forEach((k) => localStorage.removeItem(k));
+} catch { /* private mode */ }
 export const DEMO_UID = '00000000-0000-4000-8000-000000000001';
 const token = () => (uid() + uid()).replace(/-/g, '');
 

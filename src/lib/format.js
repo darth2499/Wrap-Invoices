@@ -121,3 +121,23 @@ export function slug(s) {
 export function payMethod(m) {
   return m && !/^imported\b/i.test(String(m).trim()) ? m : null;
 }
+
+/** Time windows for long lists: 'all', '30d', '90d', '120d', '365d', or a year like '2025'. */
+export function inPeriod(iso, period, today = todayISO()) {
+  if (!period || period === 'all') return true;
+  if (!iso) return false;
+  if (/^\d{4}$/.test(period)) return iso.startsWith(period);
+  const days = Number(period.replace('d', ''));
+  return iso >= addDays(today, -days) && iso <= addDays(today, 3650);
+}
+export function periodOptions(dates) {
+  const years = [...new Set(dates.filter(Boolean).map((d) => d.slice(0, 4)))].sort().reverse();
+  return [
+    { value: 'all', label: 'All time' },
+    { value: '30d', label: 'Last 30 days' },
+    { value: '90d', label: 'Last 90 days' },
+    { value: '120d', label: 'Last 120 days' },
+    { value: '365d', label: 'Last 12 months' },
+    ...years.map((y) => ({ value: y, label: y })),
+  ];
+}

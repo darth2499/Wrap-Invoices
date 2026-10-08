@@ -118,10 +118,32 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
   page = pdf.addPage([W, H]);
   pages.push(page);
   y = H - M;
-  if (template === 'bold') {
-    page.drawRectangle({ x: 0, y: H - 14, width: W, height: 14, color: accent });
+  const isBold = template === 'bold';
+  if (isBold) {
+    // ----- "Bold" layout: big title right, company + contact columns, gray details band, open table -----
+    page.drawRectangle({ x: 0, y: H - 8, width: W, height: 8, color: accent });
+    text(isQuote ? 'Quote' : 'Invoice', W - M, y - 22, { size: 26, f: bold, color: INK, align: 'right' });
+    let by = y - 8;
+    if (logoImg) {
+      const sc = Math.min(160 / logoImg.width, 60 / logoImg.height, 1);
+      page.drawImage(logoImg, { x: M, y: by - logoImg.height * sc, width: logoImg.width * sc, height: logoImg.height * sc });
+      by -= logoImg.height * sc + 16;
+    } else by -= 34;
+    let cy = by;
+    text(business.business_name || '', M, cy, { size: 10.5, f: bold });
+    cy -= 13;
+    for (const l of String(business.address || '').split('\n').filter(Boolean)) { text(l, M, cy, { size: 9, color: GRAY }); cy -= 12; }
+    let ky = by;
+    const cx = M + 200;
+    for (const [k, v] of [['Phone #', business.phone], ['Email', business.business_email], ['Website', business.website]].filter(([, v]) => v)) {
+      text(k, cx, ky, { size: 9, f: bold });
+      text(v, cx + bold.widthOfTextAtSize(k, 9) + 5, ky, { size: 9, color: GRAY });
+      ky -= 12;
+    }
+    y = Math.min(cy, ky) - 20;
   }
   // Left: logo or name
+  if (!isBold) {
   let leftBottom = y;
   if (logoImg) {
     const s = Math.min(170 / logoImg.width, 72 / logoImg.height, 1);
@@ -143,11 +165,32 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
   y = Math.min(leftBottom, ry) - 16;
   page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.8, color: LINE });
   y -= 22;
+  }
 
   // ---------- bill to + meta ----------
   const paid = payments.reduce((s, p) => s + num(p.amount), 0);
   const due = num(invoice.total) - paid;
+  if (isBold) {
+    const left = [];
+    if (client) {
+      left.push([client.name, true]);
+      for (const l of [...String(client.address || '').split('\n'), client.email].filter(Boolean)) for (const w of wrap(l, 9, 210)) left.push([w]);
+    }
+    const det = [[`${label} #`, invoice.number], [isQuote ? 'Date' : 'Invoice date', fmtLong(invoice.issue_date)], ...(invoice.terms ? [['Terms', invoice.terms]] : []), ...(invoice.due_date ? [[isQuote ? 'Valid until' : 'Due date', fmtLong(invoice.due_date)]] : []), [isQuote ? 'Total' : 'Amount due', money(isQuote ? invoice.total : due)]];
+    const bandH = 30 + Math.max(left.length, det.length) * 12;
+    page.drawRectangle({ x: M, y: y - bandH + 12, width: W - 2 * M, height: bandH, color: SHADE });
+    let ly2 = y - 4;
+    text('Bill to', M + 12, ly2, { size: 9, f: bold });
+    let dy = ly2;
+    const dx = W - M - 190;
+    text('Details', dx, dy, { size: 9, f: bold });
+    ly2 -= 14; dy -= 14;
+    for (const [t, b] of left) { text(t, M + 12, ly2, { size: 9, f: b ? bold : font, color: b ? INK : GRAY }); ly2 -= 12; }
+    for (const [k, v] of det) { text(k, dx, dy, { size: 9, f: bold }); text(v, dx + 72, dy, { size: 9, color: GRAY }); dy -= 12; }
+    y = y - bandH - 14;
+  }
   let ly = y;
+  if (!isBold) {
   text('BILL TO', M, ly, { size: 8, f: bold, color: GRAY });
   ly -= 14;
   if (client) {
@@ -174,25 +217,31 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
   text(money(isQuote ? invoice.total : due), colX, my, { size: 9.5, f: bold });
   my -= 14;
   y = Math.min(ly, my) - 22;
+  }
 
   // ---------- items table ----------
   const hasTax = lines.some((l) => num(l.tax_rate) > 0);
-  const cols = hasTax
-    ? { item: M + 12, itemW: 250, qty: 380, price: 450, tax: 505, amount: W - M - 12 }
-    : { item: M + 12, itemW: 300, qty: 400, price: 482, amount: W - M - 12 };
+  const cols = isBold
+    ? (hasTax
+      ? { item: M + 8, itemW: 100, desc: M + 120, descW: 180, qty: 380, price: 440, tax: 495, amount: W - M - 8 }
+      : { item: M + 8, itemW: 110, desc: M + 130, descW: 210, qty: 400, price: 470, amount: W - M - 8 })
+    : hasTax
+      ? { item: M + 12, itemW: 250, qty: 380, price: 450, tax: 505, amount: W - M - 12 }
+      : { item: M + 12, itemW: 300, qty: 400, price: 482, amount: W - M - 12 };
 
   const tableHeader = () => {
     const h = 24;
     if (template === 'classic') page.drawRectangle({ x: M, y: y - h + 8, width: W - 2 * M, height: h, color: INK });
-    else if (template === 'bold') page.drawRectangle({ x: M, y: y - h + 8, width: W - 2 * M, height: h, color: accent });
-    const c = template === 'minimal' ? GRAY : rgb(1, 1, 1);
+    const c = template === 'classic' ? rgb(1, 1, 1) : template === 'bold' ? INK : GRAY;
     const ty = y - 8;
-    text('Items', cols.item, ty, { size: 9, f: bold, color: c });
-    text('Quantity', cols.qty, ty, { size: 9, f: bold, color: c, align: 'right' });
-    text('Price', cols.price, ty, { size: 9, f: bold, color: c, align: 'right' });
+    text(isBold ? 'Product / service' : 'Items', cols.item, ty, { size: 9, f: bold, color: c });
+    if (isBold) text('Description', cols.desc, ty, { size: 9, f: bold, color: c });
+    text(isBold ? 'Qty' : 'Quantity', cols.qty, ty, { size: 9, f: bold, color: c, align: 'right' });
+    text(isBold ? 'Rate' : 'Price', cols.price, ty, { size: 9, f: bold, color: c, align: 'right' });
     if (hasTax) text('Tax', cols.tax, ty, { size: 9, f: bold, color: c, align: 'right' });
     text('Amount', cols.amount, ty, { size: 9, f: bold, color: c, align: 'right' });
     if (template === 'minimal') page.drawLine({ start: { x: M, y: y - h + 8 }, end: { x: W - M, y: y - h + 8 }, thickness: 1.2, color: INK });
+    if (isBold) page.drawLine({ start: { x: M, y: y - h + 8 }, end: { x: W - M, y: y - h + 8 }, thickness: 0.8, color: LINE });
     y -= h + 6;
   };
 
@@ -200,7 +249,7 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
     page = pdf.addPage([W, H]);
     pages.push(page);
     y = H - M;
-    if (template === 'bold') page.drawRectangle({ x: 0, y: H - 14, width: W, height: 14, color: accent });
+    if (isBold) page.drawRectangle({ x: 0, y: H - 8, width: W, height: 8, color: accent });
     text(`${label.toUpperCase()} #${invoice.number}`, W - M, y - 10, { size: 10, f: bold, align: 'right' });
     text(business.business_name || '', M, y - 10, { size: 10, f: bold });
     y -= 36;
@@ -209,14 +258,28 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
 
   tableHeader();
   for (const l of lines) {
-    const desc = l.description ? wrap(l.description, 9, cols.itemW) : [];
-    const note = l.note ? wrap(l.note, 8.5, cols.itemW) : [];
-    const h = 14 + desc.length * 11.5 + note.length * 11 + 10;
+    const desc = l.description ? wrap(l.description, 9, isBold ? cols.descW : cols.itemW) : [];
+    const note = l.note ? wrap(l.note, 8.5, isBold ? cols.descW : cols.itemW) : [];
+    const itemLines = isBold ? wrap(l.item, 9.5, cols.itemW) : [l.item];
+    const h = isBold ? Math.max(itemLines.length * 12, (desc.length + note.length) * 11.5, 12) + 16 : 14 + desc.length * 11.5 + note.length * 11 + 10;
     if (y - h < BOTTOM) {
       newPage();
       tableHeader();
     }
     let iy = y;
+    if (isBold) {
+      let a = y;
+      for (const t of itemLines) { text(t, cols.item, a, { size: 9.5 }); a -= 12; }
+      let d = y;
+      for (const t of [...desc, ...note]) { text(t, cols.desc, d, { size: 9, color: GRAY }); d -= 11.5; }
+      text(Number(l.qty).toLocaleString('en-US', { maximumFractionDigits: 3 }), cols.qty, y, { size: 9.5, align: 'right' });
+      text(money(l.rate), cols.price, y, { size: 9.5, align: 'right' });
+      if (hasTax) text(num(l.tax_rate) ? `${num(l.tax_rate)}%` : '-', cols.tax, y, { size: 9.5, align: 'right' });
+      text(money(l.amount), cols.amount, y, { size: 9.5, align: 'right' });
+      y = Math.min(a, d) - 4;
+      y -= 8;
+      continue;
+    }
     text(l.item, cols.item, iy, { size: 10, f: bold });
     text(Number(l.qty).toLocaleString('en-US', { maximumFractionDigits: 3 }), cols.qty, iy, { size: 10, align: 'right' });
     text(money(l.rate), cols.price, iy, { size: 10, align: 'right' });
@@ -232,6 +295,8 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
   }
 
   // ---------- totals ----------
+  let shownNotes = false;
+  let notesBottom = null;
   const rows = [];
   if (num(invoice.discount_total) > 0 || num(invoice.tax_total) > 0) rows.push(['Subtotal:', money(invoice.subtotal)]);
   if (num(invoice.discount_total) > 0) rows.push(['Discount:', `-${money(invoice.discount_total)}`]);
@@ -242,6 +307,19 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
   const deposit = depositAmount(invoice);
   if (deposit > 0 && paid < deposit) rows.push([`Deposit due now (${num(invoice.deposit_percent)}%):`, money(deposit - paid), true]);
   if (y - rows.length * 20 < BOTTOM) newPage();
+  if (isBold) {
+    page.drawLine({ start: { x: M, y: y + 6 }, end: { x: W - M, y: y + 6 }, thickness: 0.8, color: LINE });
+    y -= 12;
+    const msg = [invoice.terms, invoice.notes].filter(Boolean).join('\n');
+    if (msg) {
+      let ny = y;
+      text('Message', M, ny, { size: 9.5, f: bold });
+      ny -= 13;
+      for (const l of wrap(msg, 9, 230)) { text(l, M, ny, { size: 9, color: GRAY }); ny -= 11.5; }
+      notesBottom = ny;
+    }
+    shownNotes = true;
+  }
   y -= 4;
   for (const [k, v, strong, rule] of rows) {
     if (rule) {
@@ -252,6 +330,7 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
     text(v, W - M - 12, y, { size: 10, f: strong ? bold : font, align: 'right' });
     y -= 18;
   }
+  if (notesBottom != null) y = Math.min(y, notesBottom - 6);
   y -= 10;
 
   // ---------- notes, payment instructions, footer ----------
@@ -264,7 +343,7 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
     y -= 12;
   };
   const notes = [invoice.terms, invoice.notes].filter(Boolean).join('\n');
-  if (notes) block('Notes / Terms', notes);
+  if (notes && !shownNotes) block('Notes / Terms', notes);
   if (business.payment_instructions && !isQuote) block('How to pay', business.payment_instructions);
   if (business.footer_note) {
     if (y < BOTTOM + 14) newPage();

@@ -15,6 +15,7 @@ export default function InvoiceDoc({ business = {}, invoice, client, lines, paym
       : template === 'bold' ? { background: accent, color: '#fff' }
         : { borderBottom: '1.5px solid #16161A', color: '#5f6168' };
   const hasTax = lines.some((l) => num(l.tax_rate) > 0);
+  if (template === 'bold') return <BoldDoc {...{ business, invoice, client, lines, payments, logoUrl, accent, isQuote, paid, due, deposit, hasTax }} />;
 
   return (
     <article className="doc" style={template === 'bold' ? { paddingTop: 0, overflow: 'hidden' } : null}>
@@ -145,5 +146,88 @@ function MobileLine({ l }) {
       <span className="doc-mline-amt num">{money(l.amount)}</span>
       {more && <svg className="doc-mline-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>}
     </button>
+  );
+}
+
+/** "Bold" template: big title, company + contact columns, gray details band, open table with a Description column. */
+function BoldDoc({ business, invoice, client, lines, payments, logoUrl, accent, isQuote, paid, due, deposit, hasTax }) {
+  const label = isQuote ? 'Quote' : 'Invoice';
+  const msg = [invoice.terms, invoice.notes].filter(Boolean).join('\n');
+  return (
+    <article className="doc bold-doc" style={{ borderTop: `8px solid ${accent}` }}>
+      <header className="bd-head">
+        <div className="col" style={{ gap: 14, minWidth: 0 }}>
+          {logoUrl && <img src={logoUrl} alt="" style={{ maxWidth: 170, maxHeight: 64, objectFit: 'contain', objectPosition: 'left' }} />}
+          <div className="bd-from">
+            <div>
+              <strong>{business.business_name}</strong>
+              {business.address && <div style={{ whiteSpace: 'pre-line' }}>{business.address}</div>}
+            </div>
+            <div>
+              {business.phone && <div><b>Phone #</b> {business.phone}</div>}
+              {business.business_email && <div><b>Email</b> {business.business_email}</div>}
+              {business.website && <div><b>Website</b> {business.website}</div>}
+            </div>
+          </div>
+        </div>
+        <h1 className="bd-title">{label}</h1>
+      </header>
+
+      <section className="bd-band">
+        <div>
+          <b>Bill to</b>
+          {client ? <><div className="bd-strong">{client.name}</div>{client.address && <div style={{ whiteSpace: 'pre-line' }}>{client.address}</div>}{client.email && <div>{client.email}</div>}</> : <div>—</div>}
+        </div>
+        <dl>
+          <b>Details</b>
+          <div><dt>{label} #</dt><dd>{invoice.number}</dd></div>
+          <div><dt>{isQuote ? 'Date' : 'Invoice date'}</dt><dd>{fmtLong(invoice.issue_date)}</dd></div>
+          {invoice.terms && <div><dt>Terms</dt><dd>{invoice.terms}</dd></div>}
+          {invoice.due_date && <div><dt>{isQuote ? 'Valid until' : 'Due date'}</dt><dd>{fmtLong(invoice.due_date)}</dd></div>}
+          <div><dt>{isQuote ? 'Total' : 'Amount due'}</dt><dd className="num bd-strong">{money(isQuote ? invoice.total : due)}</dd></div>
+        </dl>
+      </section>
+
+      <div className="doc-mlines">{lines.map((l, i) => <MobileLine key={l.id || i} l={l} />)}</div>
+      <div className="table-wrap doc-table">
+        <table className="bd-lines">
+          <thead><tr><th>Product / service</th><th>Description</th><th className="r">Qty</th><th className="r">Rate</th>{hasTax && <th className="r">Tax</th>}<th className="r">Amount</th></tr></thead>
+          <tbody>
+            {lines.map((l, i) => (
+              <tr key={l.id || i}>
+                <td>{l.item}</td>
+                <td className="bd-desc">{[l.description, l.note].filter(Boolean).join('\n')}</td>
+                <td className="r num">{Number(l.qty).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
+                <td className="r num">{money(l.rate)}</td>
+                {hasTax && <td className="r num">{num(l.tax_rate) ? `${num(l.tax_rate)}%` : '—'}</td>}
+                <td className="r num">{money(l.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <section className="bd-foot">
+        <div>{msg && <><b>Message</b><div style={{ whiteSpace: 'pre-line' }}>{msg}</div></>}</div>
+        <table className="doc-totals bd-totals">
+          <tbody>
+            {(num(invoice.discount_total) > 0 || num(invoice.tax_total) > 0) && <TotRow label="Subtotal" value={money(invoice.subtotal)} />}
+            {num(invoice.discount_total) > 0 && <TotRow label="Discount" value={`−${money(invoice.discount_total)}`} />}
+            {num(invoice.tax_total) > 0 && <TotRow label="Tax" value={money(invoice.tax_total)} />}
+            <TotRow label="Total" value={money(invoice.total)} strong big />
+            {payments.map((p, i) => <TotRow key={i} label={`Payment on ${fmtLong(p.paid_on)}`} value={`−${money(p.amount)}`} muted />)}
+            {!isQuote && payments.length > 0 && <TotRow label="Amount due" value={money(due)} strong />}
+            {deposit > 0 && paid < deposit && <TotRow label={`Deposit due now (${num(invoice.deposit_percent)}%)`} value={money(deposit - paid)} strong />}
+          </tbody>
+        </table>
+      </section>
+      {business.payment_instructions && !isQuote && (
+        <section style={{ fontSize: 13, lineHeight: 1.6, padding: 14, background: '#f6f6f4', borderRadius: 10 }}>
+          <div style={{ fontWeight: 600 }}>How to pay</div>
+          <div style={{ whiteSpace: 'pre-line' }}>{business.payment_instructions}</div>
+        </section>
+      )}
+      {business.footer_note && <footer style={{ textAlign: 'center', fontSize: 12, color: '#5f6168' }}>{business.footer_note}</footer>}
+    </article>
   );
 }

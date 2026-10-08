@@ -1,6 +1,9 @@
 // Sample data for demo mode, shaped like a freelance video person's real year.
 import { uid, toISO, addDays, round2, datesCode } from '../lib/format.js';
 
+// Bump this whenever the sample data changes, so browsers drop their old copy.
+export const SEED_VERSION = 'v4';
+
 const addDaysDate = (d, n) => new Date(d.getTime() + n * 86400000);
 
 export function seedDemo(owner, token) {
@@ -14,7 +17,7 @@ export function seedDemo(owner, token) {
 
   const profile = {
     id: owner, email: 'demo@wrap.app', is_admin: true, business_name: 'Alex Rivera', business_email: 'you@example.com',
-    address: '123 Example Street\nConcord, CA 94518', phone: '(555) 010-0199', website: '', logo_key: null,
+    address: '1600 Pennsylvania Avenue NW\nWashington, DC 20500', phone: '(555) 010-0199', website: '', logo_key: null,
     template: 'classic', accent: '#16161A', payment_instructions: 'Zelle: you@example.com\nOr check payable to Alex Rivera',
     footer_note: 'Thank you!', next_invoice_number: 1, next_quote_number: 1, default_terms_days: 30,
     ot_base_hours: 10, ot_mult1: 1.5, ot_mult1_hours: 2, ot_mult2: 2, reminder_days: [3, 7, 14], auto_remind_default: false,
@@ -22,11 +25,13 @@ export function seedDemo(owner, token) {
   };
 
   const c = (name, email, extra = {}) => ({ ...base, id: uid(), name, email, cc_emails: null, address: null, phone: null, notes: null, ot_base_hours: null, expects_1099: true, statement_token: token(), archived: false, created_at: ts(at(Y - 1, 0, 2)), ...extra });
-  const vuong = c('Northlight Studios', 'billing@northlight.example', { address: '500 Market Street, Suite 12\nSan Francisco, CA 94105' });
-  const ben = c('Bluebird Creative', 'hello@bluebird.example', { expects_1099: false });
-  const chad = c('Jordan Lee', 'jordan@example.com', { ot_base_hours: 12 });
-  const simz = c('Harbor & Pine Films', 'billing@harborpine.example', {});
-  const clients = [vuong, ben, chad, simz];
+  const vuong = c('Warner Bros. Pictures', 'ap@warnerbros.example', { address: '4000 Warner Blvd\nBurbank, CA 91522' });
+  const ben = c('Universal Pictures', 'invoices@universal.example', { expects_1099: false, address: '100 Universal City Plaza\nUniversal City, CA 91608' });
+  const chad = c('Paramount Pictures', 'payables@paramount.example', { ot_base_hours: 12, address: '5555 Melrose Ave\nLos Angeles, CA 90038' });
+  const simz = c('Sony Pictures', 'vendors@sonypictures.example', { address: '10202 W Washington Blvd\nCulver City, CA 90232' });
+  const disney = c('Walt Disney Studios', 'ap@disneystudios.example', { address: '500 S Buena Vista St\nBurbank, CA 91521' });
+  const lionsgate = c('Lionsgate', 'billing@lionsgate.example', { address: '2700 Colorado Ave\nSanta Monica, CA 90404' });
+  const clients = [vuong, ben, chad, simz, disney, lionsgate];
 
   const item = (name, kind, unit, rate, pos, extra = {}) => ({ ...base, id: uid(), name, description: null, kind, unit, rate, week_rate: null, ot_eligible: kind === 'labor' && unit === 'day', archived: false, position: pos, created_at: ts(at(Y - 1, 0, 1)), ...extra });
   const catalog_items = [
@@ -44,7 +49,7 @@ export function seedDemo(owner, token) {
     ['Cancellation (under 48 h)', 0.5], ['Cancellation (under 24 h)', 1],
   ].map(([name, multiplier], i) => ({ ...base, id: uid(), name, multiplier, position: i }));
 
-  const companies = ['Brightwave', 'Oakline', 'Meridian', 'Copperleaf', 'Fieldstone', 'Nimbus', 'Atlas Co', 'Summit Labs', 'Redwood Health'];
+  const companies = ['Press junket', 'BTS featurette', 'Premiere red carpet', 'Trailer pickups', 'EPK interviews', 'Studio tour promo', 'Cast Q&A', 'Set visit', 'Award campaign'];
   const invoices = [];
   const invoice_lines = [];
   const payments = [];
@@ -92,7 +97,7 @@ export function seedDemo(owner, token) {
         created_at: ts(issue), updated_at: ts(issue),
       });
       lines.forEach((l, i) => invoice_lines.push({ ...base, id: uid(), invoice_id: id, position: i, tax_rate: 0, day_type: null, receipt_id: null, ...l }));
-      invoice_events.push({ ...base, id: uid(), invoice_id: id, type: 'sent', detail: 'Emailed to billing@northlight.example', created_at: ts(issue) });
+      invoice_events.push({ ...base, id: uid(), invoice_id: id, type: 'sent', detail: 'Emailed to ap@warnerbros.example', created_at: ts(issue) });
       if (status === 'paid') payments.push({ ...base, id: uid(), invoice_id: id, paid_on: addDays(due, Math.floor(rnd() * 40)), amount: total, method: 'Bank transfer', note: null, created_at: ts(due) });
       else if (monthsAgo === 5) {
         payments.push({ ...base, id: uid(), invoice_id: id, paid_on: addDays(due, 50), amount: round2(total * 0.22), method: 'Bank transfer', note: null, created_at: ts(due) });
@@ -125,7 +130,7 @@ export function seedDemo(owner, token) {
   oneOff(simz, at(Y - 1, 5, 12), [{ kind: 'labor', item: 'Sound Mixer', description: 'Doc interview', qty: 2, rate: 850, amount: 1700 }], 'paid');
 
   // Regular smaller jobs for the other clients over the past two years.
-  const others = [ben, chad, simz];
+  const others = [ben, chad, simz, disney, lionsgate];
   const jobs = [
     [{ kind: 'labor', item: 'Sound Mixer', description: 'Interview day', qty: 1, rate: 850 }, { kind: 'gear', item: 'Sound Gear', description: 'Lav kit + recorder', qty: 1, rate: 300 }],
     [{ kind: 'labor', item: 'Camera Operator', description: 'Event coverage', qty: 1, rate: 750 }, { kind: 'expense', item: 'Parking', description: 'Event garage', qty: 1, rate: 28 }],
@@ -158,20 +163,21 @@ export function seedDemo(owner, token) {
 
   const r = (vendor, dISO, total, category, invoice_id = null, billable = false) => ({ ...base, id: uid(), vendor, receipt_date: dISO, total, subtotal: null, tax: null, tip: null, category, notes: null, file_key: null, original_key: null, mime: null, file_hash: null, status: 'confirmed', invoice_id, billable, ai: null, created_at: ts(dISO) });
   const receipts = [
-    r('McDonald’s', addDays(toISO(now), -1), 12.39, 'Meals'),
-    r('Oyamel', addDays(toISO(now), -3), 53.4, 'Meals'),
-    r('Apple Store', addDays(toISO(now), -14), 439.41, 'Supplies'),
     r('Parking', recent, 58.25, 'Parking & tolls', benInv, false),
-    r('Delta Hotels', addDays(recent, -4), 192.9, 'Travel', benInv, false),
-    r('United Baggage', addDays(recent, -7), 100, 'Travel'),
-    r('B&H Photo', at(Y, 2, 4), 1249, 'Equipment (depreciation / Sec. 179)'),
-    r('Adobe', at(Y, 0, 9), 59.99, 'Software & subscriptions'),
-    r('State Farm', at(Y, 1, 1), 410, 'Insurance'),
+    r('Hotel', addDays(recent, -4), 192.9, 'Travel', benInv, false),
   ];
-  for (let m = 0; m < 12 + now.getMonth(); m += 1) {
-    const y = m < 12 ? Y - 1 : Y;
-    receipts.push(r('Parking', at(y, m % 12, 10), round2(18 + rnd() * 40), 'Parking & tolls'));
-    if (m % 2) receipts.push(r('Lunch on set', at(y, m % 12, 18), round2(14 + rnd() * 30), 'Meals'));
+  // A random-ish mix of everyday freelance spending over the past two years.
+  const pool = [
+    ['Gas station', 'Car & truck', 35, 70], ['Coffee shop', 'Meals', 6, 18], ['Taco truck', 'Meals', 9, 24], ['Diner', 'Meals', 14, 45],
+    ['Parking garage', 'Parking & tolls', 12, 48], ['Bridge toll', 'Parking & tolls', 7, 8], ['Airline', 'Travel', 180, 520], ['Rideshare', 'Travel', 14, 62],
+    ['Hotel', 'Travel', 140, 320], ['Camera store', 'Equipment (depreciation / Sec. 179)', 300, 2400], ['Batteries & media', 'Supplies', 25, 160],
+    ['Gaffer tape & gels', 'Supplies', 18, 75], ['Editing software', 'Software & subscriptions', 20, 60], ['Cloud storage', 'Software & subscriptions', 10, 30],
+    ['Gear insurance', 'Insurance', 300, 520], ['Phone bill', 'Utilities', 60, 95], ['Rental house', 'Equipment rental', 90, 650], ['Office supply store', 'Office expense', 12, 80],
+  ];
+  const start = new Date(Y - 1, 0, 3, 12);
+  for (let d = new Date(start); d < addDaysDate(now, -1); d = addDaysDate(d, 3 + Math.floor(rnd() * 9))) {
+    const [vendor, cat, lo, hi] = pool[Math.floor(rnd() * pool.length)];
+    receipts.push(r(vendor, toISO(d), round2(lo + rnd() * (hi - lo)), cat));
   }
 
   const tony = { ...base, id: uid(), name: 'Casey Morgan', email: 'tony@example.com', phone: null, role: '1st AC', notes: null, created_at: ts(at(Y, 0, 1)) };

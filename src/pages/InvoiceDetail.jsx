@@ -7,7 +7,7 @@ import { buildInvoiceEmail } from '../lib/emailTemplate.js';
 import { statusOf, dueText } from '../lib/calc.js';
 import { money, fmtDate, fmtDateTime, fmtShort, fmtTsDate, num, todayISO, round2, payMethod } from '../lib/format.js';
 import * as A from '../lib/actions.js';
-import { go, shareUrl } from '../router.js';
+import { go, shareUrl, useRoute } from '../router.js';
 
 const METHODS = ['Bank transfer', 'Zelle', 'Check', 'Venmo', 'PayPal', 'Cash', 'Card', 'Other'];
 
@@ -17,7 +17,9 @@ export default function InvoiceDetail({ id }) {
   const inv = derived.invoices[id];
   const [logoUrl, setLogoUrl] = useState(null);
   const [receiptUrls, setReceiptUrls] = useState({});
-  const [modal, setModal] = useState(null);
+  const route = useRoute();
+  // Quick actions from the invoice list open straight into the right window (?do=pay|send|remind).
+  const [modal, setModal] = useState(() => ({ pay: { type: 'pay' }, send: { type: 'email', reminder: false }, remind: { type: 'email', reminder: true } }[route.query.do] || null));
   const [busy, setBusy] = useState('');
 
   const receipts = inv ? db.receipts.filter((r) => r.invoice_id === inv.id) : [];

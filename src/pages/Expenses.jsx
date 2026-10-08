@@ -4,8 +4,8 @@ import { Button, Empty, Field, Icon, Modal, MoneyInput, Pill, Seg, Switch, Combo
 import { CATEGORIES, categoryLabel } from '../lib/categories.js';
 import { addReceiptFile } from '../lib/receipts.js';
 import { setBillable } from '../lib/actions.js';
-import { money, fmtDate, fmtShort, num, todayISO, round2, plural } from '../lib/format.js';
-import { pickFiles } from '../lib/files.js';
+import { money, fmtDate, fmtShort, num, todayISO, round2, plural, inPeriod, periodOptions } from '../lib/format.js';
+import { pickFiles, sha256 } from '../lib/files.js';
 import { go } from '../router.js';
 import { takeFiles, onFiles } from '../lib/scanQueue.js';
 
@@ -41,7 +41,7 @@ function Receipts({ query }) {
     const t = q.trim().toLowerCase();
     return db.receipts
       .filter((r) => filter === 'all' || (filter === 'review' ? r.status === 'review' : filter === 'unattached' ? !r.invoice_id : !!r.invoice_id))
-      .filter((r) => year === 'all' || r.receipt_date?.startsWith(year))
+      .filter((r) => inPeriod(r.receipt_date, year))
       .filter((r) => !t || `${r.vendor} ${r.category} ${r.total} ${r.notes}`.toLowerCase().includes(t))
       .sort((a, b) => (a.status === 'review' ? 0 : 1) - (b.status === 'review' ? 0 : 1) || String(b.receipt_date || b.created_at).localeCompare(String(a.receipt_date || a.created_at)));
   }, [db.receipts, filter, year, q]);
@@ -107,7 +107,7 @@ function Receipts({ query }) {
   return (
     <>
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-        <button className="card" style={{ padding: 22, display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit' }} onClick={() => cameraRef.current?.click()} disabled={busy}>
+        <button className="card phone-only" style={{ padding: 22, alignItems: 'center', gap: 14, cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit' }} onClick={() => cameraRef.current?.click()} disabled={busy}>
           <span style={{ width: 46, height: 46, borderRadius: 12, background: 'var(--ink)', color: '#fff', display: 'grid', placeItems: 'center' }}><Icon name="camera" size={22} /></span>
           <span className="col" style={{ gap: 2 }}><strong>Scan a receipt</strong><span className="small muted">Opens your camera. Auto-crops and sharpens.</span></span>
         </button>
@@ -144,7 +144,7 @@ function Receipts({ query }) {
       <div className="row wrap between">
         <div className="row wrap">
           <Seg value={filter} onChange={setFilter} label="Filter" options={[{ value: 'all', label: 'All' }, { value: 'review', label: 'To review', count: reviewCount }, { value: 'unattached', label: 'Not on an invoice' }, { value: 'attached', label: 'On an invoice' }]} />
-          <select className="input" style={{ width: 110 }} value={year} onChange={(e) => setYear(e.target.value)} aria-label="Year"><option value="all">All years</option>{years.map((y) => <option key={y}>{y}</option>)}</select>
+          <select className="input" style={{ width: 160 }} value={year} onChange={(e) => setYear(e.target.value)} aria-label="Period">{periodOptions(db.receipts.map((r) => r.receipt_date)).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
         </div>
         <div className="row wrap">
           {highConf.length > 0 && filter === 'review' && <Button size="sm" icon="check" onClick={async () => { for (const r of highConf) await s.update('receipts', r.id, { status: 'confirmed' }); s.toast(`${highConf.length} confirmed`); }}>Confirm {highConf.length} sure ones</Button>}
@@ -216,6 +216,26 @@ export function ReceiptModal({ id, onClose, onNext }) {
   const reviewQueue = db.receipts.filter((x) => x.status === 'review' && x.id !== id);
   const invoices = db.invoices.filter((i) => i.kind === 'invoice' && i.status !== 'void').sort((a, b) => String(b.issue_date).localeCompare(String(a.issue_date)));
   const url = view === 'scan' ? urls[r.file_key] : urls[r.original_key];
+  // Add a file to a receipt that has none (e.g. imported from Wave), or swap in a new one.
+  const [fileBusy, setFileBusy] = useState(false);
+  const attachFile = async () => {
+    const [file] = await pickFiles({ accept: 'image/*,application/pdf' });
+    if (!file) return;
+    setFileBusy(true);
+    try {
+      const isPdf = file.type === 'application/pdf';
+      const ext = isPdf ? 'pdf' : (file.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+      const key = await s.api.files.upload(file, { folder: 'receipts', ext });
+      const old = [r.file_key, r.original_key].filter(Boolean);
+      await s.update('receipts', r.id, { file_key: key, original_key: null, mime: file.type || (isPdf ? 'application/pdf' : 'image/jpeg'), file_hash: await sha256(file) });
+      if (old.length) await s.api.files.remove(old).catch(() => {});
+      setView('scan');
+      s.toast(old.length ? 'File replaced' : 'File added');
+    } catch (e) {
+      s.toast(e.message, { error: true });
+    }
+    setFileBusy(false);
+  };
 
   const save = async (next) => {
     setBusy(true);
@@ -259,8 +279,11 @@ export function ReceiptModal({ id, onClose, onNext }) {
         <div className="col" style={{ flex: '1 1 280px', minWidth: 0, gap: 8 }}>
           {r.original_key && <Seg value={view} onChange={setView} label="Image" options={[{ value: 'scan', label: ai.cropped === false ? 'Cleaned up' : 'Cropped · sharpened' }, { value: 'orig', label: 'Original photo' }]} />}
           <div style={{ background: '#e9e9e5', borderRadius: 12, minHeight: 240, maxHeight: 'min(520px, 48vh)', overflow: 'auto', display: 'grid', placeItems: 'center' }}>
-            {!url ? <span className="muted small">{r.file_key ? 'Loading…' : 'No file'}</span> : r.mime === 'application/pdf' && view === 'scan' ? <iframe title="Receipt PDF" src={url} style={{ width: '100%', height: 500, border: 0 }} /> : <a href={url} target="_blank" rel="noreferrer"><img src={url} alt="Receipt" style={{ maxWidth: '100%', display: 'block' }} /></a>}
+            {!r.file_key
+              ? <button type="button" className="file-drop" onClick={attachFile} disabled={fileBusy}>{fileBusy ? <span className="spinner" /> : <Icon name="upload" size={22} />}<span>Add receipt image or PDF</span></button>
+              : !url ? <span className="spinner" /> : r.mime === 'application/pdf' && view === 'scan' ? <iframe title="Receipt PDF" src={url} style={{ width: '100%', height: 500, border: 0 }} /> : <a href={url} target="_blank" rel="noreferrer"><img src={url} alt="Receipt" style={{ maxWidth: '100%', display: 'block' }} /></a>}
           </div>
+          {r.file_key && <Button size="sm" variant="ghost" icon="upload" busy={fileBusy} onClick={attachFile} style={{ alignSelf: 'flex-start' }}>Replace file</Button>}
         </div>
         <div className="col" style={{ flex: '1 1 300px', gap: 12 }}>
           {r.status === 'review' && ai.reasoning && (
