@@ -1,6 +1,8 @@
 // Sample data for demo mode, shaped like a freelance video person's real year.
 import { uid, toISO, addDays, round2, datesCode } from '../lib/format.js';
 
+const addDaysDate = (d, n) => new Date(d.getTime() + n * 86400000);
+
 export function seedDemo(owner, token) {
   const now = new Date();
   const Y = now.getFullYear();
@@ -11,19 +13,19 @@ export function seedDemo(owner, token) {
   const base = { owner_id: owner };
 
   const profile = {
-    id: owner, email: 'demo@wrap.app', is_admin: true, business_name: 'Yuki Asahina', business_email: 'you@example.com',
+    id: owner, email: 'demo@wrap.app', is_admin: true, business_name: 'Alex Rivera', business_email: 'you@example.com',
     address: '123 Example Street\nConcord, CA 94518', phone: '(555) 010-0199', website: '', logo_key: null,
-    template: 'classic', accent: '#16161A', payment_instructions: 'Zelle: you@example.com\nOr check payable to Yuki Asahina',
+    template: 'classic', accent: '#16161A', payment_instructions: 'Zelle: you@example.com\nOr check payable to Alex Rivera',
     footer_note: 'Thank you!', next_invoice_number: 1, next_quote_number: 1, default_terms_days: 30,
     ot_base_hours: 10, ot_mult1: 1.5, ot_mult1_hours: 2, ot_mult2: 2, reminder_days: [3, 7, 14], auto_remind_default: false,
     mileage_rate: 0.7, tax_set_aside_pct: 25, gmail_email: null,
   };
 
   const c = (name, email, extra = {}) => ({ ...base, id: uid(), name, email, cc_emails: null, address: null, phone: null, notes: null, ot_base_hours: null, expects_1099: true, statement_token: token(), archived: false, created_at: ts(at(Y - 1, 0, 2)), ...extra });
-  const vuong = c('Vuong Tran', 'invoice@main.camera', { address: '47 Forest View Drive\nSan Francisco, CA 94132' });
-  const ben = c('Ben Williams', 'brwmedia@gmail.com', { expects_1099: false });
-  const chad = c('Chad Thomas', 'chad@example.com', { ot_base_hours: 12 });
-  const simz = c('Simz Productions', 'billing@simz.example', {});
+  const vuong = c('Northlight Studios', 'billing@northlight.example', { address: '500 Market Street, Suite 12\nSan Francisco, CA 94105' });
+  const ben = c('Bluebird Creative', 'hello@bluebird.example', { expects_1099: false });
+  const chad = c('Jordan Lee', 'jordan@example.com', { ot_base_hours: 12 });
+  const simz = c('Harbor & Pine Films', 'billing@harborpine.example', {});
   const clients = [vuong, ben, chad, simz];
 
   const item = (name, kind, unit, rate, pos, extra = {}) => ({ ...base, id: uid(), name, description: null, kind, unit, rate, week_rate: null, ot_eligible: kind === 'labor' && unit === 'day', archived: false, position: pos, created_at: ts(at(Y - 1, 0, 1)), ...extra });
@@ -42,14 +44,14 @@ export function seedDemo(owner, token) {
     ['Cancellation (under 48 h)', 0.5], ['Cancellation (under 24 h)', 1],
   ].map(([name, multiplier], i) => ({ ...base, id: uid(), name, multiplier, position: i }));
 
-  const companies = ['Felicis', 'AIUC', 'Orchestra', 'Uncapped', 'Lightspeed', 'Maxima', 'Chemistry', 'Google', 'Salesforce'];
+  const companies = ['Brightwave', 'Oakline', 'Meridian', 'Copperleaf', 'Fieldstone', 'Nimbus', 'Atlas Co', 'Summit Labs', 'Redwood Health'];
   const invoices = [];
   const invoice_lines = [];
   const payments = [];
   const invoice_events = [];
   let n = 101;
 
-  // Monthly invoices to Vuong: last year and this year, growing over time.
+  // Monthly invoices to the main client: last year and this year, growing over time.
   const lastMonth = now.getMonth() - (now.getDate() < 3 ? 2 : 1);
   for (let y = Y - 1; y <= Y; y++) {
     for (let m = 0; m < 12; m++) {
@@ -90,7 +92,7 @@ export function seedDemo(owner, token) {
         created_at: ts(issue), updated_at: ts(issue),
       });
       lines.forEach((l, i) => invoice_lines.push({ ...base, id: uid(), invoice_id: id, position: i, tax_rate: 0, day_type: null, receipt_id: null, ...l }));
-      invoice_events.push({ ...base, id: uid(), invoice_id: id, type: 'sent', detail: 'Emailed to invoice@main.camera', created_at: ts(issue) });
+      invoice_events.push({ ...base, id: uid(), invoice_id: id, type: 'sent', detail: 'Emailed to billing@northlight.example', created_at: ts(issue) });
       if (status === 'paid') payments.push({ ...base, id: uid(), invoice_id: id, paid_on: addDays(due, Math.floor(rnd() * 40)), amount: total, method: 'Bank transfer', note: null, created_at: ts(due) });
       else if (monthsAgo === 5) {
         payments.push({ ...base, id: uid(), invoice_id: id, paid_on: addDays(due, 50), amount: round2(total * 0.22), method: 'Bank transfer', note: null, created_at: ts(due) });
@@ -105,7 +107,7 @@ export function seedDemo(owner, token) {
     invoices.push({
       ...base, id, kind: 'invoice', number: String(n++), client_id: client.id, project_id: null, status, issue_date: issueISO,
       due_date: addDays(issueISO, 30), terms: 'Net 30', notes: null, mode: 'basic', jobs: null, discount_type: 'amount', discount_value: 0,
-      deposit_percent: null, subtotal: total, discount_total: 0, tax_total: 0, total, share_token: token(), sent_at: status === 'draft' ? null : ts(issueISO),
+      deposit_percent: null, subtotal: total, discount_total: 0, tax_total: 0, total, share_token: status === 'draft' ? null : token(), sent_at: status === 'draft' ? null : ts(issueISO),
       first_viewed_at: null, last_viewed_at: null, view_count: 0, auto_remind: true, last_reminder_at: null, reminders_sent: 0, version: 1,
       quote_id: null, converted_invoice_id: null, voided_at: null, created_at: ts(issueISO), updated_at: ts(issueISO), ...extra,
     });
@@ -121,6 +123,22 @@ export function seedDemo(owner, token) {
   oneOff(chad, addDays(recent, -3), [{ kind: 'labor', item: 'Camera Operator', description: 'Brand shoot', qty: 2, rate: 750, amount: 1500 }, { kind: 'gear', item: 'Camera Package (FX6)', description: '2 days', qty: 2, rate: 400, amount: 800 }, { kind: 'expense', item: 'Meal', description: 'Crew lunch', qty: 1, rate: 200, amount: 200 }]);
   oneOff(simz, addDays(recent, -1), [{ kind: 'labor', item: 'Editing', description: 'Social cutdowns', qty: 8, rate: 85, amount: 680 }, { kind: 'expense', item: 'Music license', description: '', qty: 1, rate: 70, amount: 70 }]);
   oneOff(simz, at(Y - 1, 5, 12), [{ kind: 'labor', item: 'Sound Mixer', description: 'Doc interview', qty: 2, rate: 850, amount: 1700 }], 'paid');
+
+  // Regular smaller jobs for the other clients over the past two years.
+  const others = [ben, chad, simz];
+  const jobs = [
+    [{ kind: 'labor', item: 'Sound Mixer', description: 'Interview day', qty: 1, rate: 850 }, { kind: 'gear', item: 'Sound Gear', description: 'Lav kit + recorder', qty: 1, rate: 300 }],
+    [{ kind: 'labor', item: 'Camera Operator', description: 'Event coverage', qty: 1, rate: 750 }, { kind: 'expense', item: 'Parking', description: 'Event garage', qty: 1, rate: 28 }],
+    [{ kind: 'labor', item: 'Editing', description: 'Recap edit', qty: 10, rate: 85 }],
+    [{ kind: 'labor', item: 'Camera Operator', description: 'Brand shoot', qty: 2, rate: 750 }, { kind: 'gear', item: 'Camera Package (FX6)', description: '2 days', qty: 2, rate: 400 }],
+  ];
+  for (let k = 0; k < 24; k++) {
+    const when = new Date(Y - 1, 0, 6 + k * 27 + Math.floor(rnd() * 9), 12);
+    if (when > addDaysDate(now, -20)) break;
+    const iso = toISO(when);
+    const ls = jobs[Math.floor(rnd() * jobs.length)].map((l) => ({ ...l, description: `${l.description} (${datesCode([iso])})`, amount: round2(l.qty * l.rate) }));
+    oneOff(others[k % others.length], iso, ls, 'paid');
+  }
 
   // A quote waiting on approval.
   const qid = uid();
@@ -156,15 +174,15 @@ export function seedDemo(owner, token) {
     if (m % 2) receipts.push(r('Lunch on set', at(y, m % 12, 18), round2(14 + rnd() * 30), 'Meals'));
   }
 
-  const tony = { ...base, id: uid(), name: 'Tony Nguyen', email: 'tony@example.com', phone: null, role: '1st AC', notes: null, created_at: ts(at(Y, 0, 1)) };
+  const tony = { ...base, id: uid(), name: 'Casey Morgan', email: 'tony@example.com', phone: null, role: '1st AC', notes: null, created_at: ts(at(Y, 0, 1)) };
   const crew_members = [tony];
   const crew_payouts = [
-    { ...base, id: uid(), crew_id: tony.id, work_date: at(Y, 3, 8), client_id: vuong.id, invoice_id: null, description: 'Orchestra shoot — AC', amount: 450, paid_on: at(Y, 3, 15), method: 'Venmo', created_at: ts(at(Y, 3, 8)) },
+    { ...base, id: uid(), crew_id: tony.id, work_date: at(Y, 3, 8), client_id: vuong.id, invoice_id: null, description: 'Meridian shoot — AC', amount: 450, paid_on: at(Y, 3, 15), method: 'Venmo', created_at: ts(at(Y, 3, 8)) },
     { ...base, id: uid(), crew_id: tony.id, work_date: addDays(recent, -10), client_id: chad.id, invoice_id: null, description: 'Brand shoot — AC (2 days)', amount: 900, paid_on: null, method: null, created_at: ts(recent) },
   ];
   const mileage_trips = [
-    { ...base, id: uid(), trip_date: addDays(recent, -2), start_place: 'Concord', end_place: 'San Francisco', miles: 31, round_trip: true, purpose: 'Felicis shoot', client_id: vuong.id, invoice_id: null, billable: false, rate: 0.7, created_at: ts(recent) },
-    { ...base, id: uid(), trip_date: recent, start_place: 'Concord', end_place: 'Palo Alto', miles: 45, round_trip: true, purpose: 'Ben Williams shoot', client_id: ben.id, invoice_id: null, billable: true, rate: 0.7, created_at: ts(recent) },
+    { ...base, id: uid(), trip_date: addDays(recent, -2), start_place: 'Concord', end_place: 'San Francisco', miles: 31, round_trip: true, purpose: 'Brightwave shoot', client_id: vuong.id, invoice_id: null, billable: false, rate: 0.7, created_at: ts(recent) },
+    { ...base, id: uid(), trip_date: recent, start_place: 'Concord', end_place: 'Palo Alto', miles: 45, round_trip: true, purpose: 'Bluebird shoot', client_id: ben.id, invoice_id: null, billable: true, rate: 0.7, created_at: ts(recent) },
   ];
 
   profile.next_invoice_number = n;
@@ -172,7 +190,7 @@ export function seedDemo(owner, token) {
 
   return {
     profile, invites: [{ email: 'demo@wrap.app', is_admin: true, created_at: ts(at(Y, 0, 1)) }],
-    clients, projects: [{ ...base, id: uid(), client_id: vuong.id, name: 'Salesforce sizzle reel', archived: false, created_at: ts(at(Y, 6, 1)) }],
+    clients, projects: [{ ...base, id: uid(), client_id: vuong.id, name: 'Summit Labs sizzle reel', archived: false, created_at: ts(at(Y, 6, 1)) }],
     catalog_items, day_types, tax_rates: [], invoices, receipts, invoice_lines, invoice_revisions: [], invoice_events, payments,
     mileage_trips, crew_members, crew_payouts, form1099: [],
   };

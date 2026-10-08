@@ -11,7 +11,7 @@ export const cors = {
 export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...cors, "Content-Type": "application/json" },
+    headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
   });
 }
 
@@ -92,6 +92,30 @@ export async function r2Get(key: string): Promise<Response> {
   const res = await r2().fetch(objectUrl(key), { method: "GET" });
   if (!res.ok) throw new HttpError(404, `File not found (${res.status})`);
   return res;
+}
+
+/** Every file in the bucket with its size (pages through R2's list, 1000 at a time). */
+export async function r2List(): Promise<{ key: string; size: number }[]> {
+  const out: { key: string; size: number }[] = [];
+  let token = "";
+  for (let page = 0; page < 1000; page++) {
+    const url = new URL(`https://${env("R2_ACCOUNT_ID")}.r2.cloudflarestorage.com/${env("R2_BUCKET")}`);
+    url.searchParams.set("list-type", "2");
+    url.searchParams.set("max-keys", "1000");
+    if (token) url.searchParams.set("continuation-token", token);
+    const res = await r2().fetch(url.toString(), { method: "GET" });
+    if (!res.ok) throw new HttpError(502, `Couldn't list storage (${res.status}). Check that the R2 token can read the bucket.`);
+    const xml = await res.text();
+    for (const m of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+      const key = m[1].match(/<Key>([\s\S]*?)<\/Key>/)?.[1] ?? "";
+      const size = Number(m[1].match(/<Size>(\d+)<\/Size>/)?.[1] ?? 0);
+      if (key) out.push({ key: key.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'"), size });
+    }
+    const next = xml.match(/<NextContinuationToken>([\s\S]*?)<\/NextContinuationToken>/)?.[1];
+    if (!/<IsTruncated>true<\/IsTruncated>/.test(xml) || !next) break;
+    token = next.replace(/&amp;/g, "&");
+  }
+  return out;
 }
 
 export async function r2Delete(key: string): Promise<void> {

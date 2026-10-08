@@ -60,7 +60,8 @@ export default function InvoiceDetail({ id }) {
     inv.status === 'draft' && { label: 'Mark as sent', icon: 'check', onClick: () => run('sent', () => A.markSent(s, inv), 'Marked as sent') },
     isQuote && ['sent', 'draft'].includes(inv.status) && { label: 'Mark accepted', icon: 'check', onClick: () => run('acc', () => s.update('invoices', inv.id, { status: 'accepted' }), 'Marked accepted') },
     isQuote && ['sent', 'draft', 'accepted'].includes(inv.status) && { label: 'Mark declined', icon: 'x', onClick: () => run('dec', () => s.update('invoices', inv.id, { status: 'declined' }), 'Marked declined') },
-    { label: 'Open client view', icon: 'eye', onClick: () => window.open(shareUrl(inv.share_token) + '?preview=1', '_blank') },
+    inv.share_token && { label: 'Open client link', icon: 'eye', onClick: () => window.open(shareUrl(inv.share_token) + '?preview=1', '_blank') },
+    inv.share_token && { label: 'Turn off client link', icon: 'x', onClick: async () => (await s.confirm({ title: 'Turn off the client link?', body: 'The link you sent stops working right away. Sending again makes a new link.', ok: 'Turn off' })) && run('unshare', () => s.update('invoices', inv.id, { share_token: null }), 'Client link turned off') },
     inv.status === 'void' && { label: 'Undo void', icon: 'history', onClick: () => run('unvoid', () => A.unvoidInvoice(s, inv), 'Restored') },
     inv.status !== 'void' && inv.status !== 'draft' && !isQuote && {
       label: 'Void invoice', icon: 'x', danger: true,
@@ -103,12 +104,16 @@ export default function InvoiceDetail({ id }) {
 
         <div className="col" style={{ gap: 16, minWidth: 0, flex: '1 1 320px' }}>
           <section className="card card-pad col" style={{ gap: 10 }}>
-            <h2>Share &amp; download</h2>
-            {inv.status !== 'void' && (
+            <h2>{inv.share_token ? 'Share & download' : 'Send'}</h2>
+            {inv.status !== 'void' && inv.status !== 'paid' && (
               <>
-                <Button variant="primary" icon="link" busy={busy === 'link'} onClick={() => run('link', () => A.copyLink(s, inv))}>Copy client link</Button>
-                <span className="small muted" style={{ textAlign: 'center' }}>{isQuote ? 'Your client can view and accept the quote' : 'Link stays active until this invoice is paid'}{inv.view_count ? ` · viewed ${inv.view_count}×` : ''}</span>
-                <Button icon="mail" onClick={() => setModal({ type: 'email', reminder: false })}>Email from Gmail</Button>
+                <Button variant="primary" icon="mail" onClick={() => setModal({ type: 'email', reminder: false })}>{inv.share_token ? 'Email again' : 'Send from Gmail'}</Button>
+                <Button icon="link" busy={busy === 'link'} onClick={() => run('link', () => A.copyLink(s, inv))}>{inv.share_token ? 'Copy client link' : 'Send as link (copy)'}</Button>
+                <span className="small muted" style={{ textAlign: 'center' }}>
+                  {inv.share_token
+                    ? `${isQuote ? 'Client can view and accept it' : 'Link works until this invoice is paid'}${inv.view_count ? ` · viewed ${inv.view_count}×` : ''}`
+                    : 'A private client link is only created when you send'}
+                </span>
               </>
             )}
             <Button icon="download" busy={busy === 'pdf'} onClick={() => run('pdf', () => A.downloadPdf(s, inv))}>Download PDF</Button>
@@ -256,7 +261,7 @@ function EmailModal({ inv, client, reminder, due, onClose }) {
     kind: inv.kind, number: inv.number, issueDate: inv.issue_date, dueDate: inv.due_date, notes: inv.notes,
     total: num(inv.total), paid: s.derived.paidFor(inv.id), lines: s.derived.linesFor(inv.id),
     receiptCount: s.db.receipts.filter((r) => r.invoice_id === inv.id).length, clientName: client?.name,
-    accent: p.accent, paymentInstructions: p.payment_instructions, link: shareUrl(inv.share_token), message, isReminder: reminder,
+    accent: p.accent, paymentInstructions: p.payment_instructions, link: inv.share_token ? shareUrl(inv.share_token) : shareUrl('(private link made when you send)'), message, isReminder: reminder,
     business: { name: p.business_name || p.gmail_email, email: p.business_email, phone: p.phone, website: p.website },
   }).html;
   if (!p.gmail_email) {

@@ -3,7 +3,7 @@ import { Icon } from './ui.jsx';
 import { queueFiles } from '../lib/scanQueue.js';
 import { go } from '../router.js';
 import { useStore } from '../store.jsx';
-import { APP_NAME, DEMO } from '../config.js';
+import { APP_NAME, DEMO, LIVE_CONFIGURED } from '../config.js';
 import { api } from '../api/index.js';
 
 const NAV = [
@@ -44,7 +44,7 @@ export default function Layout({ route, children }) {
         <div className="side-foot col" style={{ gap: 6 }}>
           {DEMO && <span className="pill partial" style={{ alignSelf: 'flex-start' }}>Demo mode</span>}
           <span>{DEMO ? 'Data stays in this browser' : `Signed in as ${user.email}`}</span>
-          <button className="btn link small" style={{ alignSelf: 'flex-start' }} onClick={() => api.auth.signOut()}>Sign out</button>
+          <button className="btn link small" style={{ alignSelf: 'flex-start' }} onClick={() => api.auth.signOut()}>{DEMO && LIVE_CONFIGURED ? 'Exit demo' : 'Sign out'}</button>
         </div>
       </nav>
       <main className="main">{children}</main>
@@ -72,7 +72,7 @@ function MobileNav({ current, review }) {
           <a href="#/clients" onClick={() => setOpen(false)}><Icon name="clients" />Clients</a>
           <a href="#/reports" onClick={() => setOpen(false)}><Icon name="reports" />Reports</a>
           <a href="#/settings" onClick={() => setOpen(false)}><Icon name="settings" />Settings</a>
-          <button onClick={() => api.auth.signOut()}><Icon name="logout" />Sign out</button>
+          <button onClick={() => api.auth.signOut()}><Icon name="logout" />{DEMO && LIVE_CONFIGURED ? 'Exit demo' : 'Sign out'}</button>
         </div>
       )}
       <nav className="mobile-nav" aria-label="Main">

@@ -1,10 +1,12 @@
 // Demo backend: same interface as supabase.js, but everything lives in this browser
 // (localStorage for data, IndexedDB for files). Used when no Supabase settings are configured.
+import { LIVE_CONFIGURED, setDemoMode } from '../config.js';
 import { TABLES } from './tables.js';
 import { seedDemo } from './demoSeed.js';
 import { uid, todayISO, round2, num } from '../lib/format.js';
 
-const KEY = 'wrap_demo_v1';
+const KEY = 'wrap_demo_v2';
+try { localStorage.removeItem('wrap_demo_v1'); } catch { /* old sample data */ }
 export const DEMO_UID = '00000000-0000-4000-8000-000000000001';
 const token = () => (uid() + uid()).replace(/-/g, '');
 
@@ -36,7 +38,7 @@ const DEFAULTS = {
   clients: () => ({ statement_token: token(), archived: false, expects_1099: false }),
   projects: () => ({ archived: false }),
   catalog_items: () => ({ kind: 'labor', unit: 'day', rate: 0, archived: false, position: 0, ot_eligible: false }),
-  invoices: () => ({ status: 'draft', share_token: token(), view_count: 0, version: 1, reminders_sent: 0, auto_remind: false, mode: 'basic', discount_type: 'amount', discount_value: 0 }),
+  invoices: () => ({ status: 'draft', share_token: null, view_count: 0, version: 1, reminders_sent: 0, auto_remind: false, mode: 'basic', discount_type: 'amount', discount_value: 0 }),
   receipts: () => ({ status: 'review', billable: false }),
   payments: () => ({ paid_on: todayISO() }),
   mileage_trips: () => ({ billable: false, round_trip: false }),
@@ -131,6 +133,13 @@ export const api = {
       window.location.reload();
     },
     async signOut() {
+      if (LIVE_CONFIGURED) {
+        // Leaving the demo: clear its sample data so it doesn't take up space, then show the real sign-in.
+        localStorage.removeItem(KEY);
+        try { indexedDB.deleteDatabase('wrap_demo_files'); } catch { /* ignore */ }
+        setDemoMode(false);
+        return;
+      }
       localStorage.setItem('wrap_demo_signed_out', '1');
       window.location.reload();
     },
@@ -216,6 +225,13 @@ export const api = {
       save();
       return n;
     }
+    if (name === 'share_link') {
+      const inv = state.invoices.find((i) => i.id === args.p_invoice);
+      if (!inv) return null;
+      inv.share_token = inv.share_token || token();
+      save();
+      return inv.share_token;
+    }
     if (name === 'refresh_invoice_status') {
       refreshStatus(args.inv);
       save();
@@ -281,6 +297,13 @@ export const api = {
     },
     async remove(keys) {
       for (const k of keys.filter(Boolean)) await idbDel(k);
+    },
+    async usage() {
+      load();
+      const keys = state.receipts.flatMap((r) => [r.file_key, r.original_key]).concat(state.profile.logo_key).filter(Boolean);
+      let used = 0;
+      for (const k of keys) used += (await idbGet(k))?.size || 0;
+      return { used, mine: used, limit: 9.5 * 1024 ** 3, counted_at: nowTs() };
     },
   },
 

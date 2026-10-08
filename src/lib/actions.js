@@ -28,7 +28,10 @@ export async function logEvent(s, invoiceId, type, detail = null) {
 
 /** Copies the client link. Copying a draft's link marks it as sent. */
 export async function copyLink(s, inv) {
-  const url = shareUrl(inv.share_token);
+  // The private link is only created the first time you send.
+  const token = inv.share_token || (await s.api.rpc('share_link', { p_invoice: inv.id }));
+  if (!token) throw new Error('Couldn’t create the link');
+  const url = shareUrl(token);
   try {
     await navigator.clipboard.writeText(url);
   } catch {
@@ -38,7 +41,10 @@ export async function copyLink(s, inv) {
     await s.update('invoices', inv.id, { status: 'sent', sent_at: new Date().toISOString() });
     await logEvent(s, inv.id, 'sent', 'Client link copied');
     s.toast('Link copied — marked as sent');
-  } else s.toast('Link copied');
+  } else {
+    if (!inv.share_token) await s.reload('invoices');
+    s.toast('Link copied');
+  }
 }
 
 export async function markSent(s, inv) {

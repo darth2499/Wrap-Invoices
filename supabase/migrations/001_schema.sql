@@ -528,19 +528,31 @@ begin
   return n;
 end $$;
 
--- Deletes all of the signed-in person's business data (used by "Restore → replace everything").
+-- Deletes all of the signed-in person's business data (used by "Reset account" and "Restore → replace everything").
+-- Every statement names the owner: Supabase blocks DELETE/UPDATE without a WHERE clause, and it keeps this to your own rows.
 create or replace function public.wipe_my_data() returns void
 language plpgsql security invoker set search_path = public as $$
+declare me uuid := auth.uid();
 begin
-  delete from public.crew_payouts;  delete from public.crew_members;
-  delete from public.mileage_trips; delete from public.form1099;
-  delete from public.payments;      delete from public.invoice_events;
-  delete from public.invoice_revisions; delete from public.invoice_lines;
-  update public.receipts set invoice_id = null;
-  update public.invoices set quote_id = null, converted_invoice_id = null;
-  delete from public.invoices;      delete from public.receipts;
-  delete from public.projects;      delete from public.clients;
-  delete from public.catalog_items; delete from public.day_types; delete from public.tax_rates;
+  if me is null then raise exception 'Not signed in'; end if;
+  delete from public.crew_payouts      where owner_id = me;
+  delete from public.crew_members      where owner_id = me;
+  delete from public.mileage_trips     where owner_id = me;
+  delete from public.form1099          where owner_id = me;
+  delete from public.payments          where owner_id = me;
+  delete from public.invoice_events    where owner_id = me;
+  delete from public.invoice_revisions where owner_id = me;
+  delete from public.invoice_lines     where owner_id = me;
+  update public.receipts set invoice_id = null where owner_id = me and invoice_id is not null;
+  update public.invoices set quote_id = null, converted_invoice_id = null
+    where owner_id = me and (quote_id is not null or converted_invoice_id is not null);
+  delete from public.invoices          where owner_id = me;
+  delete from public.receipts          where owner_id = me;
+  delete from public.projects          where owner_id = me;
+  delete from public.clients           where owner_id = me;
+  delete from public.catalog_items     where owner_id = me;
+  delete from public.day_types         where owner_id = me;
+  delete from public.tax_rates         where owner_id = me;
 end $$;
 
 grant execute on function public.save_invoice(jsonb, jsonb, text) to authenticated;
@@ -548,3 +560,53 @@ grant execute on function public.take_number(text) to authenticated;
 grant execute on function public.wipe_my_data() to authenticated;
 revoke execute on function public.refresh_invoice_status(uuid) from public, anon;
 grant execute on function public.refresh_invoice_status(uuid) to authenticated;
+
+-- ---------- storage limit: keeps Cloudflare R2 under its free 10 GB ----------
+-- One row per file in R2. Only the server functions read or write these (no browser access).
+create table if not exists public.stored_files (
+  key        text primary key,
+  owner_id   uuid,
+  bytes      bigint not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists stored_files_owner on public.stored_files (owner_id);
+alter table public.stored_files enable row level security;
+
+-- When the list above was last re-counted from R2 itself (fixes any drift, e.g. an upload that never finished).
+create table if not exists public.storage_meta (
+  id         int primary key default 1 check (id = 1),
+  counted_at timestamptz
+);
+alter table public.storage_meta enable row level security;
+
+-- Total bytes stored, for the upload check (one quick sum instead of downloading every row).
+-- p_owner = null: everyone (the bucket is shared); otherwise just that person's files.
+create or replace function public.storage_used(p_owner uuid default null) returns bigint
+language sql stable security definer set search_path = public as $$
+  select coalesce(sum(bytes), 0)::bigint from public.stored_files where p_owner is null or owner_id = p_owner
+$$;
+revoke execute on function public.storage_used(uuid) from public, anon, authenticated;
+grant execute on function public.storage_used(uuid) to service_role;
+
+-- ---------- client links only exist once an invoice is sent ----------
+-- Drafts have no link at all. Sending (email or "Copy link") creates one; "Turn off link" removes it.
+alter table public.invoices alter column share_token drop not null;
+alter table public.invoices alter column share_token drop default;
+update public.invoices set share_token = null where status = 'draft' and share_token is not null;
+
+-- Creates the client link for one of your invoices (or returns the existing one).
+create or replace function public.share_link(p_invoice uuid) returns text
+language sql volatile security invoker set search_path = public as $$
+  update public.invoices set share_token = coalesce(share_token, public.new_token())
+  where id = p_invoice and owner_id = auth.uid()
+  returning share_token
+$$;
+revoke execute on function public.share_link(uuid) from public, anon;
+grant execute on function public.share_link(uuid) to authenticated;
+
+-- ---------- lock-down: signed-out visitors can't touch any table or function directly ----------
+-- (Client links go through the "public" server function, which checks the secret link itself.)
+revoke all on all tables in schema public from anon;
+revoke execute on all functions in schema public from anon;
+alter default privileges in schema public revoke all on tables from anon;
+alter default privileges in schema public revoke execute on functions from anon;

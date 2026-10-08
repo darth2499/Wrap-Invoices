@@ -64,6 +64,13 @@ serve(async (req) => {
     if (!inv) throw new HttpError(404, "Invoice not found");
     if (inv.status === "void") throw new HttpError(400, "This invoice is void");
     const isReminder = body.type === "reminder";
+    // The private client link is created the first time an invoice is sent.
+    if (!inv.share_token) {
+      const bytes = crypto.getRandomValues(new Uint8Array(32));
+      inv.share_token = [...bytes].map((x) => x.toString(16).padStart(2, "0")).join("");
+      const { error: tokErr } = await db.from("invoices").update({ share_token: inv.share_token }).eq("id", inv.id).eq("owner_id", user.id);
+      if (tokErr) throw new HttpError(500, "Couldn't create the client link");
+    }
     const data = await invoiceEmailData(db, inv, profile, business);
     const paid = data.paid;
     const email = buildInvoiceEmail({

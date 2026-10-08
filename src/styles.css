@@ -240,3 +240,40 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
 .m-short { display: none; }
 @media (max-width: 560px) { .m-full { display: none; } .m-short { display: inline; } }
 @media (max-width: 480px) { .hide-sm { display: none; } }
+/* ---------- invoice on phones ---------- */
+.doc-mlines { display: none; }
+@media (max-width: 600px) {
+  .doc-table { display: none; }
+  .doc-mlines { display: flex; flex-direction: column; border-top: 1.5px solid #16161a; }
+  .doc-mline { all: unset; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; gap: 10px; align-items: start; padding: 12px 0; border-bottom: 1px solid #ececE8; cursor: pointer; width: 100%; }
+  .doc-mline-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .doc-mline-item { font-weight: 600; font-size: 14px; }
+  .doc-mline-desc { font-size: 13px; color: #5f6168; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .doc-mline-desc.full { white-space: pre-line; overflow: visible; }
+  .doc-mline-qty { font-size: 12px; color: #5f6168; margin-top: 2px; }
+  .doc-mline-amt { font-size: 14px; font-weight: 500; }
+  .doc-mline-chev { color: #9a9ba1; margin-top: 2px; transition: transform .15s; }
+  .doc-mline.open .doc-mline-chev { transform: rotate(180deg); }
+  .doc-head { flex-direction: column; }
+  .doc-from { text-align: left !important; }
+  .doc-meta, .doc-totals { width: 100%; min-width: 0 !important; }
+  .doc-meta td:first-child { text-align: left !important; }
+}
+/* ---------- tabs never wrap onto 2 rows on phones: they scroll sideways instead ---------- */
+@media (max-width: 700px) {
+  .seg { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; }
+  .seg::-webkit-scrollbar { display: none; }
+  .seg .tab { flex: none; white-space: nowrap; }
+}
+/* ---------- invoice list as cards on phones ---------- */
+.inv-cards { display: none; }
+@media (max-width: 700px) {
+  .inv-table { display: none; }
+  .inv-cards { display: flex; flex-direction: column; }
+  .inv-card { all: unset; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 13px 16px; border-bottom: 1px solid var(--line-2); cursor: pointer; width: 100%; }
+  .inv-card:last-child { border-bottom: 0; }
+  .inv-card .who { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .inv-card .meta { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .inv-card .amt { text-align: right; font-weight: 600; }
+  .inv-card .st { justify-self: end; }
+}

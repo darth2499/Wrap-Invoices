@@ -1,4 +1,5 @@
 // The invoice as the client sees it (screen version). The PDF is drawn to match in lib/pdf.js.
+import { useState } from 'react';
 import { money, fmtLong, num, payMethod } from '../lib/format.js';
 import { depositAmount } from '../lib/calc.js';
 
@@ -18,12 +19,12 @@ export default function InvoiceDoc({ business = {}, invoice, client, lines, paym
   return (
     <article className="doc" style={template === 'bold' ? { paddingTop: 0, overflow: 'hidden' } : null}>
       {template === 'bold' && <div style={{ height: 10, background: accent, margin: '0 calc(-1 * clamp(20px, 5vw, 44px))' }} />}
-      <header style={{ display: 'flex', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
+      <header className="doc-head" style={{ display: 'flex', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
         <div className="col" style={{ gap: 8, minWidth: 0 }}>
           {logoUrl ? <img src={logoUrl} alt="" style={{ maxWidth: 180, maxHeight: 80, objectFit: 'contain', objectPosition: 'left' }} /> : null}
           {!logoUrl && <strong style={{ fontSize: 20, letterSpacing: '.03em' }}>{(business.business_name || '').toUpperCase()}</strong>}
         </div>
-        <div style={{ textAlign: 'right', fontSize: 13, color: '#45464d', lineHeight: 1.55 }}>
+        <div className="doc-from" style={{ textAlign: 'right', fontSize: 13, color: '#45464d', lineHeight: 1.55 }}>
           <div style={{ fontSize: 26, fontWeight: 600, color: template === 'bold' ? accent : '#16161a', letterSpacing: '.02em' }}>{isQuote ? 'QUOTE' : 'INVOICE'}</div>
           {logoUrl && <div style={{ fontWeight: 600, color: '#16161a' }}>{business.business_name}</div>}
           <div style={{ whiteSpace: 'pre-line' }}>{business.address}</div>
@@ -44,7 +45,7 @@ export default function InvoiceDoc({ business = {}, invoice, client, lines, paym
             </>
           ) : <span className="muted">—</span>}
         </div>
-        <table style={{ fontSize: 13, borderCollapse: 'collapse' }}>
+        <table className="doc-meta" style={{ fontSize: 13, borderCollapse: 'collapse' }}>
           <tbody>
             <tr><td style={{ textAlign: 'right', fontWeight: 600, padding: '1px 12px 1px 0' }}>{isQuote ? 'Quote' : 'Invoice'} number:</td><td>{invoice.number}</td></tr>
             <tr><td style={{ textAlign: 'right', fontWeight: 600, padding: '1px 12px 1px 0' }}>{isQuote ? 'Date' : 'Invoice date'}:</td><td>{fmtLong(invoice.issue_date)}</td></tr>
@@ -54,7 +55,11 @@ export default function InvoiceDoc({ business = {}, invoice, client, lines, paym
         </table>
       </section>
 
-      <div className="table-wrap">
+      {/* Phones: one tappable row per item (tap to see details) instead of a wide table. */}
+      <div className="doc-mlines">
+        {lines.map((l, i) => <MobileLine key={l.id || i} l={l} />)}
+      </div>
+      <div className="table-wrap doc-table">
         <table className="doc-lines" style={{ minWidth: 460 }}>
           <thead>
             <tr style={headStyle}>
@@ -84,7 +89,7 @@ export default function InvoiceDoc({ business = {}, invoice, client, lines, paym
       </div>
 
       <section style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <table style={{ fontSize: 13, borderCollapse: 'collapse', minWidth: 260 }}>
+        <table className="doc-totals" style={{ fontSize: 13, borderCollapse: 'collapse', minWidth: 260 }}>
           <tbody>
             {(num(invoice.discount_total) > 0 || num(invoice.tax_total) > 0) && <TotRow label="Subtotal" value={money(invoice.subtotal)} />}
             {num(invoice.discount_total) > 0 && <TotRow label="Discount" value={`−${money(invoice.discount_total)}`} />}
@@ -121,5 +126,24 @@ function TotRow({ label, value, strong, big, muted }) {
       <td style={{ padding: '4px 20px 4px 0', textAlign: 'right', fontWeight: strong ? 600 : 400, color: muted ? '#5f6168' : undefined }}>{label}:</td>
       <td className="num" style={{ padding: '4px 0', textAlign: 'right', fontWeight: strong ? 600 : 400, fontSize: big ? 15 : 13, color: muted ? '#5f6168' : undefined, borderTop: big ? '1.5px solid #16161a' : undefined }}>{value}</td>
     </tr>
+  );
+}
+
+function MobileLine({ l }) {
+  const [open, setOpen] = useState(false);
+  const desc = String(l.description || '');
+  const first = desc.split('\n')[0];
+  const more = desc.includes('\n') || !!l.note || num(l.qty) !== 1 || num(l.tax_rate) > 0;
+  return (
+    <button type="button" className={`doc-mline ${open ? 'open' : ''}`} onClick={() => more && setOpen(!open)} aria-expanded={more ? open : undefined}>
+      <span className="doc-mline-main">
+        <span className="doc-mline-item">{l.item}</span>
+        {first && <span className={`doc-mline-desc ${open ? 'full' : ''}`}>{open ? desc : first}</span>}
+        {open && l.note && <span className="doc-mline-desc full">{l.note}</span>}
+        {open && <span className="doc-mline-qty num">{Number(l.qty).toLocaleString('en-US', { maximumFractionDigits: 3 })} × {money(l.rate)}{num(l.tax_rate) ? ` · tax ${num(l.tax_rate)}%` : ''}</span>}
+      </span>
+      <span className="doc-mline-amt num">{money(l.amount)}</span>
+      {more && <svg className="doc-mline-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>}
+    </button>
   );
 }

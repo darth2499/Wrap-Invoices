@@ -70,7 +70,19 @@ export default function Invoices({ kind }) {
             {!rows.length && <Button variant="primary" onClick={() => go(isQuote ? '/invoices/new?kind=quote' : '/invoices/new')}>{isQuote ? 'Create your first quote' : 'Create your first invoice'}</Button>}
           </Empty>
         ) : (
-          <div className="table-wrap">
+          <>
+          <div className="inv-cards">
+            {shown.map((r) => (
+              <button type="button" key={r.id} className="inv-card" onClick={() => go(`/invoices/${r.id}`)}>
+                <span className="who">{r.client?.name || 'No client'}</span>
+                <span className="amt num">{money(isQuote || r.status === 'paid' || r.status === 'void' || r.status === 'draft' ? r.total : r.due)}</span>
+                <span className="meta">#{r.number} · {['sent'].includes(r.status) && !isQuote ? dueText(r, today) : fmtDate(r.issue_date)}{r.project?.name || r.notes ? ` · ${r.project?.name || r.notes}` : ''}</span>
+                <span className="st"><Pill kind={r.st.key}>{r.st.label}</Pill></span>
+              </button>
+            ))}
+            <div className="row between small" style={{ padding: '10px 16px', borderTop: '1px solid var(--line)' }}><span className="muted">{shown.length} shown</span><strong className="num">{money(sum)}</strong></div>
+          </div>
+          <div className="table-wrap inv-table">
             <table className="table" style={{ minWidth: 720 }}>
               <thead>
                 <tr><th>Status</th><th>No.</th><th>Client · project</th><th>Date</th><th>{isQuote ? 'Valid until' : 'Due'}</th><th className="right">{isQuote || filter === 'paid' ? 'Total' : 'Amount due'}</th></tr>
@@ -95,6 +107,7 @@ export default function Invoices({ kind }) {
               </tfoot>
             </table>
           </div>
+          </>
         )}
       </div>
     </div>
