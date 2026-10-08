@@ -1,9 +1,11 @@
+# Uploads the server functions (supabase/functions) to Supabase.
+# Runs when you change anything in supabase/functions (or the invoice-PDF code it shares with the app), or by hand from the Actions tab.
 name: Deploy backend
 
 on:
   push:
     branches: [main]
-    paths: ['supabase/functions/**', 'supabase/config.toml']
+    paths: ['supabase/functions/**', 'supabase/config.toml', 'src/lib/pdf.js', 'src/lib/format.js', 'src/lib/calc.js', 'scripts/sync-shared.mjs']
   workflow_dispatch:
 
 jobs:
@@ -16,7 +18,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
-          version: 2.20.5
+          version: latest
+      - name: Copy the invoice-PDF code into the functions
+        run: node scripts/sync-shared.mjs
       - name: Deploy functions
         run: |
           for fn in files receipt-read public gmail reminders; do
