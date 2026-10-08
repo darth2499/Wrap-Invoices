@@ -234,11 +234,16 @@ export async function importExpenses(list, { db, api, onStep = () => {} }) {
 /** Reads a Wave invoice PDF (its text, pulled out in the browser) and returns an import-ready invoice. */
 export async function invoiceFromPdf(file, api) {
   const { pdfText, pdfFirstPageImage, blobToBase64 } = await import('./pdftext.js');
-  const text = await pdfText(file);
-  const payload = text.replace(/\s/g, '').length > 30
-    ? { text }
-    : { image_b64: await blobToBase64(await pdfFirstPageImage(file, 2000)), image_mime: 'image/jpeg' };
-  const r = await api.readInvoicePdf(payload);
+  const text = await pdfText(file, 30);
+  // Wave PDFs are read exactly from their text (free, instant). Anything else goes to the AI reader.
+  const { parseWaveInvoiceText } = await import('./waveInvoicePdf.js');
+  let r = parseWaveInvoiceText(text);
+  if (!r) {
+    const payload = text.replace(/\s/g, '').length > 30
+      ? { text }
+      : { image_b64: await blobToBase64(await pdfFirstPageImage(file, 2000)), image_mime: 'image/jpeg' };
+    r = await api.readInvoicePdf(payload);
+  }
   return {
     number: String(r.number || '').replace(/^#/, ''),
     client: r.client_name,
@@ -248,6 +253,7 @@ export async function invoiceFromPdf(file, api) {
     due: toDate(r.due_date) || addDays(toDate(r.issue_date) || todayISO(), 30),
     total: num(r.total),
     amountDue: num(r.amount_due),
+    discount: num(r.discount),
     notes: r.notes || null,
     payments: (r.payments || []).map((p) => ({ date: p.date, amount: num(p.amount), method: p.method })),
     lines: (r.lines || []).map((l) => ({ kind: 'labor', item: l.item, description: l.description || '', note: l.note || '', qty: num(l.qty) || 1, rate: num(l.rate), amount: num(l.amount) })),
