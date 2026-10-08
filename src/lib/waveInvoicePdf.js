@@ -70,8 +70,9 @@ export function parseWaveInvoiceText(text) {
   }
   if (!lines.length) return null;
   for (const ln of lines) {
-    ln.description = ln.extra[0] || '';
-    ln.note = ln.extra.slice(1).join('\n');
+    // Keep every description line, line breaks included (e.g. "Salesforce (07/20)" then "- 1 Day ($750)" …).
+    ln.description = ln.extra.join('\n');
+    ln.note = '';
     delete ln.extra;
   }
 

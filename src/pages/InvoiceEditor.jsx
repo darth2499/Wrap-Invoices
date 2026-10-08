@@ -345,7 +345,7 @@ function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup }) {
       </div>
       <div className="col c-desc" style={{ gap: 6 }}>
         <div className="row" style={{ gap: 6, alignItems: 'stretch' }}>
-          <textarea className="input" rows={1} style={{ minHeight: 40, resize: 'vertical', padding: '9px 12px' }} value={l.description || ''} placeholder="Description" onChange={(e) => upd(l.key, { description: e.target.value })} aria-label="Description" />
+          <textarea className="input" rows={Math.min(8, Math.max(1, String(l.description || '').split('\n').length))} style={{ minHeight: 40, resize: 'vertical', padding: '9px 12px' }} value={l.description || ''} placeholder="Description" onChange={(e) => upd(l.key, { description: e.target.value })} aria-label="Description" />
           <Popover open={calOpen} setOpen={setCalOpen} align="right" width={310} trigger={<Button variant="icon" icon="calendar" aria-label="Add dates" title="Add shoot dates" onClick={() => setCalOpen((o) => !o)} />}>
             <Calendar value={calDates} onChange={applyDates} />
             <div className="row between" style={{ paddingTop: 8 }}>
@@ -355,7 +355,7 @@ function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup }) {
           </Popover>
         </div>
         {l.note != null && l.note !== false && (l.note !== '' || l.showNote) ? (
-          <input className="input" style={{ minHeight: 32, fontSize: 12 }} placeholder="Extra note (e.g. $750 + $750 plus 1 hour OT)" value={l.note || ''} onChange={(e) => upd(l.key, { note: e.target.value })} aria-label="Note" autoFocus={l.showNote && !l.note} />
+          <textarea className="input" rows={Math.min(6, Math.max(1, String(l.note || '').split('\n').length))} style={{ minHeight: 32, fontSize: 12, padding: '6px 12px' }} placeholder="Extra note (e.g. $750 + $750 plus 1 hour OT)" value={l.note || ''} onChange={(e) => upd(l.key, { note: e.target.value })} aria-label="Note" autoFocus={l.showNote && !l.note} />
         ) : (
           <button type="button" className="btn link small" style={{ alignSelf: 'flex-start', fontSize: 12 }} onClick={() => upd(l.key, { showNote: true, note: l.note || '' })}>+ Add a note</button>
         )}

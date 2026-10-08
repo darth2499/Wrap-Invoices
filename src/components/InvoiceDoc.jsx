@@ -71,7 +71,7 @@ export default function InvoiceDoc({ business = {}, invoice, client, lines, paym
                 <td>
                   <div style={{ fontWeight: 600 }}>{l.item}</div>
                   {l.description && <div style={{ color: '#5f6168', whiteSpace: 'pre-line' }}>{l.description}</div>}
-                  {l.note && <div style={{ color: '#5f6168', fontSize: 12, marginTop: 2 }}>{l.note}</div>}
+                  {l.note && <div style={{ color: '#5f6168', fontSize: 12, marginTop: 2, whiteSpace: 'pre-line' }}>{l.note}</div>}
                 </td>
                 <td className="r num">{Number(l.qty).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
                 <td className="r num">{money(l.rate)}</td>
