@@ -1,6 +1,6 @@
 // gmail — connect your Gmail and send invoices / reminders / statements from it.
 import { admin, appUrl, HttpError, json, money, requireUser, serve } from "../_shared/util.ts";
-import { googleAccessToken, invoiceEmail, sendGmail, shareLink } from "../_shared/email.ts";
+import { buildInvoiceEmail, buildStatementEmail, googleAccessToken, invoiceEmailData, sendGmail, shareLink } from "../_shared/email.ts";
 
 serve(async (req) => {
   const user = await requireUser(req);
@@ -42,11 +42,19 @@ serve(async (req) => {
       const { data: client } = await db.from("clients").select("*").eq("id", body.client_id).eq("owner_id", user.id).single();
       if (!client) throw new HttpError(404, "Client not found");
       const link = `${appUrl()}/#/s/${client.statement_token}`;
-      const msg = String(body.message ?? "");
+      const { data: open } = await db.from("invoices").select("id, number, issue_date, due_date, total")
+        .eq("client_id", client.id).eq("kind", "invoice").eq("status", "sent").order("issue_date");
+      const ids = (open ?? []).map((i) => i.id);
+      const { data: sp } = ids.length ? await db.from("payments").select("invoice_id, amount").in("invoice_id", ids) : { data: [] as { invoice_id: string; amount: number }[] };
+      const paidBy: Record<string, number> = {};
+      for (const p of sp ?? []) paidBy[p.invoice_id] = (paidBy[p.invoice_id] ?? 0) + Number(p.amount);
+      const email = buildStatementEmail({
+        link, clientName: client.name, message: String(body.message ?? ""), accent: profile?.accent ?? "#16161A",
+        business: { name: business, email: profile?.business_email || null, phone: profile?.phone || null, website: profile?.website || null },
+        invoices: (open ?? []).map((i) => ({ number: i.number, issueDate: i.issue_date, dueDate: i.due_date, due: Number(i.total) - (paidBy[i.id] ?? 0) })).filter((i) => i.due > 0.009),
+      });
       await sendGmail(tok.refresh_token, {
-        fromName: business, fromEmail: tok.email, to, cc: body.cc, subject: String(body.subject ?? `Statement from ${business}`),
-        text: `${msg}\n\nView your statement:\n${link}\n\n— ${business}`,
-        html: `<p style="white-space:pre-line;font-family:Helvetica,Arial,sans-serif">${msg.replace(/</g, "&lt;")}</p><p><a href="${link}" style="font-family:Helvetica,Arial,sans-serif">View your statement</a></p>`,
+        fromName: business, fromEmail: tok.email, to, cc: body.cc, subject: String(body.subject ?? `Statement from ${business}`), ...email,
       });
       return json({ ok: true });
     }
@@ -55,14 +63,12 @@ serve(async (req) => {
     const { data: inv } = await db.from("invoices").select("*").eq("id", body.invoice_id).eq("owner_id", user.id).single();
     if (!inv) throw new HttpError(404, "Invoice not found");
     if (inv.status === "void") throw new HttpError(400, "This invoice is void");
-    const { data: pays } = await db.from("payments").select("amount").eq("invoice_id", inv.id);
-    const paid = (pays ?? []).reduce((s, p) => s + Number(p.amount), 0);
     const isReminder = body.type === "reminder";
-    const overdueDays = inv.due_date ? Math.floor((Date.now() - new Date(inv.due_date + "T12:00:00").getTime()) / 86400000) : 0;
-    const email = invoiceEmail({
-      kind: inv.kind, number: inv.number, due_date: inv.due_date, total: Number(inv.total),
-      amountDue: Number(inv.total) - paid, link: shareLink(appUrl(), inv.share_token), business,
-      accent: profile?.accent ?? "#16161A", message: String(body.message ?? ""), isReminder, overdueDays,
+    const data = await invoiceEmailData(db, inv, profile, business);
+    const paid = data.paid;
+    const email = buildInvoiceEmail({
+      ...data,
+      link: shareLink(appUrl(), inv.share_token), message: String(body.message ?? ""), isReminder,
     });
     await sendGmail(tok.refresh_token, {
       fromName: business, fromEmail: tok.email, to, cc: body.cc || undefined,

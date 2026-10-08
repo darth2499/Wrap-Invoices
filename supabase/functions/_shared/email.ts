@@ -1,5 +1,5 @@
 // Gmail sending + the invoice email template.
-import { env, escapeHtml, HttpError, money } from "./util.ts";
+import { env, HttpError } from "./util.ts";
 
 export async function googleAccessToken(refreshToken: string): Promise<string> {
   const res = await fetch("https://oauth2.googleapis.com/token", {
@@ -95,44 +95,30 @@ export async function sendGmail(refreshToken: string, mail: Mail): Promise<strin
   return data.id;
 }
 
-export interface EmailInvoice {
-  kind: string;
-  number: string;
-  due_date: string | null;
-  total: number;
-  amountDue: number;
-  link: string;
-  business: string;
-  accent: string;
-  message: string;
-  isReminder: boolean;
-  overdueDays?: number;
-}
+// The email designs live in src/lib/emailTemplate.js (shared with the app's live preview).
+// @ts-ignore: plain JS shared with the app (copied by scripts/sync-shared.mjs)
+import { buildInvoiceEmail as buildInvoiceJs, buildStatementEmail as buildStatementJs } from "./web/emailTemplate.js";
 
-export function invoiceEmail(e: EmailInvoice): { text: string; html: string } {
-  const label = e.kind === "quote" ? "Quote" : "Invoice";
-  const due = e.due_date
-    ? new Date(e.due_date + "T12:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
-    : "";
-  const status = e.isReminder && e.overdueDays && e.overdueDays > 0
-    ? `${e.overdueDays} day${e.overdueDays === 1 ? "" : "s"} past due`
-    : due ? `Due ${due}` : "";
-  const text = `${e.message}\n\n${label} #${e.number}\nAmount due: ${money(e.amountDue)}${status ? `\n${status}` : ""}\n\nView ${label.toLowerCase()} and download receipts:\n${e.link}\n\n— ${e.business}`;
-  const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f6f6f4">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f6f4;padding:32px 12px;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#16161a">
-<tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px">
-<tr><td style="padding:0 4px 20px;font-size:15px;line-height:1.6;white-space:pre-line">${escapeHtml(e.message)}</td></tr>
-<tr><td style="background:#ffffff;border:1px solid #e6e6e2;border-radius:14px;padding:28px">
-<div style="font-size:13px;color:#5f6168">${label} #${escapeHtml(e.number)} from ${escapeHtml(e.business)}</div>
-<div style="font-size:32px;font-weight:600;margin:6px 0 4px">${money(e.amountDue)}</div>
-${status ? `<div style="font-size:14px;color:${e.isReminder && (e.overdueDays ?? 0) > 0 ? "#b42318" : "#45464d"}">${escapeHtml(status)}</div>` : ""}
-<a href="${e.link}" style="display:inline-block;margin-top:22px;background:${e.accent || "#16161a"};color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 22px;border-radius:10px">View ${label.toLowerCase()}</a>
-<div style="margin-top:14px;font-size:12px;color:#5f6168">Download the PDF and any receipts from the link.</div>
-</td></tr>
-<tr><td style="padding:16px 4px;font-size:12px;color:#8a8b91">Sent by ${escapeHtml(e.business)}</td></tr>
-</table></td></tr></table></body></html>`;
-  return { text, html };
+type Built = { html: string; text: string };
+export const buildInvoiceEmail = buildInvoiceJs as unknown as (e: Record<string, unknown>) => Built;
+export const buildStatementEmail = buildStatementJs as unknown as (e: Record<string, unknown>) => Built;
+
+/** Everything the invoice email shows, loaded fresh from the database. */
+// deno-lint-ignore no-explicit-any
+export async function invoiceEmailData(db: any, inv: any, profile: any, fallbackName: string) {
+  const [{ data: lines }, { data: pays }, { count }, { data: client }] = await Promise.all([
+    db.from("invoice_lines").select("item, description, amount").eq("invoice_id", inv.id).order("position"),
+    db.from("payments").select("amount").eq("invoice_id", inv.id),
+    db.from("receipts").select("id", { count: "exact", head: true }).eq("invoice_id", inv.id),
+    inv.client_id ? db.from("clients").select("name").eq("id", inv.client_id).single() : Promise.resolve({ data: null }),
+  ]);
+  const paid = (pays ?? []).reduce((t: number, p: { amount: number }) => t + Number(p.amount), 0);
+  return {
+    kind: inv.kind, number: inv.number, issueDate: inv.issue_date, dueDate: inv.due_date, notes: inv.notes,
+    total: Number(inv.total), paid, lines: lines ?? [], receiptCount: count ?? 0, clientName: client?.name ?? null,
+    accent: profile?.accent ?? "#16161A", paymentInstructions: profile?.payment_instructions ?? null,
+    business: { name: profile?.business_name || fallbackName, email: profile?.business_email || null, phone: profile?.phone || null, website: profile?.website || null },
+  };
 }
 
 export function shareLink(appUrl: string, token: string): string {

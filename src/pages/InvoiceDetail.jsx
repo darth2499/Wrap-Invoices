@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store.jsx';
 import { Button, Field, Icon, Menu, Modal, MoneyInput, Pill, Switch, Empty } from '../components/ui.jsx';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
+import EmailPreview from '../components/EmailPreview.jsx';
+import { buildInvoiceEmail } from '../lib/emailTemplate.js';
 import { statusOf, dueText } from '../lib/calc.js';
 import { money, fmtDate, fmtDateTime, fmtShort, fmtTsDate, num, todayISO, round2, payMethod } from '../lib/format.js';
 import * as A from '../lib/actions.js';
@@ -246,10 +248,17 @@ function EmailModal({ inv, client, reminder, due, onClose }) {
   const [subject, setSubject] = useState(reminder ? `Reminder: invoice #${inv.number} from ${biz}` : `${isQuote ? 'Quote' : 'Invoice'} #${inv.number} from ${biz}`);
   const [message, setMessage] = useState(
     reminder
-      ? `Hi ${first},\n\nJust a friendly reminder that invoice #${inv.number} for ${money(due)} is ${inv.due_date && inv.due_date < todayISO() ? 'now past due' : `due ${fmtDate(inv.due_date)}`}. You can view it and download the PDF and receipts below.\n\nThank you!\n${biz}`
+      ? `Hi ${first},\n\nJust a friendly reminder that invoice #${inv.number} for ${money(due)} is ${inv.due_date && inv.due_date < todayISO() ? 'now past due' : `due ${fmtDate(inv.due_date)}`}. You can view it and download the PDF and receipts from the link below.\n\nThank you!\n${biz}`
       : `Hi ${first},\n\nHere's ${isQuote ? 'the quote' : `invoice #${inv.number}`}${inv.notes ? ` (${inv.notes})` : ''}. You can view it and download the PDF${isQuote ? '' : ' and receipts'} below.\n\nThank you!\n${biz}`,
   );
   const [busy, setBusy] = useState(false);
+  const preview = buildInvoiceEmail({
+    kind: inv.kind, number: inv.number, issueDate: inv.issue_date, dueDate: inv.due_date, notes: inv.notes,
+    total: num(inv.total), paid: s.derived.paidFor(inv.id), lines: s.derived.linesFor(inv.id),
+    receiptCount: s.db.receipts.filter((r) => r.invoice_id === inv.id).length, clientName: client?.name,
+    accent: p.accent, paymentInstructions: p.payment_instructions, link: shareUrl(inv.share_token), message, isReminder: reminder,
+    business: { name: p.business_name || p.gmail_email, email: p.business_email, phone: p.phone, website: p.website },
+  }).html;
   if (!p.gmail_email) {
     return (
       <Modal title="Connect Gmail first" onClose={onClose} footer={<><Button onClick={onClose}>Close</Button><Button variant="primary" onClick={() => s.api.auth.connectGmail()}>Connect Gmail</Button></>}>
@@ -271,12 +280,17 @@ function EmailModal({ inv, client, reminder, due, onClose }) {
     }
   };
   return (
-    <Modal title={reminder ? 'Send a reminder' : `Email ${isQuote ? 'quote' : 'invoice'}`} onClose={onClose} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" icon="mail" busy={busy} disabled={!to} onClick={send}>Send from {p.gmail_email}</Button></>}>
-      <Field label="To"><input className="input" type="email" multiple value={to} onChange={(e) => setTo(e.target.value)} placeholder="client@example.com" /></Field>
-      <Field label="Cc" hint="(optional)"><input className="input" value={cc} onChange={(e) => setCc(e.target.value)} /></Field>
-      <Field label="Subject"><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
-      <Field label="Message"><textarea className="input" rows={7} value={message} onChange={(e) => setMessage(e.target.value)} /></Field>
-      <p className="small muted">A “View {isQuote ? 'quote' : 'invoice'}” button with your private link is added below the message.</p>
+    <Modal wide title={reminder ? 'Send a reminder' : `Email ${isQuote ? 'quote' : 'invoice'}`} onClose={onClose} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" icon="mail" busy={busy} disabled={!to} onClick={send}>Send from {p.gmail_email}</Button></>}>
+      <div className="email-compose">
+        <div className="col" style={{ gap: 12 }}>
+          <Field label="To"><input className="input" type="email" multiple value={to} onChange={(e) => setTo(e.target.value)} placeholder="client@example.com" /></Field>
+          <Field label="Cc" hint="(optional)"><input className="input" value={cc} onChange={(e) => setCc(e.target.value)} /></Field>
+          <Field label="Subject"><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
+          <Field label="Message"><textarea className="input" rows={9} value={message} onChange={(e) => setMessage(e.target.value)} /></Field>
+          <p className="small muted">The {isQuote ? 'quote' : 'invoice'} details, a “View {isQuote ? 'quote' : 'invoice'}” button{p.payment_instructions && !isQuote ? ' and how to pay' : ''} are added below your message.</p>
+        </div>
+        <EmailPreview html={preview} label="What your client sees" />
+      </div>
     </Modal>
   );
 }

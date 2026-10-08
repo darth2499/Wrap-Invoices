@@ -1,7 +1,7 @@
 // reminders — runs once a day (from the database scheduler) and emails automatic reminders
 // for overdue invoices that have "Auto-remind" turned on.
 import { admin, appUrl, env, HttpError, json, money, serve } from "../_shared/util.ts";
-import { invoiceEmail, sendGmail, shareLink } from "../_shared/email.ts";
+import { buildInvoiceEmail, invoiceEmailData, sendGmail, shareLink } from "../_shared/email.ts";
 
 serve(async (req) => {
   if (req.headers.get("x-cron-secret") !== env("CRON_SECRET")) throw new HttpError(401, "Nope");
@@ -42,11 +42,10 @@ serve(async (req) => {
 
       const business = profile.business_name || tok.email;
       const first = (client.name || "").split(" ")[0] || "there";
-      const message = `Hi ${first},\n\nJust a friendly reminder that invoice #${inv.number} for ${money(due)} is now ${overdue} day${overdue === 1 ? "" : "s"} past due. You can view it and download the PDF and receipts below.\n\nThank you!\n${business}`;
-      const email = invoiceEmail({
-        kind: "invoice", number: inv.number, due_date: inv.due_date, total: Number(inv.total), amountDue: due,
-        link: shareLink(appUrl(), inv.share_token), business, accent: profile.accent ?? "#16161A",
-        message, isReminder: true, overdueDays: overdue,
+      const message = `Hi ${first},\n\nJust a friendly reminder that invoice #${inv.number} for ${money(due)} is now ${overdue} day${overdue === 1 ? "" : "s"} past due. The details are below, and you can download the PDF and receipts from the link.\n\nThank you!\n${business}`;
+      const email = buildInvoiceEmail({
+        ...(await invoiceEmailData(db, inv, profile, business)),
+        link: shareLink(appUrl(), inv.share_token), message, isReminder: true,
       });
       await sendGmail(tok.refresh_token, {
         fromName: business, fromEmail: tok.email, to: client.email, cc: client.cc_emails || undefined,

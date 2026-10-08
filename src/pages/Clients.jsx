@@ -4,6 +4,8 @@ import { Button, Empty, Field, Menu, Modal, Pill } from '../components/ui.jsx';
 import { statusOf } from '../lib/calc.js';
 import { money, fmtDate, num, todayISO, plural } from '../lib/format.js';
 import { go, shareUrl } from '../router.js';
+import EmailPreview from '../components/EmailPreview.jsx';
+import { buildStatementEmail } from '../lib/emailTemplate.js';
 
 export default function Clients({ id }) {
   return id ? <ClientDetail id={id} /> : <ClientList />;
@@ -221,12 +223,26 @@ function StatementEmail({ client, owed, onClose }) {
   const [subject, setSubject] = useState(`Statement from ${p.business_name || 'me'}`);
   const [message, setMessage] = useState(`Hi ${first},\n\nHere’s a statement of the open invoices — ${money(owed)} in total. Each invoice and its receipts can be opened from the link.\n\nThank you!\n${p.business_name || ''}`);
   const [busy, setBusy] = useState(false);
+  const open = s.db.invoices
+    .filter((i) => i.client_id === client.id && i.kind === 'invoice' && i.status === 'sent')
+    .sort((a, b) => String(a.issue_date).localeCompare(String(b.issue_date)))
+    .map((i) => ({ number: i.number, issueDate: i.issue_date, dueDate: i.due_date, due: num(i.total) - s.derived.paidFor(i.id) }))
+    .filter((i) => i.due > 0.009);
+  const preview = buildStatementEmail({
+    link: shareUrl(client.statement_token, 's'), clientName: client.name, message, accent: p.accent, invoices: open,
+    business: { name: p.business_name || p.gmail_email, email: p.business_email, phone: p.phone, website: p.website },
+  }).html;
   if (!p.gmail_email) return <Modal title="Connect Gmail first" onClose={onClose} footer={<Button variant="primary" onClick={() => s.api.auth.connectGmail()}>Connect Gmail</Button>}><p>Or copy the statement link and send it yourself.</p></Modal>;
   return (
-    <Modal title="Email statement" onClose={onClose} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" icon="mail" busy={busy} disabled={!to} onClick={async () => { setBusy(true); try { await s.api.gmail('send', { type: 'statement', client_id: client.id, to, cc: client.cc_emails, subject, message }); s.toast('Statement sent'); onClose(); } catch (e) { s.toast(e.message, { error: true }); setBusy(false); } }}>Send</Button></>}>
-      <Field label="To"><input className="input" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
-      <Field label="Subject"><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
-      <Field label="Message"><textarea className="input" rows={6} value={message} onChange={(e) => setMessage(e.target.value)} /></Field>
+    <Modal wide title="Email statement" onClose={onClose} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" icon="mail" busy={busy} disabled={!to} onClick={async () => { setBusy(true); try { await s.api.gmail('send', { type: 'statement', client_id: client.id, to, cc: client.cc_emails, subject, message }); s.toast('Statement sent'); onClose(); } catch (e) { s.toast(e.message, { error: true }); setBusy(false); } }}>Send</Button></>}>
+      <div className="email-compose">
+        <div className="col" style={{ gap: 12 }}>
+          <Field label="To"><input className="input" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
+          <Field label="Subject"><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
+          <Field label="Message"><textarea className="input" rows={8} value={message} onChange={(e) => setMessage(e.target.value)} /></Field>
+        </div>
+        <EmailPreview html={preview} label="What your client sees" />
+      </div>
     </Modal>
   );
 }
