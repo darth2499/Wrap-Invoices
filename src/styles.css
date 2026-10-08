@@ -308,3 +308,5 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
   .input.search { flex: 1 1 160px; width: auto !important; }
   .search-wrap { flex: 1 1 100% !important; }
 }
+/* Chart slides on phones: earlier months fade out at the left edge (a cut-off bar shows there's more). */
+.mb-scroll.more-left { -webkit-mask-image: linear-gradient(to right, transparent, #000 56px); mask-image: linear-gradient(to right, transparent, #000 56px); }

@@ -14,7 +14,11 @@ export function MonthBars({ labels: allLabels, years: allYears, series: allSerie
   // Phones: the chart is wider than the screen and slides sideways (starts on the latest months).
   const narrow = useNarrow(560);
   const scroller = useRef(null);
-  useEffect(() => { if (narrow && scroller.current) scroller.current.scrollLeft = scroller.current.scrollWidth; }, [narrow]);
+  const [atStart, setAtStart] = useState(false);
+  useEffect(() => {
+    const el = scroller.current;
+    if (narrow && el) { el.scrollLeft = el.scrollWidth; setAtStart(el.scrollLeft < 4); }
+  }, [narrow]);
   const labels = allLabels;
   const years = allYears;
   const series = allSeries;
@@ -48,13 +52,12 @@ export function MonthBars({ labels: allLabels, years: allYears, series: allSerie
             </span>
           </span>
         </div>
-        <span className="small muted">{narrow ? 'Slide for more · tap a month' : 'Hover or tap a month'}</span>
       </div>
       <div className="mb-plot" onMouseLeave={() => setSel(null)}>
         <div className="mb-axis" style={{ height }}>
           {ticks.map((t) => <span key={t} className="num" style={{ bottom: `${(t / top) * 100}%` }}>{moneyK(t)}</span>)}
         </div>
-        <div className="mb-scroll" ref={scroller}>
+        <div className={`mb-scroll${narrow && !atStart ? ' more-left' : ''}`} ref={scroller} onScroll={(e) => setAtStart(e.currentTarget.scrollLeft < 4)}>
         <div style={{ width: narrow ? labels.length * 58 : '100%' }}>
         <div className="mb-area" style={{ height }}>
           {ticks.map((t) => <div key={t} className="mb-grid" style={{ bottom: `${(t / top) * 100}%`, borderColor: t === 0 ? 'var(--field)' : undefined }} />)}
