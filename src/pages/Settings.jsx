@@ -4,7 +4,7 @@ import { Button, Empty, Field, Icon, Modal, MoneyInput, Seg, Switch } from '../c
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import { exportBackup, readBackup, restoreBackup } from '../lib/backup.js';
 import { parseCSV, downloadBlob, pickFiles } from '../lib/files.js';
-import { CLIENT_FIELDS, INVOICE_FIELDS, autoMap, clientsFromCsv, invoicesFromCsv, importInvoices, importExpenses, importClients, invoiceFromPdf } from '../lib/importer.js';
+import { CLIENT_FIELDS, INVOICE_FIELDS, autoMap, clientsFromCsv, invoicesFromCsv, importInvoices, importExpenses, importClients, invoiceFromPdf, pdfMatch } from '../lib/importer.js';
 import { isWaveAccounting, parseWaveAccounting, readWaveFiles } from '../lib/wave.js';
 import { money, num, todayISO, addDays, plural } from '../lib/format.js';
 import { DEMO } from '../config.js';
@@ -400,7 +400,7 @@ function Data() {
           <Button icon="sparkle" onClick={async () => { const files = await pickFiles({ accept: 'application/pdf', multiple: true }); if (files.length) setImp({ type: 'pdfs', files }); }}>Wave invoice PDFs</Button>
         </div>
         <p className="small muted"><b>Easiest:</b> pick the .zip from Wave (or select its CSV files together). Wrap figures out which file is which and imports customers first, then invoices, payments and expenses. Safe to run again: anything already in Wrap is skipped.</p>
-        <p className="small muted">In Wave: Sales &amp; Payments → Customers → Export for clients. For invoices, download each invoice as PDF (Wrap reads them, including line items and payments) or export a CSV.</p>
+        <p className="small muted">In Wave: Sales &amp; Payments → Customers → Export for clients. Invoice PDFs (Wrap reads line items and payments) can be added any time: if the invoice is already in Wrap from the zip, its line details are filled in instead of making a duplicate.</p>
       </section>
       {DEMO && (
         <section className="card card-pad col" style={{ gap: 10 }}>
@@ -570,7 +570,7 @@ function ImportModal({ imp, onClose }) {
     ? [...w.invoices].sort((a, b) => (b.amountDue > 0) - (a.amountDue > 0) || (Number(b.number) || 0) - (Number(a.number) || 0))
     : imp.type === 'clients' ? clientsFromCsv(imp.csv.rows, map)
       : imp.type === 'invoices' ? invoicesFromCsv(imp.csv.rows, map, { assume }) : pdfList || [];
-  const count = wave ? (withInvoices ? w.invoices.length : 0) + (withExpenses ? w.expenses.length : 0) : preview.length;
+  const count = wave ? (withInvoices ? w.invoices.length : 0) + (withExpenses ? w.expenses.length : 0) : imp.type === 'pdfs' ? preview.filter((r) => pdfMatch(r, s.db).action !== 'skip').length : preview.length;
 
   const run = async () => {
     setStep('Importing…');
@@ -581,8 +581,10 @@ function ImportModal({ imp, onClose }) {
       } else {
         const parts = [];
         if (!wave || withInvoices) {
-          const { created, skipped } = await importInvoices(wave ? w.invoices : preview, { db: s.db, api: s.api, onStep: setStep });
-          parts.push(`${created} invoices imported${skipped.length ? ` (${skipped.length} skipped — number already in Wrap)` : ''}`);
+          const { created, filled, skipped } = await importInvoices(wave ? w.invoices : preview, { db: s.db, api: s.api, onStep: setStep, fill: imp.type === 'pdfs' });
+          parts.push(`${created} invoices imported`);
+          if (filled) parts.push(`${filled} existing invoices filled in with line details`);
+          if (skipped.length) parts.push(`${skipped.length} skipped: ${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? '…' : ''}`);
         }
         if (wave && withExpenses && w.expenses.length) {
           const { created, skipped } = await importExpenses(w.expenses, { db: s.db, api: s.api, onStep: setStep });
@@ -607,7 +609,7 @@ function ImportModal({ imp, onClose }) {
             <label className="check"><input type="checkbox" checked={withExpenses} onChange={(e) => setWithExpenses(e.target.checked)} />Expenses ({w.expenses.length}, without receipt images)</label>
             <label className="row small muted" style={{ gap: 6 }}>Due date = invoice date +<input className="input num" style={{ width: 64 }} value={terms} onChange={(e) => setTerms(e.target.value)} aria-label="Payment terms in days" /> days</label>
           </div>
-          <p className="small muted">Wave’s export doesn’t include line descriptions like “Felicis (04/06)”, so lines come in with their item name and amount. Numbers already in Wrap are skipped, so it’s safe to import your unpaid invoices’ PDFs first to keep their full details.</p>
+          <p className="small muted">Wave’s export doesn’t include line descriptions like “Felicis (04/06)”, so lines come in with their item name and amount. Import the invoice PDFs afterwards to add those details to the matching invoices (no duplicates).</p>
         </>
       )}
       {imp.csv && !wave && (
@@ -640,7 +642,7 @@ function ImportModal({ imp, onClose }) {
             <tbody>
               {preview.slice(0, 100).map((r, i) => imp.type === 'clients'
                 ? <tr key={i}><td>{r.name}</td><td className="muted">{r.email}</td><td className="small muted" style={{ whiteSpace: 'pre-line' }}>{r.address}</td></tr>
-                : <tr key={i} style={{ opacity: existingNums.has(String(r.number)) ? 0.45 : 1 }}><td>#{r.number}</td><td>{r.client}</td><td className="muted">{r.date}</td><td className="small muted">{r.lines.length} lines{r.notes ? ` · ${r.notes}` : ''}</td><td className="right num">{money(r.total)}</td><td className="right num" style={{ color: r.amountDue > 0 ? 'var(--bad)' : 'var(--muted)' }}>{existingNums.has(String(r.number)) ? 'Already in Wrap' : r.amountDue > 0 ? `${money(r.amountDue)} due` : 'Paid'}</td></tr>)}
+                : (() => { const m = imp.type === 'pdfs' ? pdfMatch(r, s.db) : { action: existingNums.has(String(r.number)) ? 'skip' : 'new', reason: 'Already in Wrap' }; return <tr key={i} style={{ opacity: m.action === 'skip' ? 0.45 : 1 }}><td>#{r.number}</td><td>{r.client}</td><td className="muted">{r.date}</td><td className="small muted">{plural(r.lines.length, 'line')}{r.notes ? ` · ${r.notes}` : ''}</td><td className="right num">{money(r.total)}</td><td className="right num" style={{ color: m.action === 'fill' ? 'var(--good)' : r.amountDue > 0 && m.action === 'new' ? 'var(--bad)' : 'var(--muted)' }}>{m.action === 'fill' ? 'Adds details to the one in Wrap' : m.action === 'skip' ? m.reason : r.amountDue > 0 ? `${money(r.amountDue)} due` : 'Paid'}</td></tr>; })())}
             </tbody>
           </table>
         </div>
@@ -743,7 +745,7 @@ function WaveModal({ files, onClose }) {
             </div>
           )}
           {data.ignored.length > 0 && <p className="small muted" style={{ marginTop: 10 }}>Skipped (not needed): {data.ignored.join(', ')}</p>}
-          <p className="small muted" style={{ marginTop: 10 }}>Wave’s export has no line descriptions like “Felicis (04/06)”, so lines come in as item + amount. Import your unpaid invoices’ PDFs first if you want those details kept.</p>
+          <p className="small muted" style={{ marginTop: 10 }}>Wave’s export has no line descriptions like “Felicis (04/06)”, so lines come in as item + amount. To get them, import the invoice PDFs afterwards (Wave invoice PDFs button): Wrap adds their line details to the matching invoices instead of making duplicates.</p>
         </div>
       )}
     </Modal>

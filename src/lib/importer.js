@@ -130,15 +130,38 @@ export function invoicesFromCsv(rows, map, { assume = 'unpaid' } = {}) {
   });
 }
 
+/**
+ * What a PDF import would do with an invoice whose number is already in Wrap:
+ *  'fill' — it came from the Wave CSV (lines without descriptions) and the totals match, so the PDF's lines replace them.
+ *  'skip' — it already has details, or the totals differ (the PDF might be an older version).
+ */
+export function pdfMatch(inv, db) {
+  const ex = db.invoices.find((i) => i.kind === 'invoice' && String(i.number) === String(inv.number));
+  if (!ex) return { action: 'new' };
+  const exLines = db.invoice_lines.filter((l) => l.invoice_id === ex.id);
+  if (ex.mode === 'advanced' || exLines.some((l) => l.description || l.note || l.receipt_id)) return { action: 'skip', ex, reason: 'Already has details' };
+  if (!inv.lines?.length) return { action: 'skip', ex, reason: 'No line items found in the PDF' };
+  const sum = round2(inv.lines.reduce((t, l) => t + num(l.amount), 0));
+  const withDiscount = totals(inv.lines, 'amount', ex.discount_total || 0);
+  if (Math.abs(withDiscount.total - num(ex.total)) < 0.01) return { action: 'fill', ex, t: withDiscount, discount: num(ex.discount_total) };
+  if (Math.abs(sum - num(ex.total)) < 0.01) return { action: 'fill', ex, t: totals(inv.lines, 'amount', 0), discount: 0 };
+  return { action: 'skip', ex, reason: `Totals differ (Wrap ${num(ex.total).toFixed(2)}, PDF ${sum.toFixed(2)})` };
+}
+
 /** Creates clients and invoices. store: the app store (insert/rpc/reload). */
-export async function importInvoices(list, { db, api, onStep = () => {} }) {
+export async function importInvoices(list, { db, api, onStep = () => {}, fill = false }) {
   const clientsByName = new Map(db.clients.map((c) => [norm(c.name), c]));
   const existingNumbers = new Set(db.invoices.filter((i) => i.kind === 'invoice').map((i) => String(i.number)));
   let created = 0;
+  let filled = 0;
   const skipped = [];
   for (const [i, inv] of list.entries()) {
     onStep(`Importing ${i + 1} / ${list.length}`);
-    if (existingNumbers.has(String(inv.number))) { skipped.push(`#${inv.number} (number already used)`); continue; }
+    if (existingNumbers.has(String(inv.number))) {
+      const m = fill ? pdfMatch(inv, db) : { action: 'skip', reason: 'number already used' };
+      if (m.action === 'fill') { await fillInvoice(m, inv, { db, api }); filled++; } else skipped.push(`#${inv.number} (${m.reason})`);
+      continue;
+    }
     let client = clientsByName.get(norm(inv.client));
     if (!client && inv.client) {
       client = await api.insert('clients', { name: inv.client, email: inv.clientEmail || null, address: inv.clientAddress || null });
@@ -169,7 +192,25 @@ export async function importInvoices(list, { db, api, onStep = () => {} }) {
   // Keep the "next invoice #" counter ahead of anything imported.
   const maxNum = Math.max(0, ...[...existingNumbers].filter((n) => /^\d+$/.test(String(n))).map(Number));
   if (maxNum >= (db.profile.next_invoice_number || 1)) await api.updateProfile({ next_invoice_number: maxNum + 1 });
-  return { created, skipped };
+  return { created, filled, skipped };
+}
+
+/** Puts a PDF's line details onto an invoice that came in from the Wave CSV. Payments and status stay as they are. */
+async function fillInvoice({ ex, t, discount }, inv, { db, api }) {
+  const keep = ['number', 'client_id', 'project_id', 'issue_date', 'due_date', 'terms', 'mode', 'jobs', 'deposit_percent', 'auto_remind'];
+  await api.rpc('save_invoice', {
+    inv: { id: ex.id, ...Object.fromEntries(keep.map((k) => [k, ex[k]])), notes: ex.notes || inv.notes || null, discount_type: 'amount', discount_value: discount, ...t },
+    lines: inv.lines,
+    summary: 'Line details added from Wave PDF',
+  });
+  // Fill in the client's email/address if Wave's PDF has them and Wrap doesn't.
+  const client = db.clients.find((c) => c.id === ex.client_id);
+  if (client) {
+    const patch = {};
+    if (!client.email && inv.clientEmail) patch.email = inv.clientEmail;
+    if (!client.address && inv.clientAddress) patch.address = inv.clientAddress;
+    if (Object.keys(patch).length) Object.assign(client, await api.update('clients', client.id, patch));
+  }
 }
 
 /** Adds expenses (no receipt image) — e.g. from Wave — skipping ones that are already in Wrap. */
