@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useStore } from '../store.jsx';
 import { Button, Icon, Pill, Empty } from '../components/ui.jsx';
 import { ForecastChart, MonthBars, MONTHS } from '../components/charts.jsx';
-import { forecastYear } from '../lib/forecast.js';
+import { forecastYear, forecastExpenses } from '../lib/forecast.js';
 import { statusOf, dueText } from '../lib/calc.js';
 import { money, moneyK, num, todayISO, plural } from '../lib/format.js';
 import { go } from '../router.js';
@@ -25,6 +25,7 @@ export default function Overview() {
     const owed = Object.entries(byClient).map(([id, v]) => ({ name: derived.clients[id]?.name || 'No client', id, v })).sort((a, b) => b.v - a.v);
     // last 12 months income (payments) vs expenses (receipts)
     const labels = [];
+    const years = [];
     const billed = [];
     const exp = [];
     const sent = db.invoices.filter((i) => i.kind === 'invoice' && !['draft', 'void'].includes(i.status));
@@ -33,6 +34,7 @@ export default function Overview() {
       const m = new Date(d.getFullYear(), d.getMonth() - k, 1);
       const key = `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}`;
       labels.push(MONTHS[m.getMonth()]);
+      years.push(m.getFullYear());
       billed.push(sent.filter((i) => i.issue_date?.startsWith(key)).reduce((s, i) => s + num(i.total), 0));
       exp.push(
         db.receipts.filter((r) => r.receipt_date?.startsWith(key)).reduce((s, r) => s + num(r.total), 0)
@@ -41,7 +43,7 @@ export default function Overview() {
     }
     const drafts = db.invoices.filter((i) => i.kind === 'invoice' && i.status === 'draft');
     const accepted = db.invoices.filter((i) => i.kind === 'quote' && i.status === 'accepted');
-    return { open, overdue, paidYtd, expYtd, owed, labels, billed, exp, drafts, accepted, f: forecastYear(db.invoices, today) };
+    return { open, overdue, paidYtd, expYtd, owed, labels, years, billed, exp, drafts, accepted, f: forecastYear(db.invoices, today), fx: forecastExpenses(db.receipts, db.crew_payouts, today) };
   }, [db, derived, today, year]);
 
   const outstanding = data.open.reduce((s, i) => s + i.due, 0);
@@ -75,35 +77,50 @@ export default function Overview() {
         <Kpi label={`Expenses in ${year}`} value={money(data.expYtd, { cents: false })} sub={review.length ? `${review.length} receipts to review` : 'From your receipts'} onClick={() => go('/expenses')} />
       </div>
 
-      <section className="card card-pad" style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'center' }}>
-        <div className="col" style={{ flex: '1 1 230px', gap: 10 }}>
-          <div className="row"><Icon name="reports" style={{ color: 'var(--accent)' }} /><h2>{year} year-end forecast</h2></div>
-          {data.f.enough ? (
-            <>
-              <span className="num" style={{ fontSize: 34, fontWeight: 500, letterSpacing: '-0.02em' }}>{moneyK(data.f.mid)}</span>
-              <span style={{ color: 'var(--ink-2)' }}>Likely range <span className="num">{moneyK(data.f.low)} – {moneyK(data.f.high)}</span></span>
-              <div className="row wrap">
-                {data.f.growthPct != null && <Pill kind={data.f.growthPct >= 0 ? 'good' : 'overdue'}>{data.f.growthPct >= 0 ? '▲' : '▼'} {Math.abs(Math.round(data.f.growthPct))}% vs {year - 1}</Pill>}
-                <Pill kind="draft">{moneyK(data.f.ytd)} billed so far</Pill>
-              </div>
-              <p className="small muted" style={{ lineHeight: 1.5 }}>
-                {data.f.method === 'seasonal'
-                  ? `Uses ${year - 1}'s month-by-month pattern, scaled by how this year compares so far. Counts invoices you've sent (by invoice date).`
-                  : 'Based on your average monthly billing. Once you have a full year of history (or import it), the forecast also learns your busy and slow months.'}
-              </p>
-            </>
-          ) : (
-            <p className="muted" style={{ lineHeight: 1.5 }}>Not enough history yet. After about 3 months of invoices — or once you import past invoices in Settings → Data — you'll see where the year is heading.</p>
-          )}
+      <section className="card card-pad col forecast" style={{ gap: 20 }}>
+        <div className="row between wrap" style={{ gap: 10 }}>
+          <div className="row" style={{ gap: 8 }}><Icon name="reports" style={{ color: 'var(--accent)' }} /><h2>{year} year-end forecast</h2></div>
+          {data.f.enough && data.f.growthPct != null && <Pill kind={data.f.growthPct >= 0 ? 'good' : 'overdue'}>{data.f.growthPct >= 0 ? '▲' : '▼'} {Math.abs(Math.round(data.f.growthPct))}% income vs {year - 1}</Pill>}
         </div>
-        {data.f.enough && <div style={{ flex: '2 1 380px', minWidth: 0 }}><ForecastChart f={data.f} /></div>}
+        {data.f.enough ? (
+          <>
+            <div className="forecast-stats">
+              <div className="forecast-stat">
+                <span className="label">Income</span>
+                <span className="value num">{moneyK(data.f.mid)}</span>
+                <span className="sub">Likely <span className="num">{moneyK(data.f.low)}–{moneyK(data.f.high)}</span></span>
+                <span className="sub"><span className="num">{moneyK(data.f.ytd)}</span> invoiced so far</span>
+              </div>
+              <div className="forecast-stat">
+                <span className="label">Expenses</span>
+                <span className="value num">{moneyK(data.fx.mid)}</span>
+                <span className="sub">About <span className="num">{moneyK(data.fx.perMonth)}</span> a month</span>
+                <span className="sub"><span className="num">{moneyK(data.fx.ytd)}</span> spent so far</span>
+              </div>
+              <div className="forecast-stat net">
+                <span className="label">Net income</span>
+                <span className="value num" style={{ color: data.f.mid - data.fx.mid < 0 ? 'var(--bad)' : 'var(--ink)' }}>{moneyK(data.f.mid - data.fx.mid)}</span>
+                <span className="sub">Income − expenses</span>
+                <span className="sub"><span className="num">{moneyK(data.f.ytd - data.fx.ytd)}</span> so far{data.f.mid > 0 ? ` · keep ${Math.round(((data.f.mid - data.fx.mid) / data.f.mid) * 100)}%` : ''}</span>
+              </div>
+            </div>
+            <ForecastChart f={data.f} />
+            <p className="small muted" style={{ lineHeight: 1.5, margin: 0 }}>
+              {data.f.method === 'seasonal'
+                ? `Income follows ${year - 1}'s month-by-month pattern, scaled by how ${year} compares so far (by invoice date). Expenses use your average month.`
+                : 'Income uses your average monthly billing; once you have a full year of history it also learns your busy and slow months. Expenses use your average month.'}
+            </p>
+          </>
+        ) : (
+          <p className="muted" style={{ lineHeight: 1.5 }}>Not enough history yet. After about 3 months of invoices — or once you import past invoices in Settings → Data — you'll see where the year is heading.</p>
+        )}
       </section>
 
       <div className="grid-2">
         <section className="card" style={{ gridColumn: '1 / -1' }}>
           <div className="card-head"><div><h2>Money in vs. out</h2><p className="small muted">Last 12 months · invoiced (by invoice date) vs. expenses</p></div></div>
           <div style={{ padding: '0 20px 20px' }}>
-            <MonthBars labels={data.labels} series={[{ name: 'Invoiced', color: 'var(--accent)', values: data.billed }, { name: 'Expenses', color: 'var(--expense)', values: data.exp }]} />
+            <MonthBars labels={data.labels} years={data.years} currentIndex={11} series={[{ name: 'Invoiced', color: 'var(--accent)', values: data.billed }, { name: 'Expenses', color: 'var(--expense)', values: data.exp }]} />
           </div>
         </section>
 
