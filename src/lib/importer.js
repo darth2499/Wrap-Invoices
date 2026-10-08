@@ -76,6 +76,31 @@ export function clientsFromCsv(rows, map) {
     .filter((c) => c.name && !/^n\/?a$/i.test(c.name.trim()));
 }
 
+/**
+ * Adds clients, skipping names already in Wrap (but filling in their missing email/phone/address/notes).
+ * Returns the full, updated client list so invoices imported next can link to them.
+ */
+export async function importClients(list, { db, api }) {
+  const byName = new Map(db.clients.map((c) => [norm(c.name), c]));
+  const seen = new Set();
+  const fresh = [];
+  let updated = 0;
+  for (const c of list) {
+    const k = norm(c.name);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    const ex = byName.get(k);
+    if (!ex) { fresh.push(c); continue; }
+    const patch = {};
+    for (const f of ['email', 'phone', 'address', 'notes']) if (!ex[f] && c[f]) patch[f] = c[f];
+    if (Object.keys(patch).length) { byName.set(k, await api.update('clients', ex.id, patch)); updated++; }
+  }
+  for (let i = 0; i < fresh.length; i += 200) {
+    for (const c of await api.insert('clients', fresh.slice(i, i + 200))) byName.set(norm(c.name), c);
+  }
+  return { created: fresh.length, updated, existing: seen.size - fresh.length, clients: [...byName.values()] };
+}
+
 /** Groups CSV rows into invoices (one row per invoice, or one row per line item). */
 export function invoicesFromCsv(rows, map, { assume = 'unpaid' } = {}) {
   const get = (r, k) => (map[k] ? r[map[k]] : '');

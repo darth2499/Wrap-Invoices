@@ -4,7 +4,10 @@
 //   Sales Discounts rows  → invoice discount (negative amounts)
 //   Accounts Receivable   → positive = invoice total, negative = a payment on that invoice
 //   Expense-group rows    → expenses (become receipts without an image)
+import JSZip from 'jszip';
 import { round2, addDays } from './format.js';
+import { parseCSV } from './files.js';
+import { guessColumn } from './importer.js';
 
 export function isWaveAccounting(headers) {
   const h = new Set(headers.map((x) => x.trim().toLowerCase()));
@@ -139,4 +142,44 @@ export function parseWaveAccounting(rows, { termsDays = 30 } = {}) {
     from,
     to,
   };
+}
+
+/** A customer list: has a name column plus some way to reach them, and isn't the accounting ledger. */
+export function isCustomerList(headers) {
+  const name = guessColumn(headers, ['customer name', 'customer_name', 'company name', 'name']);
+  const reach = guessColumn(headers, ['email', 'phone', 'address line 1', 'address_line_1', 'city']);
+  return !!name && !!reach && !isWaveAccounting(headers);
+}
+
+/**
+ * Takes what the person picked (Wave's .zip, or the CSVs themselves) and sorts out which file is which
+ * by looking at the columns, not the file names.
+ * @returns {{ accounting: {headers, rows}|null, customers: {headers, rows}|null, names: {accounting: string[], customers: string[]}, ignored: string[] }}
+ */
+export async function readWaveFiles(files) {
+  const csvs = [];
+  for (const f of files) {
+    if (/\.zip$/i.test(f.name) || /zip/.test(f.type)) {
+      const zip = await JSZip.loadAsync(f);
+      for (const e of Object.values(zip.files)) {
+        if (e.dir || e.name.includes('__MACOSX') || !/\.csv$/i.test(e.name)) continue;
+        csvs.push({ name: e.name.split('/').pop(), text: await e.async('string') });
+      }
+    } else if (/\.csv$/i.test(f.name)) {
+      csvs.push({ name: f.name, text: await f.text() });
+    }
+  }
+  const out = { accounting: null, customers: null, names: { accounting: [], customers: [] }, ignored: [] };
+  const add = (kind, name, csv) => {
+    out.names[kind].push(name);
+    if (!out[kind]) out[kind] = { headers: csv.headers, rows: [...csv.rows] };
+    else out[kind].rows.push(...csv.rows); // e.g. one accounting export per year
+  };
+  for (const c of csvs) {
+    const csv = parseCSV(c.text);
+    if (isWaveAccounting(csv.headers)) add('accounting', c.name, csv);
+    else if (isCustomerList(csv.headers)) add('customers', c.name, csv);
+    else out.ignored.push(c.name);
+  }
+  return out;
 }

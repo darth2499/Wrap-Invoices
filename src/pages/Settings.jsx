@@ -4,8 +4,8 @@ import { Button, Empty, Field, Icon, Modal, MoneyInput, Seg, Switch } from '../c
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import { exportBackup, readBackup, restoreBackup } from '../lib/backup.js';
 import { parseCSV, downloadBlob, pickFiles } from '../lib/files.js';
-import { CLIENT_FIELDS, INVOICE_FIELDS, autoMap, clientsFromCsv, invoicesFromCsv, importInvoices, importExpenses, invoiceFromPdf } from '../lib/importer.js';
-import { isWaveAccounting, parseWaveAccounting } from '../lib/wave.js';
+import { CLIENT_FIELDS, INVOICE_FIELDS, autoMap, clientsFromCsv, invoicesFromCsv, importInvoices, importExpenses, importClients, invoiceFromPdf } from '../lib/importer.js';
+import { isWaveAccounting, parseWaveAccounting, readWaveFiles } from '../lib/wave.js';
 import { money, num, todayISO, addDays, plural } from '../lib/format.js';
 import { DEMO } from '../config.js';
 import { resetDemo } from '../api/demo.js';
@@ -356,6 +356,7 @@ function Data() {
   const [step, setStep] = useState('');
   const [restore, setRestore] = useState(null);
   const [imp, setImp] = useState(null);
+  const [wave, setWave] = useState(null);
   const counts = { invoices: s.db.invoices.length, receipts: s.db.receipts.length, clients: s.db.clients.length };
   const backup = async () => {
     setStep('Preparing…');
@@ -393,10 +394,12 @@ function Data() {
         <h2>Import from Wave or another app</h2>
         <p className="muted" style={{ lineHeight: 1.6 }}>Bring in your clients and past invoices so reports and the year-end forecast have history.</p>
         <div className="row wrap">
+          <Button variant="primary" icon="upload" onClick={async () => { const files = await pickFiles({ accept: '.zip,.csv,application/zip,text/csv', multiple: true }); if (files.length) setWave(files); }}>Wave export (.zip)</Button>
           <Button icon="clients" onClick={async () => { const [f] = await pickFiles({ accept: '.csv,text/csv' }); if (f) setImp({ type: 'clients', csv: parseCSV(await f.text()) }); }}>Clients from CSV</Button>
           <Button icon="invoice" onClick={async () => { const [f] = await pickFiles({ accept: '.csv,text/csv' }); if (f) setImp({ type: 'invoices', csv: parseCSV(await f.text()) }); }}>Invoices from CSV</Button>
           <Button icon="sparkle" onClick={async () => { const files = await pickFiles({ accept: 'application/pdf', multiple: true }); if (files.length) setImp({ type: 'pdfs', files }); }}>Wave invoice PDFs</Button>
         </div>
+        <p className="small muted"><b>Easiest:</b> pick the .zip from Wave (or select its CSV files together). Wrap figures out which file is which and imports customers first, then invoices, payments and expenses. Safe to run again: anything already in Wrap is skipped.</p>
         <p className="small muted">In Wave: Sales &amp; Payments → Customers → Export for clients. For invoices, download each invoice as PDF (Wrap reads them, including line items and payments) or export a CSV.</p>
       </section>
       {DEMO && (
@@ -409,6 +412,7 @@ function Data() {
       <ResetSection onBackup={backup} backupBusy={!!step} />
       {restore && <RestoreModal backup={restore} onClose={() => setRestore(null)} />}
       {imp && <ImportModal imp={imp} onClose={() => setImp(null)} />}
+      {wave && <WaveModal files={wave} onClose={() => setWave(null)} />}
     </>
   );
 }
@@ -428,7 +432,7 @@ function ResetSection({ onBackup, backupBusy }) {
   const start = async () => {
     const ok = await s.confirm({
       title: 'Delete all your data?',
-      body: 'Every invoice, quote, client, receipt, expense, payment and report in this account will be deleted. This can\u2019t be undone.',
+      body: 'Every invoice, quote, client, receipt, expense, payment and report in this account will be deleted. This can’t be undone.',
       ok: 'Yes, continue',
       danger: true,
     });
@@ -443,7 +447,7 @@ function ResetSection({ onBackup, backupBusy }) {
         <Switch checked={unlocked} onChange={setUnlocked} label="Unlock reset" />
         <span>{unlocked ? 'Reset unlocked' : 'Turn on to unlock reset'}</span>
       </label>
-      <Button className="danger" icon="trash" disabled={!unlocked} style={{ alignSelf: 'flex-start', opacity: unlocked ? 1 : 0.45 }} onClick={start}>{'Reset account\u2026'}</Button>
+      <Button className="danger" icon="trash" disabled={!unlocked} style={{ alignSelf: 'flex-start', opacity: unlocked ? 1 : 0.45 }} onClick={start}>{'Reset account…'}</Button>
       {open && <ResetModal onBackup={onBackup} backupBusy={backupBusy} onClose={() => { setOpen(false); setUnlocked(false); }} />}
     </section>
   );
@@ -461,7 +465,7 @@ function ResetModal({ onBackup, backupBusy, onClose }) {
     try {
       const keys = s.db.receipts.flatMap((r) => [r.file_key, r.original_key]).filter(Boolean);
       if (settingsToo && s.db.profile.logo_key) keys.push(s.db.profile.logo_key);
-      setStep('Deleting data\u2026');
+      setStep('Deleting data…');
       await s.api.rpc('wipe_my_data', {});
       for (let i = 0; i < keys.length; i += 200) {
         setStep(`Deleting files ${Math.min(i + 200, keys.length)} / ${keys.length}`);
@@ -469,7 +473,7 @@ function ResetModal({ onBackup, backupBusy, onClose }) {
       }
       await s.api.updateProfile({ next_invoice_number: 1, next_quote_number: 1, ...(settingsToo ? SETTINGS_DEFAULTS : {}) });
       await s.reload();
-      s.toast('Account reset \u2014 starting fresh');
+      s.toast('Account reset — starting fresh');
       onClose();
       go('/');
     } catch (e) {
@@ -572,10 +576,8 @@ function ImportModal({ imp, onClose }) {
     setStep('Importing…');
     try {
       if (imp.type === 'clients') {
-        const existing = new Set(s.db.clients.map((c) => c.name.toLowerCase()));
-        const fresh = preview.filter((c) => !existing.has(c.name.toLowerCase()));
-        for (let i = 0; i < fresh.length; i += 200) await s.api.insert('clients', fresh.slice(i, i + 200));
-        s.toast(`${fresh.length} clients added${preview.length - fresh.length ? `, ${preview.length - fresh.length} already existed` : ''}`);
+        const r = await importClients(preview, { db: s.db, api: s.api });
+        s.toast(`${r.created} clients added${r.existing ? `, ${r.existing} already existed${r.updated ? ` (${r.updated} filled in)` : ''}` : ''}`);
       } else {
         const parts = [];
         if (!wave || withInvoices) {
@@ -644,6 +646,106 @@ function ImportModal({ imp, onClose }) {
         </div>
       )}
       {(!wave || withInvoices) && <span className="small muted">{preview.length} found{preview.length > 100 ? ' (showing 100; unpaid first)' : ''}</span>}
+    </Modal>
+  );
+}
+
+function WaveRow({ enabled, checked, disabled, onChange, title, file, children }) {
+  return (
+    <label className="row" style={{ gap: 12, alignItems: 'flex-start', padding: '12px 0', borderTop: '1px solid var(--line)', cursor: enabled ? 'pointer' : 'default', opacity: enabled ? 1 : 0.5 }}>
+      <input type="checkbox" style={{ marginTop: 3 }} disabled={disabled} checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="col" style={{ gap: 3 }}>
+        <b>{title}</b>
+        <span className="small muted" style={{ lineHeight: 1.5 }}>{children}</span>
+        {file && <span className="small muted">From {file}</span>}
+      </span>
+    </label>
+  );
+}
+
+/** One-step Wave import: the .zip (or its CSVs). Customers first, then invoices + payments, then expenses. */
+function WaveModal({ files, onClose }) {
+  const s = useStore();
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  const [terms, setTerms] = useState(30);
+  const [want, setWant] = useState({ clients: true, invoices: true, expenses: true });
+  const [step, setStep] = useState('');
+  useEffect(() => { readWaveFiles(files).then(setData, (e) => setErr(e.message)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const clients = data?.customers ? clientsFromCsv(data.customers.rows, autoMap(data.customers.headers, CLIENT_FIELDS)) : [];
+  const known = new Set(s.db.clients.map((c) => c.name.trim().toLowerCase()));
+  const newClients = clients.filter((c) => !known.has(c.name.trim().toLowerCase())).length;
+  const w = data?.accounting ? parseWaveAccounting(data.accounting.rows, { termsDays: Number(terms) || 30 }) : null;
+  const existingNums = new Set(s.db.invoices.filter((i) => i.kind === 'invoice').map((i) => String(i.number)));
+  const newInvoices = w ? w.invoices.filter((i) => !existingNums.has(String(i.number))) : [];
+  const unpaid = newInvoices.filter((i) => i.amountDue > 0.009);
+  const has = { clients: clients.length > 0, invoices: !!w?.invoices.length, expenses: !!w?.expenses.length };
+  const on = (k) => has[k] && want[k];
+  const nothing = !on('clients') && !on('invoices') && !on('expenses');
+
+  const run = async () => {
+    const parts = [];
+    try {
+      let db = s.db;
+      if (on('clients')) {
+        setStep('Adding customers…');
+        const r = await importClients(clients, { db, api: s.api });
+        db = { ...db, clients: r.clients };
+        parts.push(`${r.created} customers added${r.updated ? ` (${r.updated} existing filled in)` : ''}`);
+      }
+      if (on('invoices')) {
+        const r = await importInvoices(w.invoices, { db, api: s.api, onStep: setStep });
+        parts.push(`${r.created} invoices imported${r.skipped.length ? ` (${r.skipped.length} already in Wrap)` : ''}`);
+      }
+      if (on('expenses')) {
+        const r = await importExpenses(w.expenses, { db, api: s.api, onStep: setStep });
+        parts.push(`${r.created} expenses added${r.skipped ? ` (${r.skipped} already there)` : ''}`);
+      }
+      s.toast(parts.join(' · '), { ms: 10000 });
+      await s.load();
+      onClose();
+    } catch (e) {
+      s.toast(`${parts.length ? `${parts.join(' · ')}, then stopped: ` : ''}${e.message}`, { error: true, ms: 12000 });
+      await s.load().catch(() => {});
+      setStep('');
+    }
+  };
+
+  const rowProps = (k) => ({ enabled: has[k], checked: on(k), disabled: !has[k] || !!step, onChange: (v) => setWant({ ...want, [k]: v }) });
+
+  return (
+    <Modal wide title="Import from Wave" onClose={step ? null : onClose} footer={<><Button onClick={onClose} disabled={!!step}>Cancel</Button><Button variant="primary" busy={!!step} disabled={!data || nothing} onClick={run}>{step || 'Import'}</Button></>}>
+      {err && <div className="banner bad">{err}</div>}
+      {!data && !err && <span className="row muted"><span className="spinner" />Reading files…</span>}
+      {data && (
+        <div className="col" style={{ gap: 0 }}>
+          {!data.customers && !data.accounting && <div className="banner bad">No Wave files found. Pick the .zip from Wave, or its accounting and customers CSV files.</div>}
+          <p className="small muted" style={{ marginBottom: 6 }}>Runs in this order so every invoice links to the right customer. Anything already in Wrap is skipped.</p>
+          <WaveRow {...rowProps('clients')} title={`1. Customers${has.clients ? ` (${clients.length})` : ''}`} file={data.names.customers.join(', ')}>
+            {has.clients
+              ? <>{newClients} new{clients.length - newClients ? `, ${clients.length - newClients} already in Wrap (missing email, phone or address gets filled in)` : ''}. Contact names go in each client’s notes.</>
+              : <>No customers file found. Clients will still be created from the names on invoices, just without email or address.</>}
+          </WaveRow>
+          <WaveRow {...rowProps('invoices')} title={`2. Invoices & payments${has.invoices ? ` (${w.invoices.length})` : ''}`} file={data.names.accounting.join(', ')}>
+            {has.invoices
+              ? <>{newInvoices.length} new{w.invoices.length - newInvoices.length ? `, ${w.invoices.length - newInvoices.length} already in Wrap` : ''}. Payments are matched to each invoice, so only <b>{unpaid.length} unpaid ({money(unpaid.reduce((t, i) => t + i.amountDue, 0))})</b> will show as owed. Due date = invoice date + <input className="input num" style={{ width: 52, height: 26, minHeight: 0, padding: '0 6px', display: 'inline-block', verticalAlign: 'middle' }} value={terms} onChange={(e) => setTerms(e.target.value)} aria-label="Payment terms in days" /> days.</>
+              : <>No accounting file found.</>}
+          </WaveRow>
+          <WaveRow {...rowProps('expenses')} title={`3. Expenses${has.expenses ? ` (${w.expenses.length})` : ''}`}>
+            {has.expenses ? <>Added as receipts without images, sorted into Schedule C categories.</> : <>None found.</>}
+          </WaveRow>
+          {unpaid.length > 0 && on('invoices') && (
+            <div className="table-wrap" style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 12 }}>
+              <table className="table"><tbody>
+                {unpaid.map((r) => <tr key={r.number}><td>#{r.number}</td><td>{r.client}</td><td className="muted">{r.date}</td><td className="right num" style={{ color: 'var(--bad)' }}>{money(r.amountDue)} due</td></tr>)}
+              </tbody></table>
+            </div>
+          )}
+          {data.ignored.length > 0 && <p className="small muted" style={{ marginTop: 10 }}>Skipped (not needed): {data.ignored.join(', ')}</p>}
+          <p className="small muted" style={{ marginTop: 10 }}>Wave’s export has no line descriptions like “Felicis (04/06)”, so lines come in as item + amount. Import your unpaid invoices’ PDFs first if you want those details kept.</p>
+        </div>
+      )}
     </Modal>
   );
 }
