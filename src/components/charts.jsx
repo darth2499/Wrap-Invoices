@@ -1,5 +1,5 @@
 // Small, dependency-free charts.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { money, moneyK } from '../lib/format.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -10,7 +10,15 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
  * right under it; hover or tap a month to see its numbers and the difference (net).
  * labels: ['Nov', …]; years (optional): [2025, …] shown under January and the first month.
  */
-export function MonthBars({ labels, years, series, height = 200, currentIndex = null }) {
+export function MonthBars({ labels: allLabels, years: allYears, series: allSeries, height = 200, currentIndex: cur = null }) {
+  // Phones: the chart is wider than the screen and slides sideways (starts on the latest months).
+  const narrow = useNarrow(560);
+  const scroller = useRef(null);
+  useEffect(() => { if (narrow && scroller.current) scroller.current.scrollLeft = scroller.current.scrollWidth; }, [narrow]);
+  const labels = allLabels;
+  const years = allYears;
+  const series = allSeries;
+  const currentIndex = cur;
   // Shown until you hover a month: this month, or else the latest month with numbers.
   const latest = labels.map((_, i) => i).filter((i) => series.some((x) => x.values[i] > 0)).pop() ?? labels.length - 1;
   const [sel, setSel] = useState(null);
@@ -40,15 +48,17 @@ export function MonthBars({ labels, years, series, height = 200, currentIndex = 
             </span>
           </span>
         </div>
-        <span className="small muted">Hover or tap a month</span>
+        <span className="small muted">{narrow ? 'Slide for more · tap a month' : 'Hover or tap a month'}</span>
       </div>
-      <div className="mb-plot" style={{ height }} onMouseLeave={() => setSel(null)}>
-        <div className="mb-axis">
+      <div className="mb-plot" onMouseLeave={() => setSel(null)}>
+        <div className="mb-axis" style={{ height }}>
           {ticks.map((t) => <span key={t} className="num" style={{ bottom: `${(t / top) * 100}%` }}>{moneyK(t)}</span>)}
         </div>
-        <div className="mb-area">
+        <div className="mb-scroll" ref={scroller}>
+        <div style={{ width: narrow ? labels.length * 58 : '100%' }}>
+        <div className="mb-area" style={{ height }}>
           {ticks.map((t) => <div key={t} className="mb-grid" style={{ bottom: `${(t / top) * 100}%`, borderColor: t === 0 ? 'var(--field)' : undefined }} />)}
-          <div className="mb-cols">
+          <div className="mb-cols" style={{ gridTemplateColumns: `repeat(${labels.length}, minmax(0, 1fr))` }}>
             {labels.map((l, i) => (
               <button type="button" key={`${l}${i}`} className={`mb-col ${i === active ? 'on' : ''}`} onMouseEnter={() => setSel(i)} onFocus={() => setSel(i)} onClick={() => setSel(i)}
                 aria-label={`${l}${years ? ` ${years[i]}` : ''}: ${series.map((x) => `${x.name} ${money(x.values[i], { cents: false })}`).join(', ')}`}>
@@ -59,14 +69,16 @@ export function MonthBars({ labels, years, series, height = 200, currentIndex = 
             ))}
           </div>
         </div>
-      </div>
-      <div className="mb-labels">
-        {labels.map((l, i) => (
-          <span key={`${l}${i}`} className={i === active ? 'on' : ''}>
-            {l}
-            {years && (i === 0 || l === 'Jan') && <em>{years[i]}</em>}
-          </span>
-        ))}
+        <div className="mb-labels" style={{ gridTemplateColumns: `repeat(${labels.length}, minmax(0, 1fr))` }}>
+          {labels.map((l, i) => (
+            <span key={`${l}${i}`} className={i === active ? 'on' : ''}>
+              {l}
+              {years && (i === 0 || l === 'Jan') && <em>{years[i]}</em>}
+            </span>
+          ))}
+        </div>
+        </div>
+        </div>
       </div>
     </div>
   );
@@ -135,3 +147,16 @@ export function ForecastChart({ f, height = 140 }) {
 }
 
 export { MONTHS };
+
+/** True when the screen is narrower than `px` (updates on resize/rotate). */
+function useNarrow(px) {
+  const q = `(max-width: ${px}px)`;
+  const [m, setM] = useState(() => typeof window !== 'undefined' && window.matchMedia(q).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(q);
+    const on = () => setM(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, [q]);
+  return m;
+}
