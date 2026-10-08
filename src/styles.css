@@ -265,15 +265,43 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
   .seg::-webkit-scrollbar { display: none; }
   .seg .tab { flex: none; white-space: nowrap; }
 }
-/* ---------- invoice list as cards on phones ---------- */
-.inv-cards { display: none; }
+/* ---------- lists become cards on phones (no sideways scrolling) ---------- */
+.m-list { display: none; }
 @media (max-width: 700px) {
-  .inv-table { display: none; }
-  .inv-cards { display: flex; flex-direction: column; }
-  .inv-card { all: unset; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 13px 16px; border-bottom: 1px solid var(--line-2); cursor: pointer; width: 100%; }
-  .inv-card:last-child { border-bottom: 0; }
-  .inv-card .who { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .inv-card .meta { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .inv-card .amt { text-align: right; font-weight: 600; }
-  .inv-card .st { justify-self: end; }
+  .d-only { display: none !important; }
+  .m-list { display: flex; flex-direction: column; }
+  .m-card { all: unset; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px; align-items: center; padding: 13px 16px; border-bottom: 1px solid var(--line-2); cursor: pointer; width: 100%; }
+  .m-card:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .m-card-thumb { grid-template-columns: 40px minmax(0, 1fr) auto; }
+  .m-card-thumb .thumb { grid-row: 1 / span 2; }
+  .m-card .who { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .m-card .meta { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .m-card .amt { text-align: right; font-weight: 600; }
+  .m-card .st { justify-self: end; }
+}
+/* ---------- labeled qty/price cells (labels only show on phones) ---------- */
+.m-field { display: block; min-width: 0; }
+.m-lbl { display: none; }
+/* ---------- phones: same-height controls, no zoom-on-tap, tidy button rows ---------- */
+@media (max-width: 700px) {
+  .input, select.input { min-height: 44px; font-size: 16px; }
+  select.input { -webkit-appearance: none; appearance: none; padding-right: 34px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235f6168' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; }
+  input[type='date'].input { -webkit-appearance: none; appearance: none; display: flex; align-items: center; }
+  textarea.input { font-size: 16px; }
+  .btn { min-height: 44px; }
+  .btn.sm { min-height: 38px; }
+  .btn.icon { width: 44px; min-height: 44px; }
+  .card .row.wrap > .btn { flex: 1 1 140px; }
+  .field > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .m-lbl { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .basic-line .c-amt { padding-top: 0 !important; align-self: center; }
+  /* tabs: full-width strip that scrolls, with fades where more tabs are hidden */
+  .seg { width: 100%; min-width: 0; }
+  .seg.more-right { -webkit-mask-image: linear-gradient(to right, #000 78%, transparent); mask-image: linear-gradient(to right, #000 78%, transparent); }
+  .seg.more-left { -webkit-mask-image: linear-gradient(to left, #000 78%, transparent); mask-image: linear-gradient(to left, #000 78%, transparent); }
+  .seg.more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 18%, #000 82%, transparent); mask-image: linear-gradient(to right, transparent, #000 18%, #000 82%, transparent); }
+  .page-head { flex-wrap: wrap; gap: 12px; }
+  .row.wrap > .row.wrap { min-width: 0; flex: 1 1 100%; }
+  .input.search { flex: 1 1 160px; width: auto !important; }
+  .search-wrap { flex: 1 1 100% !important; }
 }

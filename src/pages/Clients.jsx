@@ -41,7 +41,7 @@ function ClientList() {
       <div className="page-head">
         <h1>Clients</h1>
         <div className="row wrap">
-          <input className="input" style={{ width: 220 }} placeholder="Search clients" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search clients" />
+          <input className="input search" style={{ width: 220 }} placeholder="Search clients" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search clients" />
           <Button variant="primary" icon="plus" onClick={() => setEdit({})}>New client</Button>
         </div>
       </div>

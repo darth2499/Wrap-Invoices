@@ -96,7 +96,7 @@ function Business() {
           <Field label="Email on invoices"><input className="input" type="email" value={f.business_email} onChange={(e) => setF({ ...f, business_email: e.target.value })} /></Field>
           <Field label="Phone"><input className="input" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
         </div>
-        <Field label="Website" hint="(optional)"><input className="input" value={f.website} onChange={(e) => setF({ ...f, website: e.target.value })} placeholder="asahina.me" /></Field>
+        <Field label="Website" hint="(optional)"><input className="input" value={f.website} onChange={(e) => setF({ ...f, website: e.target.value })} placeholder="yourwebsite.com" /></Field>
         <Field label="Address"><textarea className="input" rows={3} value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} /></Field>
         <Button variant="primary" busy={busy} disabled={!dirty} onClick={() => save()} style={{ alignSelf: 'flex-start' }}>Save</Button>
       </section>
@@ -409,11 +409,53 @@ function Data() {
           <Button className="danger" style={{ alignSelf: 'flex-start' }} onClick={async () => { if (await s.confirm({ title: 'Reset demo data?', body: 'Puts the sample data back.', ok: 'Reset', danger: true })) { resetDemo(); window.location.reload(); } }}>Reset demo data</Button>
         </section>
       )}
+      <StorageCard />
       <ResetSection onBackup={backup} backupBusy={!!step} />
       {restore && <RestoreModal backup={restore} onClose={() => setRestore(null)} />}
       {imp && <ImportModal imp={imp} onClose={() => setImp(null)} />}
       {wave && <WaveModal files={wave} onClose={() => setWave(null)} />}
     </>
+  );
+}
+
+/** How much of Cloudflare's free 10 GB is used. Uploads stop at the limit, so it never costs anything. */
+function StorageCard() {
+  const s = useStore();
+  const [u, setU] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const load = async (recount = false) => {
+    setBusy(true);
+    try { setU(await s.api.files.usage(recount)); setErr(''); } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const GB = 1024 ** 3;
+  const fmt = (n) => (n >= GB ? `${(n / GB).toFixed(2)} GB` : `${Math.max(0, n / 1024 ** 2).toFixed(n < 10 * 1024 ** 2 ? 1 : 0)} MB`);
+  const pct = u ? Math.min(100, (u.used / u.limit) * 100) : 0;
+  const color = pct >= 90 ? 'var(--bad)' : pct >= 75 ? 'var(--warn, #b7791f)' : 'var(--accent)';
+  const admin = s.db.profile.is_admin;
+  return (
+    <section className="card card-pad col" style={{ gap: 12 }}>
+      <div className="row between wrap" style={{ gap: 8 }}>
+        <h2>Receipt storage</h2>
+        {admin && <Button size="sm" variant="ghost" busy={busy} onClick={() => load(true)}>Recount</Button>}
+      </div>
+      {err && <div className="banner bad">{err}</div>}
+      {!u && !err && <span className="row muted"><span className="spinner" />Checking…</span>}
+      {u && (
+        <>
+          <div style={{ height: 10, borderRadius: 5, background: 'var(--hover)', overflow: 'hidden' }} role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label="Storage used">
+            <div style={{ width: `${Math.max(pct, 0.5)}%`, height: '100%', background: color }} />
+          </div>
+          <span className="row between wrap small" style={{ gap: 8 }}>
+            <span><b className="num">{fmt(u.used)}</b> of {fmt(u.limit)} used ({pct.toFixed(pct < 1 ? 2 : 0)}%){admin && u.mine !== u.used ? ` · yours: ${fmt(u.mine)}` : ''}</span>
+            <span className="muted">{fmt(Math.max(0, u.limit - u.used))} left</span>
+          </span>
+          <p className="small muted" style={{ lineHeight: 1.6 }}>Cloudflare is free up to 10 GB. Wrap stops uploads at {fmt(u.limit)}, so you’re never charged: when it’s full, new receipts can’t be added until you delete old receipt images. Shared by everyone you’ve invited.</p>
+        </>
+      )}
+    </section>
   );
 }
 

@@ -360,8 +360,8 @@ function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup }) {
           <button type="button" className="btn link small" style={{ alignSelf: 'flex-start', fontSize: 12 }} onClick={() => upd(l.key, { showNote: true, note: l.note || '' })}>+ Add a note</button>
         )}
       </div>
-      <MoneyInput className="c-qty" value={l.qty} onChange={(v) => upd(l.key, { qty: v })} aria-label="Quantity" />
-      <MoneyInput className="c-price" value={l.rate} onChange={(v) => upd(l.key, { rate: v, base_rate: round2(v / (num(db.day_types.find((d) => d.name === l.day_type)?.multiplier) || 1)) })} aria-label="Price" />
+      <label className="c-qty m-field"><span className="m-lbl">Qty</span><MoneyInput value={l.qty} onChange={(v) => upd(l.key, { qty: v })} aria-label="Quantity" /></label>
+      <label className="c-price m-field"><span className="m-lbl">Price</span><MoneyInput value={l.rate} onChange={(v) => upd(l.key, { rate: v, base_rate: round2(v / (num(db.day_types.find((d) => d.name === l.day_type)?.multiplier) || 1)) })} aria-label="Price" /></label>
       {hasTax && (
         <select className="input c-tax" value={l.tax_rate || 0} onChange={(e) => upd(l.key, { tax_rate: Number(e.target.value) })} aria-label="Tax">
           <option value={0}>None</option>{db.tax_rates.map((t) => <option key={t.id} value={t.rate}>{t.name} {t.rate}%</option>)}

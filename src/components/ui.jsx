@@ -73,8 +73,25 @@ export function Pill({ kind, children }) {
 }
 
 export function Seg({ value, options, onChange, label }) {
+  // On phones the tabs scroll sideways; fades on the edges show there's more to swipe to.
+  const ref = useRef(null);
+  const [edges, setEdges] = useState('');
+  const check = () => {
+    const el = ref.current;
+    if (!el) return;
+    const l = el.scrollLeft > 2;
+    const r = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+    setEdges(`${l ? ' more-left' : ''}${r ? ' more-right' : ''}`);
+  };
+  useEffect(() => {
+    check();
+    const el = ref.current;
+    el?.querySelector('.tab.on')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, [value, options.length]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="seg" role="tablist" aria-label={label}>
+    <div ref={ref} onScroll={check} className={`seg${edges}`} role="tablist" aria-label={label}>
       {options.map((o) => {
         const v = typeof o === 'string' ? o : o.value;
         return (

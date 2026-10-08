@@ -148,7 +148,7 @@ function Receipts({ query }) {
         </div>
         <div className="row wrap">
           {highConf.length > 0 && filter === 'review' && <Button size="sm" icon="check" onClick={async () => { for (const r of highConf) await s.update('receipts', r.id, { status: 'confirmed' }); s.toast(`${highConf.length} confirmed`); }}>Confirm {highConf.length} sure ones</Button>}
-          <input className="input" style={{ width: 220 }} placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search receipts" />
+          <input className="input search" style={{ width: 220 }} placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search receipts" />
         </div>
       </div>
 
@@ -156,7 +156,20 @@ function Receipts({ query }) {
         {list.length === 0 ? (
           <Empty icon="receipt" title={db.receipts.length ? 'Nothing matches' : 'No receipts yet'}>{!db.receipts.length && 'Scan or drop your first receipt above.'}</Empty>
         ) : (
-          <div className="table-wrap">
+          <>
+          <div className="m-list">
+            {list.slice(0, 400).map((r) => (
+              <button type="button" key={r.id} className="m-card m-card-thumb" onClick={() => setOpen(r.id)}>
+                <span className="thumb">{urls[r.file_key] && r.mime !== 'application/pdf' ? <img src={urls[r.file_key]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : r.mime === 'application/pdf' ? 'PDF' : <Icon name="receipt" size={16} />}</span>
+                <span className="who">{r.vendor || 'Unknown vendor'}</span>
+                <span className="amt num">{r.total != null ? money(r.total) : '—'}</span>
+                <span className="meta">{fmtDate(r.receipt_date) || '—'} · {r.category || 'Uncategorized'}</span>
+                <span className="st">{r.status === 'review' ? <Pill kind="review">Check</Pill> : r.invoice_id ? <span className="pill sent">#{derived.invoices[r.invoice_id]?.number}</span> : null}</span>
+              </button>
+            ))}
+            <div className="row between small" style={{ padding: '10px 16px', borderTop: '1px solid var(--line)' }}><span className="muted">{plural(list.length, 'receipt')}</span><strong className="num">{money(total)}</strong></div>
+          </div>
+          <div className="table-wrap d-only">
             <table className="table" style={{ minWidth: 720 }}>
               <thead><tr><th style={{ width: 56 }} /><th>Vendor</th><th>Date</th><th>Category</th><th>Invoice</th><th className="right">Amount</th></tr></thead>
               <tbody>
@@ -174,6 +187,7 @@ function Receipts({ query }) {
               <tfoot><tr><td colSpan={5} className="small muted" style={{ borderTop: '1px solid var(--line)' }}>{plural(list.length, 'receipt')}</td><td className="right num" style={{ borderTop: '1px solid var(--line)', fontWeight: 600 }}>{money(total)}</td></tr></tfoot>
             </table>
           </div>
+          </>
         )}
       </section>
 
@@ -324,7 +338,18 @@ function Mileage() {
       </div>
       <section className="card">
         {trips.length === 0 ? <Empty icon="car" title="No trips logged">Log drives to shoots, gear pickups and client meetings. Commuting to a regular workplace doesn’t count.</Empty> : (
-          <div className="table-wrap">
+          <>
+          <div className="m-list">
+            {trips.map((t) => (
+              <button type="button" key={t.id} className="m-card" onClick={() => setEdit(t)}>
+                <span className="who">{[t.start_place, t.end_place].filter(Boolean).join(' → ') || 'Trip'}</span>
+                <span className="amt num">{miles(t)} mi</span>
+                <span className="meta">{fmtDate(t.trip_date)}{t.purpose ? ` · ${t.purpose}` : ''}{t.client_id ? ` · ${derived.clients[t.client_id]?.name}` : ''}</span>
+                <span className="st">{t.invoice_id ? <span className="pill sent">#{derived.invoices[t.invoice_id]?.number}</span> : t.billable ? <span className="pill partial">To bill</span> : null}</span>
+              </button>
+            ))}
+          </div>
+          <div className="table-wrap d-only">
             <table className="table" style={{ minWidth: 640 }}>
               <thead><tr><th>Date</th><th>Trip</th><th>Purpose</th><th>Billing</th><th className="right">Miles</th></tr></thead>
               <tbody>
@@ -340,6 +365,7 @@ function Mileage() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </section>
       {edit && <TripModal trip={edit} onClose={() => setEdit(null)} />}

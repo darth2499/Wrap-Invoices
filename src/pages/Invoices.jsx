@@ -58,7 +58,7 @@ export default function Invoices({ kind }) {
 
       <div className="row wrap between">
         <Seg value={filter} onChange={setFilter} label="Filter" options={filters.map((f) => ({ value: f.value, label: f.label, count: rows.filter(f.test).length }))} />
-        <div style={{ position: 'relative', flex: '0 1 300px', minWidth: 200 }}>
+        <div className="search-wrap" style={{ position: 'relative', flex: '0 1 300px', minWidth: 200 }}>
           <span style={{ position: 'absolute', left: 12, top: 12, color: 'var(--muted)' }}><Icon name="search" size={16} /></span>
           <input className="input" style={{ paddingLeft: 36 }} placeholder="Search client, number, project…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search" />
         </div>
@@ -71,9 +71,9 @@ export default function Invoices({ kind }) {
           </Empty>
         ) : (
           <>
-          <div className="inv-cards">
+          <div className="m-list">
             {shown.map((r) => (
-              <button type="button" key={r.id} className="inv-card" onClick={() => go(`/invoices/${r.id}`)}>
+              <button type="button" key={r.id} className="m-card" onClick={() => go(`/invoices/${r.id}`)}>
                 <span className="who">{r.client?.name || 'No client'}</span>
                 <span className="amt num">{money(isQuote || r.status === 'paid' || r.status === 'void' || r.status === 'draft' ? r.total : r.due)}</span>
                 <span className="meta">#{r.number} · {['sent'].includes(r.status) && !isQuote ? dueText(r, today) : fmtDate(r.issue_date)}{r.project?.name || r.notes ? ` · ${r.project?.name || r.notes}` : ''}</span>
@@ -82,7 +82,7 @@ export default function Invoices({ kind }) {
             ))}
             <div className="row between small" style={{ padding: '10px 16px', borderTop: '1px solid var(--line)' }}><span className="muted">{shown.length} shown</span><strong className="num">{money(sum)}</strong></div>
           </div>
-          <div className="table-wrap inv-table">
+          <div className="table-wrap d-only">
             <table className="table" style={{ minWidth: 720 }}>
               <thead>
                 <tr><th>Status</th><th>No.</th><th>Client · project</th><th>Date</th><th>{isQuote ? 'Valid until' : 'Due'}</th><th className="right">{isQuote || filter === 'paid' ? 'Total' : 'Amount due'}</th></tr>
