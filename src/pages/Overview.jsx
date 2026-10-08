@@ -77,39 +77,24 @@ export default function Overview() {
         <Kpi label={`Expenses in ${year}`} value={money(data.expYtd, { cents: false })} sub={review.length ? `${review.length} receipts to review` : 'From your receipts'} onClick={() => go('/expenses')} />
       </div>
 
-      <section className="card card-pad col forecast" style={{ gap: 20 }}>
-        <div className="row between wrap" style={{ gap: 10 }}>
-          <div className="row" style={{ gap: 8 }}><Icon name="reports" style={{ color: 'var(--accent)' }} /><h2>{year} year-end forecast</h2></div>
-          {data.f.enough && data.f.growthPct != null && <Pill kind={data.f.growthPct >= 0 ? 'good' : 'overdue'}>{data.f.growthPct >= 0 ? '▲' : '▼'} {Math.abs(Math.round(data.f.growthPct))}% income vs {year - 1}</Pill>}
+      <section className="card card-pad col forecast" style={{ gap: 14 }}>
+        <div className="row between" style={{ gap: 10, flexWrap: 'nowrap' }}>
+          <div className="row" style={{ gap: 8 }} title={data.f.enough ? `Projected: ${moneyK(data.f.mid)} income − ${moneyK(data.fx.mid)} expenses by Dec 31. ${data.f.method === 'seasonal' ? `Follows ${year - 1}'s monthly pattern, scaled to ${year} so far.` : 'Based on your average month.'}` : undefined}><Icon name="reports" style={{ color: 'var(--accent)' }} /><h2>{year} year-end forecast</h2></div>
+          {data.f.enough && data.f.growthPct != null && <Pill kind={data.f.growthPct >= 0 ? 'good' : 'overdue'}>{data.f.growthPct >= 0 ? '▲' : '▼'} {Math.abs(Math.round(data.f.growthPct))}%<span className="hide-sm">vs {year - 1}</span></Pill>}
         </div>
         {data.f.enough ? (
           <>
-            <div className="forecast-stats">
-              <div className="forecast-stat">
-                <span className="label">Income</span>
-                <span className="value num">{moneyK(data.f.mid)}</span>
-                <span className="sub">Likely <span className="num">{moneyK(data.f.low)}–{moneyK(data.f.high)}</span></span>
-                <span className="sub"><span className="num">{moneyK(data.f.ytd)}</span> invoiced so far</span>
+            <div className="forecast-body">
+              <div className="col" style={{ gap: 4, minWidth: 0 }}>
+                <ForecastHeadline net={data.f.mid - data.fx.mid} growth={data.f.growthPct} />
+                <div className="forecast-boxes">
+                  <div><span>Net so far</span><b className="num">{moneyK(data.f.ytd - data.fx.ytd)}</b></div>
+                  <div><span>Expenses so far</span><b className="num">{moneyK(data.fx.ytd)}</b></div>
+                  <div><span>Likely income range</span><b className="num">{moneyK(data.f.low)}–{moneyK(data.f.high)}</b></div>
+                </div>
               </div>
-              <div className="forecast-stat">
-                <span className="label">Expenses</span>
-                <span className="value num">{moneyK(data.fx.mid)}</span>
-                <span className="sub">About <span className="num">{moneyK(data.fx.perMonth)}</span> a month</span>
-                <span className="sub"><span className="num">{moneyK(data.fx.ytd)}</span> spent so far</span>
-              </div>
-              <div className="forecast-stat net">
-                <span className="label">Net income</span>
-                <span className="value num" style={{ color: data.f.mid - data.fx.mid < 0 ? 'var(--bad)' : 'var(--ink)' }}>{moneyK(data.f.mid - data.fx.mid)}</span>
-                <span className="sub">Income − expenses</span>
-                <span className="sub"><span className="num">{moneyK(data.f.ytd - data.fx.ytd)}</span> so far{data.f.mid > 0 ? ` · keep ${Math.round(((data.f.mid - data.fx.mid) / data.f.mid) * 100)}%` : ''}</span>
-              </div>
+              <ForecastChart f={data.f} />
             </div>
-            <ForecastChart f={data.f} />
-            <p className="small muted" style={{ lineHeight: 1.5, margin: 0 }}>
-              {data.f.method === 'seasonal'
-                ? `Income follows ${year - 1}'s month-by-month pattern, scaled by how ${year} compares so far (by invoice date). Expenses use your average month.`
-                : 'Income uses your average monthly billing; once you have a full year of history it also learns your busy and slow months. Expenses use your average month.'}
-            </p>
           </>
         ) : (
           <p className="muted" style={{ lineHeight: 1.5 }}>Not enough history yet. After about 3 months of invoices — or once you import past invoices in Settings → Data — you'll see where the year is heading.</p>
@@ -166,5 +151,26 @@ function Kpi({ label, value, sub, bad, onClick }) {
       <span className="v">{value}</span>
       <span className="small" style={{ color: bad ? 'var(--bad)' : 'var(--muted)' }}>{sub}</span>
     </button>
+  );
+}
+
+// Short, friendly lines about where the year is heading. Upbeat when it's better than last year,
+// plain when it's about the same or down. A different one shows each day.
+const HEADLINES = {
+  big: ['Big year! Heading for {amt} net', 'Crushing it: {amt} net by December', 'Your year is on fire: {amt} net', 'Way up from last year: {amt} net', 'What a year! {amt} net in sight'],
+  up: ['Nice, ahead of last year: {amt} net', 'Trending up: {amt} net by December', 'Good momentum: {amt} net in sight', 'Better than last year: {amt} net'],
+  steady: ['Steady year: {amt} net by December', 'Right on last year’s pace: {amt} net', 'Holding steady at {amt} net'],
+  plain: ['Heading for {amt} net by December', 'On pace for {amt} net this year', '{amt} net expected by December'],
+  red: ['Heading {amt} in the red this year', 'Expenses ahead of income by {amt}'],
+};
+
+function ForecastHeadline({ net, growth }) {
+  const tier = net < 0 ? 'red' : growth >= 25 ? 'big' : growth >= 5 ? 'up' : growth != null && growth > -5 ? 'steady' : 'plain';
+  const day = Math.floor(Date.now() / 86400000);
+  const [before, after] = HEADLINES[tier][day % HEADLINES[tier].length].split('{amt}');
+  return (
+    <div className="forecast-headline">
+      {before}<span style={{ color: net >= 0 ? 'var(--accent)' : 'var(--bad)' }}>{moneyK(Math.abs(net))}</span>{after}
+    </div>
   );
 }
