@@ -32,9 +32,9 @@ export async function buildInvoiceZip(pdfBytes, pdfName, receipts) {
   const zip = new JSZip();
   zip.file(pdfName, pdfBytes);
   const used = new Set();
-  const folder = zip.folder('Receipts');
-  for (const r of receipts) {
-    if (!r.url) continue;
+  const withFiles = receipts.filter((r) => r.url);
+  const folder = withFiles.length ? zip.folder('Receipts') : null;
+  for (const r of withFiles) {
     const blob = await (await fetch(r.url)).blob();
     let name = receiptFileName({ ...r, receipt_date: r.receipt_date || r.date }, extFor(r.mime || blob.type, 'jpg'));
     let i = 2;

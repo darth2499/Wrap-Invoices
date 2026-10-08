@@ -2,7 +2,7 @@
 import { uid, toISO, addDays, round2, datesCode } from '../lib/format.js';
 
 // Bump this whenever the sample data changes, so browsers drop their old copy.
-export const SEED_VERSION = 'v4';
+export const SEED_VERSION = 'v5';
 
 const addDaysDate = (d, n) => new Date(d.getTime() + n * 86400000);
 
@@ -180,15 +180,15 @@ export function seedDemo(owner, token) {
     receipts.push(r(vendor, toISO(d), round2(lo + rnd() * (hi - lo)), cat));
   }
 
-  const tony = { ...base, id: uid(), name: 'Casey Morgan', email: 'tony@example.com', phone: null, role: '1st AC', notes: null, created_at: ts(at(Y, 0, 1)) };
+  const tony = { ...base, id: uid(), name: 'Casey Morgan', email: 'casey@example.com', phone: null, role: '1st AC', notes: null, created_at: ts(at(Y, 0, 1)) };
   const crew_members = [tony];
   const crew_payouts = [
-    { ...base, id: uid(), crew_id: tony.id, work_date: at(Y, 3, 8), client_id: vuong.id, invoice_id: null, description: 'Meridian shoot — AC', amount: 450, paid_on: at(Y, 3, 15), method: 'Venmo', created_at: ts(at(Y, 3, 8)) },
+    { ...base, id: uid(), crew_id: tony.id, work_date: at(Y, 3, 8), client_id: vuong.id, invoice_id: null, description: 'Press junket — AC', amount: 450, paid_on: at(Y, 3, 15), method: 'Venmo', created_at: ts(at(Y, 3, 8)) },
     { ...base, id: uid(), crew_id: tony.id, work_date: addDays(recent, -10), client_id: chad.id, invoice_id: null, description: 'Brand shoot — AC (2 days)', amount: 900, paid_on: null, method: null, created_at: ts(recent) },
   ];
   const mileage_trips = [
-    { ...base, id: uid(), trip_date: addDays(recent, -2), start_place: 'Concord', end_place: 'San Francisco', miles: 31, round_trip: true, purpose: 'Brightwave shoot', client_id: vuong.id, invoice_id: null, billable: false, rate: 0.7, created_at: ts(recent) },
-    { ...base, id: uid(), trip_date: recent, start_place: 'Concord', end_place: 'Palo Alto', miles: 45, round_trip: true, purpose: 'Bluebird shoot', client_id: ben.id, invoice_id: null, billable: true, rate: 0.7, created_at: ts(recent) },
+    { ...base, id: uid(), trip_date: addDays(recent, -2), start_place: 'Washington, DC', end_place: 'Arlington, VA', miles: 31, round_trip: true, purpose: 'Warner Bros. junket', client_id: vuong.id, invoice_id: null, billable: false, rate: 0.7, created_at: ts(recent) },
+    { ...base, id: uid(), trip_date: recent, start_place: 'Washington, DC', end_place: 'Baltimore, MD', miles: 45, round_trip: true, purpose: 'Universal press day', client_id: ben.id, invoice_id: null, billable: true, rate: 0.7, created_at: ts(recent) },
   ];
 
   profile.next_invoice_number = n;

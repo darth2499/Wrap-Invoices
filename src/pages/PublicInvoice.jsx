@@ -58,7 +58,7 @@ export default function PublicInvoice({ token }) {
           </div>
           <div className="row wrap">
             <Button icon="download" busy={busy === 'pdf'} onClick={() => run('pdf', async () => downloadBlob(new Blob([await pdf()], { type: 'application/pdf' }), pdfFileName(inv)))}>Download PDF</Button>
-            {data.receipts.length > 0 && <Button variant="primary" icon="zip" busy={busy === 'zip'} onClick={() => run('zip', async () => downloadBlob(await buildInvoiceZip(await pdf(), pdfFileName(inv), data.receipts), pdfFileName(inv).replace(/\.pdf$/, '_with_receipts.zip')))}>Download all (.zip)</Button>}
+            {data.receipts.some((r) => r.url) && <Button variant="primary" icon="zip" busy={busy === 'zip'} onClick={() => run('zip', async () => downloadBlob(await buildInvoiceZip(await pdf(), pdfFileName(inv), data.receipts), pdfFileName(inv).replace(/\.pdf$/, '_with_receipts.zip')))}>Download all (.zip)</Button>}
           </div>
         </header>
 

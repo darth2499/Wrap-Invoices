@@ -255,6 +255,11 @@ export const api = {
           snapshot: { invoice: clone(row), lines: clone(state.invoice_lines.filter((l) => l.invoice_id === id).sort((a, b) => a.position - b.position)) },
         });
         state.invoice_events.push({ id: uid(), owner_id: DEMO_UID, invoice_id: id, type: 'edited', detail: summary || `Invoice updated (version ${row.version + 1})`, created_at: nowTs() });
+        // Same limits as the live database: 20 earlier versions, 60 history events per invoice.
+        const revs = state.invoice_revisions.filter((r) => r.invoice_id === id).sort((x, y) => y.version - x.version).slice(20).map((r) => r.id);
+        state.invoice_revisions = state.invoice_revisions.filter((r) => !revs.includes(r.id));
+        const evs = state.invoice_events.filter((e) => e.invoice_id === id).sort((x, y) => (x.created_at < y.created_at ? 1 : -1)).slice(60).map((e) => e.id);
+        state.invoice_events = state.invoice_events.filter((e) => !evs.includes(e.id));
       }
       const fields = ['number', 'client_id', 'project_id', 'issue_date', 'due_date', 'terms', 'notes', 'mode', 'jobs', 'discount_type', 'discount_value', 'deposit_percent', 'subtotal', 'discount_total', 'tax_total', 'total', 'auto_remind'];
       const patch = {};
@@ -325,7 +330,7 @@ export const api = {
         reasoning: 'Demo mode: read from the PDF’s text with a simple rule. The live reader is smarter.', demo: true,
       };
     }
-    const vendors = ['Parking', 'Oyamel', 'Delta Hotels', 'United Baggage', 'Uber', 'B&H Photo'];
+    const vendors = ['Parking garage', 'Taco truck', 'Hotel', 'Airline', 'Rideshare', 'Camera store'];
     const v = vendors[Math.floor(Math.random() * vendors.length)];
     const subtotal = round2(10 + Math.random() * 80);
     const tax = round2(subtotal * 0.0925);
@@ -334,7 +339,7 @@ export const api = {
       is_receipt: true, vendor: v, date: todayISO(), total_paid: total, subtotal, tax, tip: null, currency: 'USD',
       reasoning: 'Demo mode makes up these numbers. Once Supabase and the free Cloudflare reader are connected, real receipts are read.',
       amounts: [{ label: 'Subtotal', amount: subtotal }, { label: 'Tax', amount: tax }],
-      category: v === 'Oyamel' ? 'Meals' : v === 'B&H Photo' ? 'Supplies' : v === 'Parking' ? 'Parking & tolls' : 'Travel',
+      category: v === 'Taco truck' ? 'Meals' : v === 'Camera store' ? 'Supplies' : v === 'Parking garage' ? 'Parking & tolls' : 'Travel',
       confidence: 'medium', check: 'ok', demo: true,
     };
   },

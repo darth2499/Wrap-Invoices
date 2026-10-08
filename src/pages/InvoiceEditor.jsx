@@ -282,7 +282,31 @@ function BasicLines({ lines, setLines, db, openPicker, mileageIds, setMileageIds
     [c[i], c[j]] = [c[j], c[i]];
     return c;
   });
-  const cols = `minmax(150px,1.1fr) minmax(170px,1.5fr) 72px 104px ${hasTax ? '90px ' : ''}104px 40px`;
+  const cols = `minmax(150px,1.1fr) minmax(170px,1.5fr) 72px 104px ${hasTax ? '90px ' : ''}104px 68px`;
+  // Drag the grip to reorder lines (mouse or finger): the line follows the pointer over the others.
+  const [dragKey, setDragKey] = useState(null);
+  const startDrag = (key, e) => {
+    e.preventDefault();
+    setDragKey(key);
+    const onMove = (ev) => {
+      const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-line-key]');
+      const over = el?.getAttribute('data-line-key');
+      if (!over || over === key) return;
+      setLines((ls) => {
+        const from = ls.findIndex((x) => x.key === key);
+        const to = ls.findIndex((x) => x.key === over);
+        if (from < 0 || to < 0) return ls;
+        const c = [...ls];
+        const [m] = c.splice(from, 1);
+        c.splice(to, 0, m);
+        return c;
+      });
+    };
+    const onUp = () => { setDragKey(null); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); window.removeEventListener('pointercancel', onUp); };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
 
   const addCatalog = (c) => setLines((ls) => [...ls.filter((l) => l.item || num(l.rate) || l.description), blankLine({ kind: c.kind, item: c.name, description: c.description || '', rate: num(c.rate), base_rate: num(c.rate), day_type: c.unit === 'day' && c.kind === 'labor' ? 'Full day' : null })]);
 
@@ -294,7 +318,7 @@ function BasicLines({ lines, setLines, db, openPicker, mileageIds, setMileageIds
             <span>Item</span><span>Description</span><span>Qty</span><span>Price</span>{hasTax && <span>Tax</span>}<span className="right">Amount</span><span />
           </div>
           {lines.map((l) => (
-            <BasicLine key={l.key} l={l} cols={cols} catalog={catalog} db={db} hasTax={hasTax} upd={upd} move={move} remove={() => setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== l.key) : [blankLine()]))} dup={() => setLines((ls) => { const i = ls.findIndex((x) => x.key === l.key); const c = [...ls]; c.splice(i + 1, 0, { ...l, key: uid(), receipt_id: null }); return c; })} />
+            <BasicLine key={l.key} l={l} cols={cols} dragging={dragKey === l.key} onGrip={(e) => startDrag(l.key, e)} catalog={catalog} db={db} hasTax={hasTax} upd={upd} move={move} remove={() => setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== l.key) : [blankLine()]))} dup={() => setLines((ls) => { const i = ls.findIndex((x) => x.key === l.key); const c = [...ls]; c.splice(i + 1, 0, { ...l, key: uid(), receipt_id: null }); return c; })} />
           ))}
         </div>
       </div>
@@ -311,7 +335,7 @@ function BasicLines({ lines, setLines, db, openPicker, mileageIds, setMileageIds
   );
 }
 
-function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup }) {
+function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup, dragging, onGrip }) {
   const [calOpen, setCalOpen] = useState(false);
   const [calDates, setCalDates] = useState([]);
   const isDay = l.kind === 'labor' || l.kind === 'gear';
@@ -328,7 +352,7 @@ function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup }) {
     upd(l.key, { description: code ? `${desc}${desc ? ' ' : ''}(${code})` : desc, qty: isDay && dates.length ? dates.length : l.qty });
   };
   return (
-    <div className="line basic-line" style={{ gridTemplateColumns: cols }}>
+    <div className={`line basic-line ${dragging ? 'dragging' : ''}`} data-line-key={l.key} style={{ gridTemplateColumns: cols }}>
       <div className="col c-item" style={{ gap: 6 }}>
         <input className="input" list={listId} value={l.item} placeholder="Item" onChange={(e) => pickItem(e.target.value)} aria-label="Item" style={{ fontWeight: 500 }} />
         <datalist id={listId}>{catalog.map((c) => <option key={c.id} value={c.name} />)}</datalist>
@@ -368,7 +392,7 @@ function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup }) {
         </select>
       )}
       <span className="num right c-amt" style={{ paddingTop: 10 }}>{money(lineAmount(l.qty, l.rate))}</span>
-      <div className="c-menu"><Menu label="" icon="more" variant="ghost icon" items={[
+      <div className="c-menu row" style={{ gap: 0, flexWrap: 'nowrap' }}><span className="grip" onPointerDown={onGrip} aria-label="Drag to reorder" role="button" tabIndex={-1}><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg></span><Menu label="" icon="more" variant="ghost icon" items={[
         { label: 'Move up', icon: 'chevL', onClick: () => move(l.key, -1) },
         { label: 'Move down', icon: 'chevR', onClick: () => move(l.key, 1) },
         { label: 'Duplicate', icon: 'copy', onClick: dup },

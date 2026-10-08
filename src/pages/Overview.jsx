@@ -155,7 +155,7 @@ function Kpi({ label, value, sub, bad, onClick }) {
 }
 
 // Short, friendly lines about where the year is heading. Upbeat when it's better than last year,
-// plain when it's about the same or down. A different one shows each visit.
+// plain when it's about the same or down. A different one shows each day.
 const HEADLINES = {
   big: ['Big year! Heading for {amt} net', 'Crushing it: {amt} net by December', 'Your year is on fire: {amt} net', 'Way up from last year: {amt} net', 'What a year! {amt} net in sight'],
   up: ['Nice, ahead of last year: {amt} net', 'Trending up: {amt} net by December', 'Good momentum: {amt} net in sight', 'Better than last year: {amt} net'],
@@ -166,9 +166,9 @@ const HEADLINES = {
 
 function ForecastHeadline({ net, growth }) {
   const tier = net < 0 ? 'red' : growth >= 25 ? 'big' : growth >= 5 ? 'up' : growth != null && growth > -5 ? 'steady' : 'plain';
-  const [pick] = useState(() => Math.random()); // a different line each time you open the page
   const list = HEADLINES[tier];
-  const [before, after] = list[Math.floor(pick * list.length)].split('{amt}');
+  const day = Math.floor(Date.now() / 86400000); // a different line each day
+  const [before, after] = list[day % list.length].split('{amt}');
   return (
     <div className="forecast-headline">
       {before}<span style={{ color: net >= 0 ? 'var(--accent)' : 'var(--bad)' }}>{moneyK(Math.abs(net))}</span>{after}

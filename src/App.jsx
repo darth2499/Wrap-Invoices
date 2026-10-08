@@ -12,6 +12,7 @@ import InvoiceEditor from './pages/InvoiceEditor.jsx';
 import Expenses from './pages/Expenses.jsx';
 import Clients from './pages/Clients.jsx';
 import Reports from './pages/Reports.jsx';
+import Calendar from './pages/Calendar.jsx';
 import Settings from './pages/Settings.jsx';
 import PublicInvoice from './pages/PublicInvoice.jsx';
 import PublicStatement from './pages/PublicStatement.jsx';
@@ -86,6 +87,7 @@ function Shell({ route }) {
   else if (a === 'expenses') page = <Expenses tab={b || 'receipts'} query={route.query} />;
   else if (a === 'clients') page = <Clients id={b} />;
   else if (a === 'reports') page = <Reports tab={b || 'overview'} />;
+  else if (a === 'calendar') page = <Calendar />;
   else if (a === 'settings') page = <Settings section={route.query.section} />;
   else page = <div className="page"><h1>Not found</h1><a href="#/">Go to overview</a></div>;
   return <Layout route={route}>{page}</Layout>;

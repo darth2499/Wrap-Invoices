@@ -10,6 +10,7 @@ const NAV = [
   { id: '', label: 'Overview', icon: 'overview' },
   { id: 'invoices', label: 'Invoices', icon: 'invoice' },
   { id: 'quotes', label: 'Quotes', icon: 'quote' },
+  { id: 'calendar', label: 'Calendar', icon: 'calendar' },
   { id: 'expenses', label: 'Expenses', icon: 'receipt' },
   { id: 'clients', label: 'Clients', icon: 'clients' },
   { id: 'reports', label: 'Reports', icon: 'reports' },
@@ -69,6 +70,7 @@ function MobileNav({ current, review }) {
           <a href="#/invoices/new" onClick={() => setOpen(false)}><Icon name="plus" />New invoice</a>
           <a href="#/invoices/new?kind=quote" onClick={() => setOpen(false)}><Icon name="quote" />New quote</a>
           <a href="#/quotes" onClick={() => setOpen(false)}><Icon name="quote" />Quotes</a>
+          <a href="#/calendar" onClick={() => setOpen(false)}><Icon name="calendar" />Calendar</a>
           <a href="#/clients" onClick={() => setOpen(false)}><Icon name="clients" />Clients</a>
           <a href="#/reports" onClick={() => setOpen(false)}><Icon name="reports" />Reports</a>
           <a href="#/settings" onClick={() => setOpen(false)}><Icon name="settings" />Settings</a>

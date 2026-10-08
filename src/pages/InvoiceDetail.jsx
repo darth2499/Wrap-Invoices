@@ -23,6 +23,7 @@ export default function InvoiceDetail({ id }) {
   const [busy, setBusy] = useState('');
 
   const receipts = inv ? db.receipts.filter((r) => r.invoice_id === inv.id) : [];
+  const withFiles = receipts.filter((r) => r.file_key).length; // only these can go in the zip
   useEffect(() => {
     const keys = [db.profile.logo_key, ...receipts.map((r) => r.file_key)].filter(Boolean);
     if (!keys.length) return;
@@ -119,7 +120,7 @@ export default function InvoiceDetail({ id }) {
               </>
             )}
             <Button icon="download" busy={busy === 'pdf'} onClick={() => run('pdf', () => A.downloadPdf(s, inv))}>Download PDF</Button>
-            {receipts.length > 0 && <Button icon="zip" busy={busy === 'zip'} onClick={() => run('zip', () => A.downloadZip(s, inv))}>PDF + {receipts.length} receipt{receipts.length === 1 ? '' : 's'} (.zip)</Button>}
+            {withFiles > 0 && <Button icon="zip" busy={busy === 'zip'} onClick={() => run('zip', () => A.downloadZip(s, inv))}>PDF + {withFiles} receipt{withFiles === 1 ? '' : 's'} (.zip)</Button>}
             {canRemind && <Button icon="bell" onClick={() => setModal({ type: 'email', reminder: true })}>Send reminder</Button>}
             {!isQuote && inv.status !== 'void' && inv.status !== 'paid' && (
               <label className="row between" style={{ paddingTop: 6, borderTop: '1px solid var(--line-2)' }}>

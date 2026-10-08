@@ -13,6 +13,8 @@ const PATHS = {
   plus: <path d="M12 5v14M5 12h14" />,
   x: <path d="M6 6l12 12M18 6L6 18" />,
   search: <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>,
+  'chev-left': <path d="m15 6-6 6 6 6" />,
+  'chev-right': <path d="m9 6 6 6-6 6" />,
   calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></>,
   camera: <><path d="M4 7h3l2-3h6l2 3h3v12H4z" /><circle cx="12" cy="13" r="3.5" /></>,
   upload: <path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />,
@@ -225,16 +227,44 @@ export function Combobox({ value, options, onChange, onCreate, placeholder, labe
 
 /** Dropdown menu: <Menu label="More" items={[{label, icon, onClick, danger}]} /> */
 export function Menu({ label = 'More', icon = 'more', items, align = 'right', variant = '' }) {
-  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null); // where the open menu sits on screen (null = closed)
   const ref = useRef(null);
-  useClickOutside(ref, () => setOpen(false), open);
+  const close = () => setPos(null);
+  useClickOutside(ref, close, !!pos);
+  // Fixed to the screen so tables and scrolling boxes can never cut it off; opens upward near the bottom.
+  const place = () => {
+    const r = ref.current.getBoundingClientRect();
+    const list = items.filter(Boolean).length;
+    const h = list * 42 + 12;
+    const up = r.bottom + h > window.innerHeight - 8 && r.top > h;
+    setPos({
+      top: up ? 'auto' : r.bottom + 4,
+      bottom: up ? window.innerHeight - r.top + 4 : 'auto',
+      left: align === 'right' ? 'auto' : Math.max(8, r.left),
+      right: align === 'right' ? Math.max(8, window.innerWidth - r.right) : 'auto',
+      maxHeight: Math.max(160, (up ? r.top : window.innerHeight - r.bottom) - 16),
+    });
+  };
+  const toggle = () => (pos ? close() : place());
+  useEffect(() => {
+    if (!pos) return undefined;
+    // Follow the button if the page scrolls; close if it scrolls out of view.
+    const follow = () => {
+      const r = ref.current?.getBoundingClientRect();
+      if (!r || r.bottom < 0 || r.top > window.innerHeight) close();
+      else place();
+    };
+    window.addEventListener('scroll', follow, true);
+    window.addEventListener('resize', follow);
+    return () => { window.removeEventListener('scroll', follow, true); window.removeEventListener('resize', follow); };
+  }, [pos]);
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <Button variant={variant} icon={icon} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>{label}</Button>
-      {open && (
-        <div className="pop" role="menu" style={{ minWidth: 220, left: align === 'right' ? 'auto' : 0, right: align === 'right' ? 0 : 'auto' }}>
+      <Button variant={variant} icon={icon} aria-haspopup="menu" aria-expanded={!!pos} onClick={toggle}>{label}</Button>
+      {pos && (
+        <div className="pop" role="menu" style={{ minWidth: 220, position: 'fixed', ...pos, zIndex: 60 }}>
           {items.filter(Boolean).map((it) => (
-            <button key={it.label} type="button" role="menuitem" className="opt" disabled={it.disabled} style={{ justifyContent: 'flex-start', gap: 10, color: it.danger ? 'var(--bad)' : 'var(--ink)', opacity: it.disabled ? 0.45 : 1 }} onClick={() => { setOpen(false); it.onClick(); }}>
+            <button key={it.label} type="button" role="menuitem" className="opt" disabled={it.disabled} style={{ justifyContent: 'flex-start', gap: 10, color: it.danger ? 'var(--bad)' : 'var(--ink)', opacity: it.disabled ? 0.45 : 1 }} onClick={() => { close(); it.onClick(); }}>
               {it.icon && <Icon name={it.icon} size={16} />}{it.label}
             </button>
           ))}

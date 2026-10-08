@@ -329,7 +329,7 @@ export function ReceiptModal({ id, onClose, onNext }) {
               <Switch checked={f.billable} onChange={(v) => setF({ ...f, billable: v })} label="Bill the client" />
             </label>
           )}
-          <Field label="Notes" hint="(optional)"><input className="input" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="e.g. Lunch for crew on Felicis shoot" /></Field>
+          <Field label="Notes" hint="(optional)"><input className="input" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="e.g. Lunch for crew on set" /></Field>
         </div>
       </div>
     </Modal>
@@ -415,7 +415,7 @@ function TripModal({ trip, onClose }) {
         <Field label="To"><input className="input" value={f.end_place} onChange={(e) => setF({ ...f, end_place: e.target.value })} placeholder="Shoot location" /></Field>
       </div>
       <label className="check"><input type="checkbox" checked={f.round_trip} onChange={(e) => setF({ ...f, round_trip: e.target.checked })} />Round trip (counts the miles twice)</label>
-      <Field label="Purpose"><input className="input" value={f.purpose} onChange={(e) => setF({ ...f, purpose: e.target.value })} placeholder="e.g. Felicis shoot" /></Field>
+      <Field label="Purpose"><input className="input" value={f.purpose} onChange={(e) => setF({ ...f, purpose: e.target.value })} placeholder="e.g. Brand shoot" /></Field>
       <Combobox label="Client (optional)" value={f.client_id} options={s.db.clients.map((c) => ({ value: c.id, label: c.name }))} onChange={(v) => setF({ ...f, client_id: v })} placeholder="Search clients" />
       <label className="check"><input type="checkbox" checked={f.billable} onChange={(e) => setF({ ...f, billable: e.target.checked })} />Bill this to the client (add it from the invoice editor → Mileage)</label>
     </Modal>

@@ -119,9 +119,9 @@ const SAMPLE = {
   invoice: { kind: 'invoice', number: '1', issue_date: todayISO(), due_date: addDays(todayISO(), 30), subtotal: 2026.4, discount_total: 0, tax_total: 0, total: 2026.4, notes: 'Month of October', terms: 'Net 30' },
   client: { name: 'Sample Client', email: 'client@example.com', address: '1 Market St\nSan Francisco, CA' },
   lines: [
-    { item: 'Camera Operator', description: 'Orchestra (10/08-10/09)', note: '$750 + $750 (plus 1 hour OT)', qty: 1, rate: 1612.5, amount: 1612.5 },
-    { item: 'Parking', description: 'Orchestra (10/08)', qty: 1, rate: 26, amount: 26 },
-    { item: 'Sound Gear', description: 'Felicis (10/06)', qty: 1, rate: 387.9, amount: 387.9 },
+    { item: 'Camera Operator', description: 'Brand shoot (10/08-10/09)', note: '$750 + $750 (plus 1 hour OT)', qty: 1, rate: 1612.5, amount: 1612.5 },
+    { item: 'Parking', description: 'Brand shoot (10/08)', qty: 1, rate: 26, amount: 26 },
+    { item: 'Sound Gear', description: 'Brand shoot (10/06)', qty: 1, rate: 387.9, amount: 387.9 },
   ],
 };
 
@@ -373,6 +373,8 @@ function Data() {
   const last = (() => { try { return localStorage.getItem('wrap_last_backup'); } catch { return null; } })();
   return (
     <>
+      {!DEMO && (
+        <>
       <div className="grid-2">
         <section className="card card-pad col" style={{ gap: 12 }}>
           <h2>Back up everything</h2>
@@ -402,6 +404,8 @@ function Data() {
         <p className="small muted"><b>Easiest:</b> pick the .zip from Wave (or select its CSV files together). Wrap figures out which file is which and imports customers first, then invoices, payments and expenses. Safe to run again: anything already in Wrap is skipped.</p>
         <p className="small muted">In Wave: Sales &amp; Payments → Customers → Export for clients. Invoice PDFs (Wrap reads line items and payments) can be added any time: if the invoice is already in Wrap from the zip, its line details are filled in instead of making a duplicate.</p>
       </section>
+        </>
+      )}
       {DEMO && (
         <section className="card card-pad col" style={{ gap: 10 }}>
           <h2>Demo data</h2>
@@ -409,8 +413,8 @@ function Data() {
           <Button className="danger" style={{ alignSelf: 'flex-start' }} onClick={async () => { if (await s.confirm({ title: 'Reset demo data?', body: 'Puts the sample data back.', ok: 'Reset', danger: true })) { resetDemo(); window.location.reload(); } }}>Reset demo data</Button>
         </section>
       )}
-      <StorageCard />
-      <ResetSection onBackup={backup} backupBusy={!!step} />
+      {!DEMO && <StorageCard />}
+      {!DEMO && <ResetSection onBackup={backup} backupBusy={!!step} />}
       {restore && <RestoreModal backup={restore} onClose={() => setRestore(null)} />}
       {imp && <ImportModal imp={imp} onClose={() => setImp(null)} />}
       {wave && <WaveModal files={wave} onClose={() => setWave(null)} />}
@@ -651,7 +655,7 @@ function ImportModal({ imp, onClose }) {
             <label className="check"><input type="checkbox" checked={withExpenses} onChange={(e) => setWithExpenses(e.target.checked)} />Expenses ({w.expenses.length}, without receipt images)</label>
             <label className="row small muted" style={{ gap: 6 }}>Due date = invoice date +<input className="input num" style={{ width: 64 }} value={terms} onChange={(e) => setTerms(e.target.value)} aria-label="Payment terms in days" /> days</label>
           </div>
-          <p className="small muted">Wave’s export doesn’t include line descriptions like “Felicis (04/06)”, so lines come in with their item name and amount. Import the invoice PDFs afterwards to add those details to the matching invoices (no duplicates).</p>
+          <p className="small muted">Wave’s export doesn’t include line descriptions like “Brand shoot (04/06)”, so lines come in with their item name and amount. Import the invoice PDFs afterwards to add those details to the matching invoices (no duplicates).</p>
         </>
       )}
       {imp.csv && !wave && (
@@ -787,7 +791,7 @@ function WaveModal({ files, onClose }) {
             </div>
           )}
           {data.ignored.length > 0 && <p className="small muted" style={{ marginTop: 10 }}>Skipped (not needed): {data.ignored.join(', ')}</p>}
-          <p className="small muted" style={{ marginTop: 10 }}>Wave’s export has no line descriptions like “Felicis (04/06)”, so lines come in as item + amount. To get them, import the invoice PDFs afterwards (Wave invoice PDFs button): Wrap adds their line details to the matching invoices instead of making duplicates.</p>
+          <p className="small muted" style={{ marginTop: 10 }}>Wave’s export has no line descriptions like “Brand shoot (04/06)”, so lines come in as item + amount. To get them, import the invoice PDFs afterwards (Wave invoice PDFs button): Wrap adds their line details to the matching invoices instead of making duplicates.</p>
         </div>
       )}
     </Modal>
