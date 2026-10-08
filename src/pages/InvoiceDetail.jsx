@@ -154,7 +154,7 @@ export default function InvoiceDetail({ id }) {
               <h2>Receipts</h2>
               <Button size="sm" icon="plus" onClick={() => setModal({ type: 'attach' })}>Attach</Button>
             </div>
-            <p className="small muted" style={{ padding: '0 20px 10px' }}>Turn on “Bill” to add a receipt to the total. Off = backup only. All go in the zip.</p>
+            <p className="small muted" style={{ padding: '0 20px 10px' }}>Turn on “Bill” to add a receipt to the total.</p>
             {receipts.length === 0 && <p className="small muted" style={{ padding: '0 20px 16px' }}>None attached.</p>}
             {receipts.map((r) => (
               <div key={r.id} className="list-row" style={{ gridTemplateColumns: '40px 1fr auto auto', cursor: 'default' }}>
@@ -329,7 +329,7 @@ function AttachModal({ inv, onClose }) {
     }
   };
   return (
-    <Modal title={`Attach receipts to #${inv.number}`} onClose={onClose} footer={<><Button onClick={onClose}>Cancel</Button><Button disabled={!sel.size} onClick={() => go2(false)}>Attach as backup</Button><Button variant="primary" disabled={!sel.size} onClick={() => go2(true)}>Attach &amp; bill client</Button></>}>
+    <Modal title={`Attach receipts to #${inv.number}`} onClose={onClose} footer={<><Button onClick={onClose}>Cancel</Button><Button disabled={!sel.size} onClick={() => go2(false)}>Attach</Button><Button variant="primary" disabled={!sel.size} onClick={() => go2(true)}>Attach &amp; bill client</Button></>}>
       <input className="input" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
       <div className="col" style={{ gap: 0, maxHeight: 380, overflowY: 'auto' }}>
         {list.length === 0 && <Empty icon="receipt" title="No other receipts">Add some in Expenses.</Empty>}

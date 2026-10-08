@@ -344,7 +344,7 @@ export const api = {
     const total = round2(subtotal + tax);
     return {
       is_receipt: true, vendor: v, date: todayISO(), total_paid: total, subtotal, tax, tip: null, currency: 'USD',
-      reasoning: 'Demo mode makes up these numbers. Once Supabase and the free Cloudflare reader are connected, real receipts are read.',
+      reasoning: 'Demo mode makes up these numbers.',
       amounts: [{ label: 'Subtotal', amount: subtotal }, { label: 'Tax', amount: tax }],
       category: v === 'Taco truck' ? 'Meals' : v === 'Camera store' ? 'Supplies' : v === 'Parking garage' ? 'Parking & tolls' : 'Travel',
       confidence: 'medium', check: 'ok', demo: true,

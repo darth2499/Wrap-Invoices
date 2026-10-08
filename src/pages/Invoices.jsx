@@ -160,7 +160,7 @@ export default function Invoices({ kind }) {
               <tbody>
                 {shown.map((r) => (
                   <tr key={r.id} className="click" onClick={() => go(`/invoices/${r.id}`)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && go(`/invoices/${r.id}`)}>
-                    {cols.map((k) => <td key={k} className={COLS[k].right ? 'right num' : undefined}>{COLS[k].cell(r, { isQuote, today, counts, setQ })}</td>)}
+                    {cols.map((k) => <td key={k} className={COLS[k].right ? 'right num' : undefined}>{COLS[k].cell(r, { isQuote, today, counts, setQ, q })}</td>)}
                     <td className="right" onClick={(e) => e.stopPropagation()}><Menu label="" icon="more" variant="ghost icon" items={actions(r)} /></td>
                   </tr>
                 ))}
@@ -184,11 +184,11 @@ const COLS = {
   client: {
     sort: (r) => (r.client?.name || '').toLowerCase(),
     label: () => 'Client · project',
-    cell: (r, { counts, setQ }) => (
+    cell: (r, { counts, setQ, q }) => (
       <>
         <div className="row" style={{ gap: 8 }}>
           <span style={{ fontWeight: 500 }}>{r.client?.name || <span className="muted">No client</span>}</span>
-          {counts[r.id] && <button type="button" className="count-badge" onClick={(e) => { e.stopPropagation(); setQ(r.client?.name || ''); }} aria-label={`${counts[r.id].n} of ${counts[r.id].of} for ${r.client?.name} — show only them`} title={`${counts[r.id].n} of ${counts[r.id].of}`}>{counts[r.id].n}</button>}
+          {counts[r.id] && <button type="button" className={`count-badge ${q && q === r.client?.name ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); setQ(q === r.client?.name ? '' : r.client?.name || ''); }} aria-label={`${counts[r.id].n} of ${counts[r.id].of} for ${r.client?.name} — show only them`} title={`${counts[r.id].n} of ${counts[r.id].of}`}>{counts[r.id].n}</button>}
         </div>
         {(r.project || r.notes) && <div className="small muted">{r.project?.name || r.notes}</div>}
       </>

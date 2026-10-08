@@ -204,6 +204,7 @@ export function ReceiptModal({ id, onClose, onNext }) {
   const [view, setView] = useState('scan');
   const [urls, setUrls] = useState({});
   const [busy, setBusy] = useState(false);
+  const [fileBusy, setFileBusy] = useState(false); // (all hooks must sit above the early return below)
   useEffect(() => {
     if (r) s.api.files.urls([r.file_key, r.original_key].filter(Boolean)).then(setUrls).catch(() => {});
   }, [r?.file_key]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -217,7 +218,6 @@ export function ReceiptModal({ id, onClose, onNext }) {
   const invoices = db.invoices.filter((i) => i.kind === 'invoice' && i.status !== 'void').sort((a, b) => String(b.issue_date).localeCompare(String(a.issue_date)));
   const url = view === 'scan' ? urls[r.file_key] : urls[r.original_key];
   // Add a file to a receipt that has none (e.g. imported from Wave), or swap in a new one.
-  const [fileBusy, setFileBusy] = useState(false);
   const attachFile = async () => {
     const [file] = await pickFiles({ accept: 'image/*,application/pdf' });
     if (!file) return;

@@ -113,7 +113,6 @@ export function buildInvoiceEmail(e) {
     <tr><td colspan="2" style="padding-top:6px;font-size:14px;color:${late > 0 ? C.bad : C.ink2}">${esc(sub)}</td></tr>
   </table>
   ${button(e.link, `View ${label.toLowerCase()}`, e.accent)}
-  <div style="margin-top:12px;font-size:12px;line-height:1.5;color:${C.muted}">Download the PDF${!isQuote && e.receiptCount ? ` and ${plural(e.receiptCount, 'receipt')}` : ''} from the link${isQuote ? '' : ' — no sign-in needed'}.</div>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px;border-top:1px solid ${C.line}">
     <tr><td style="height:8px"></td><td></td></tr>
     ${e.notes ? metaRow('For', e.notes) : ''}

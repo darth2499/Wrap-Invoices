@@ -427,7 +427,10 @@ function StorageCard() {
   const [err, setErr] = useState('');
   const load = async (recount = false) => {
     setBusy(true);
-    try { setU(await s.api.files.usage(recount)); setErr(''); } catch (e) { setErr(e.message); }
+    try {
+      if (typeof s.api.files.usage !== 'function') throw new Error('Storage info needs the latest src/api/supabase.js — re-upload it.');
+      setU(await s.api.files.usage(recount)); setErr('');
+    } catch (e) { setErr(e.message); }
     setBusy(false);
   };
   useEffect(() => { if (!DEMO) load(); else setU({ used: 0, limit: 9.5 * 1024 ** 3, mine: 0 }); }, []); // eslint-disable-line react-hooks/exhaustive-deps

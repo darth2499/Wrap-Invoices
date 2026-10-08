@@ -379,7 +379,7 @@ function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup, dragg
           <Popover open={calOpen} setOpen={setCalOpen} align="right" width={310} trigger={<Button variant="icon" icon="calendar" aria-label="Add dates" title="Add shoot dates" onClick={() => setCalOpen((o) => !o)} />}>
             <Calendar value={calDates} onChange={applyDates} />
             <div className="row between" style={{ paddingTop: 8 }}>
-              <span className="small muted">{calDates.length ? `${datesLabel(calDates)} · qty ${isDay ? calDates.length : l.qty}` : 'Dates go into the description'}</span>
+              <span className="small muted">{calDates.length ? `${datesLabel(calDates)} · qty ${isDay ? calDates.length : l.qty}` : ''}</span>
               <Button size="sm" variant="primary" onClick={() => setCalOpen(false)}>Done</Button>
             </div>
           </Popover>

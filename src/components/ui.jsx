@@ -317,11 +317,6 @@ export function Calendar({ value, onChange, busy = {}, single = false }) {
           {value.length > 0 && <button type="button" className="btn link small" onClick={() => onChange([])}>Clear</button>}
         </div>
       )}
-      {!single && (
-        <span className="small muted">
-          {mode === 'days' ? 'Tap days to add or remove them.' : start ? 'Now tap the last day.' : 'Tap the first day of the range.'}
-        </span>
-      )}
       <div className="cal-grid">
         {DOW.map((d, i) => <span key={i} className="cal-dow">{d}</span>)}
         {cells.map((iso, i) =>
@@ -344,12 +339,31 @@ export function Calendar({ value, onChange, busy = {}, single = false }) {
 /** A button that opens a floating panel (used for the calendar). */
 export function Popover({ trigger, children, open, setOpen, width = 300, align = 'left' }) {
   const ref = useRef(null);
+  const [pos, setPos] = useState(null);
   useClickOutside(ref, () => setOpen(false), open);
+  // Fixed to the screen (like menus) so scrolling boxes and tables can't cut it off; flips up near the bottom.
+  useEffect(() => {
+    if (!open) { setPos(null); return undefined; }
+    const place = () => {
+      const r = ref.current?.getBoundingClientRect();
+      if (!r) return;
+      const w = Math.min(width, window.innerWidth - 16);
+      let left = align === 'right' ? r.right - w : r.left;
+      left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+      const below = window.innerHeight - r.bottom;
+      const up = below < 380 && r.top > below;
+      setPos({ left, width: w, top: up ? 'auto' : r.bottom + 4, bottom: up ? window.innerHeight - r.top + 4 : 'auto', maxHeight: (up ? r.top : below) - 12 });
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => { window.removeEventListener('scroll', place, true); window.removeEventListener('resize', place); };
+  }, [open, width, align]);
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       {trigger}
-      {open && (
-        <div className="pop" style={{ width, maxHeight: 'none', padding: 12, left: align === 'left' ? 0 : 'auto', right: align === 'right' ? 0 : 'auto', zIndex: 60 }}>
+      {open && pos && (
+        <div className="pop" style={{ position: 'fixed', ...pos, right: 'auto', padding: 12, overflowY: 'auto', zIndex: 60 }}>
           {children}
         </div>
       )}
