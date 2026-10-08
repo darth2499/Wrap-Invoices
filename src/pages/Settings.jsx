@@ -4,7 +4,8 @@ import { Button, Empty, Field, Icon, Modal, MoneyInput, Seg, Switch } from '../c
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import { exportBackup, readBackup, restoreBackup } from '../lib/backup.js';
 import { parseCSV, downloadBlob, pickFiles } from '../lib/files.js';
-import { CLIENT_FIELDS, INVOICE_FIELDS, autoMap, clientsFromCsv, invoicesFromCsv, importInvoices, invoiceFromPdf } from '../lib/importer.js';
+import { CLIENT_FIELDS, INVOICE_FIELDS, autoMap, clientsFromCsv, invoicesFromCsv, importInvoices, importExpenses, invoiceFromPdf } from '../lib/importer.js';
+import { isWaveAccounting, parseWaveAccounting } from '../lib/wave.js';
 import { money, num, todayISO, addDays, plural } from '../lib/format.js';
 import { DEMO } from '../config.js';
 import { resetDemo } from '../api/demo.js';
@@ -405,9 +406,100 @@ function Data() {
           <Button className="danger" style={{ alignSelf: 'flex-start' }} onClick={async () => { if (await s.confirm({ title: 'Reset demo data?', body: 'Puts the sample data back.', ok: 'Reset', danger: true })) { resetDemo(); window.location.reload(); } }}>Reset demo data</Button>
         </section>
       )}
+      <ResetSection onBackup={backup} backupBusy={!!step} />
       {restore && <RestoreModal backup={restore} onClose={() => setRestore(null)} />}
       {imp && <ImportModal imp={imp} onClose={() => setImp(null)} />}
     </>
+  );
+}
+
+const SETTINGS_DEFAULTS = {
+  business_name: null, business_email: null, address: null, phone: null, website: null, logo_key: null,
+  template: 'minimal', accent: '#16161A', payment_instructions: null, footer_note: null,
+  default_terms_days: 30, ot_base_hours: 10, ot_mult1: 1.5, ot_mult1_hours: 2, ot_mult2: 2,
+  reminder_days: [3, 7, 14], auto_remind_default: false, mileage_rate: 0.7, tax_set_aside_pct: 25,
+};
+
+/** "Danger zone": wipes the account. Locked behind a switch, then two separate confirmations. */
+function ResetSection({ onBackup, backupBusy }) {
+  const s = useStore();
+  const [unlocked, setUnlocked] = useState(false);
+  const [open, setOpen] = useState(false);
+  const start = async () => {
+    const ok = await s.confirm({
+      title: 'Delete all your data?',
+      body: 'Every invoice, quote, client, receipt, expense, payment and report in this account will be deleted. This can\u2019t be undone.',
+      ok: 'Yes, continue',
+      danger: true,
+    });
+    if (ok) setOpen(true);
+    else setUnlocked(false);
+  };
+  return (
+    <section className="card card-pad col" style={{ gap: 12, borderColor: 'var(--bad)' }}>
+      <h2 style={{ color: 'var(--bad)' }}>Reset account</h2>
+      <p className="muted" style={{ lineHeight: 1.6 }}>Deletes all your data and receipt files so you can start from scratch. Your login, Gmail connection and invites stay. Download a backup first if you might want it back.</p>
+      <label className="row" style={{ gap: 10, alignSelf: 'flex-start', cursor: 'pointer' }}>
+        <Switch checked={unlocked} onChange={setUnlocked} label="Unlock reset" />
+        <span>{unlocked ? 'Reset unlocked' : 'Turn on to unlock reset'}</span>
+      </label>
+      <Button className="danger" icon="trash" disabled={!unlocked} style={{ alignSelf: 'flex-start', opacity: unlocked ? 1 : 0.45 }} onClick={start}>{'Reset account\u2026'}</Button>
+      {open && <ResetModal onBackup={onBackup} backupBusy={backupBusy} onClose={() => { setOpen(false); setUnlocked(false); }} />}
+    </section>
+  );
+}
+
+function ResetModal({ onBackup, backupBusy, onClose }) {
+  const s = useStore();
+  const [typed, setTyped] = useState('');
+  const [settingsToo, setSettingsToo] = useState(false);
+  const [step, setStep] = useState('');
+  const ready = typed.trim().toUpperCase() === 'RESET';
+  const counts = { invoices: s.db.invoices.length, clients: s.db.clients.length, receipts: s.db.receipts.length };
+  const run = async () => {
+    if (!ready) return;
+    try {
+      const keys = s.db.receipts.flatMap((r) => [r.file_key, r.original_key]).filter(Boolean);
+      if (settingsToo && s.db.profile.logo_key) keys.push(s.db.profile.logo_key);
+      setStep('Deleting data\u2026');
+      await s.api.rpc('wipe_my_data', {});
+      for (let i = 0; i < keys.length; i += 200) {
+        setStep(`Deleting files ${Math.min(i + 200, keys.length)} / ${keys.length}`);
+        try { await s.api.files.remove(keys.slice(i, i + 200)); } catch { /* data is already gone; leftover files are harmless */ }
+      }
+      await s.api.updateProfile({ next_invoice_number: 1, next_quote_number: 1, ...(settingsToo ? SETTINGS_DEFAULTS : {}) });
+      await s.reload();
+      s.toast('Account reset \u2014 starting fresh');
+      onClose();
+      go('/');
+    } catch (e) {
+      s.toast(e.message, { error: true });
+      setStep('');
+    }
+  };
+  return (
+    <Modal
+      title="Last check: reset account"
+      onClose={step ? undefined : onClose}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={!!step}>Cancel</Button>
+          <Button variant="primary" className="danger-fill" icon="trash" disabled={!ready} busy={!!step} onClick={run}>{step || 'Delete everything'}</Button>
+        </>
+      }
+    >
+      <div className="col" style={{ gap: 14 }}>
+        <p style={{ lineHeight: 1.6 }}>This permanently deletes {plural(counts.invoices, 'invoice')}, {plural(counts.clients, 'client')} and {plural(counts.receipts, 'receipt')} (with their files), plus mileage, crew, saved items and 1099 records. Invoice numbers go back to #1. Shared links stop working.</p>
+        <Button icon="download" busy={backupBusy} onClick={onBackup} style={{ alignSelf: 'flex-start' }}>Download a backup first</Button>
+        <label className="row" style={{ gap: 10, cursor: 'pointer' }}>
+          <input type="checkbox" checked={settingsToo} onChange={(e) => setSettingsToo(e.target.checked)} />
+          <span>Also reset business details &amp; settings (name, logo, template, overtime, reminders)</span>
+        </label>
+        <Field label="Type RESET to confirm">
+          <input className="input" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="RESET" autoComplete="off" autoCapitalize="characters" />
+        </Field>
+      </div>
+    </Modal>
   );
 }
 
@@ -443,8 +535,13 @@ function RestoreModal({ backup, onClose }) {
 
 function ImportModal({ imp, onClose }) {
   const s = useStore();
+  const wave = imp.type === 'invoices' && imp.csv && isWaveAccounting(imp.csv.headers);
   const fields = imp.type === 'clients' ? CLIENT_FIELDS : INVOICE_FIELDS;
-  const [map, setMap] = useState(() => (imp.csv ? autoMap(imp.csv.headers, fields) : {}));
+  const [map, setMap] = useState(() => (imp.csv && !wave ? autoMap(imp.csv.headers, fields) : {}));
+  const [assume, setAssume] = useState('unpaid');
+  const [terms, setTerms] = useState(30);
+  const [withInvoices, setWithInvoices] = useState(true);
+  const [withExpenses, setWithExpenses] = useState(true);
   const [step, setStep] = useState('');
   const [pdfList, setPdfList] = useState(null);
   const [errors, setErrors] = useState([]);
@@ -463,7 +560,14 @@ function ImportModal({ imp, onClose }) {
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const preview = imp.type === 'clients' ? clientsFromCsv(imp.csv.rows, map) : imp.type === 'invoices' ? invoicesFromCsv(imp.csv.rows, map) : pdfList || [];
+  const w = wave ? parseWaveAccounting(imp.csv.rows, { termsDays: Number(terms) || 30 }) : null;
+  const existingNums = new Set(s.db.invoices.filter((i) => i.kind === 'invoice').map((i) => String(i.number)));
+  const preview = wave
+    ? [...w.invoices].sort((a, b) => (b.amountDue > 0) - (a.amountDue > 0) || (Number(b.number) || 0) - (Number(a.number) || 0))
+    : imp.type === 'clients' ? clientsFromCsv(imp.csv.rows, map)
+      : imp.type === 'invoices' ? invoicesFromCsv(imp.csv.rows, map, { assume }) : pdfList || [];
+  const count = wave ? (withInvoices ? w.invoices.length : 0) + (withExpenses ? w.expenses.length : 0) : preview.length;
+
   const run = async () => {
     setStep('Importing…');
     try {
@@ -473,8 +577,16 @@ function ImportModal({ imp, onClose }) {
         for (let i = 0; i < fresh.length; i += 200) await s.api.insert('clients', fresh.slice(i, i + 200));
         s.toast(`${fresh.length} clients added${preview.length - fresh.length ? `, ${preview.length - fresh.length} already existed` : ''}`);
       } else {
-        const { created, skipped } = await importInvoices(preview, { db: s.db, api: s.api, onStep: setStep });
-        s.toast(`${created} invoices imported${skipped.length ? ` · skipped ${skipped.join(', ')}` : ''}`, { ms: 8000 });
+        const parts = [];
+        if (!wave || withInvoices) {
+          const { created, skipped } = await importInvoices(wave ? w.invoices : preview, { db: s.db, api: s.api, onStep: setStep });
+          parts.push(`${created} invoices imported${skipped.length ? ` (${skipped.length} skipped — number already in Wrap)` : ''}`);
+        }
+        if (wave && withExpenses && w.expenses.length) {
+          const { created, skipped } = await importExpenses(w.expenses, { db: s.db, api: s.api, onStep: setStep });
+          parts.push(`${created} expenses added${skipped ? ` (${skipped} already there)` : ''}`);
+        }
+        s.toast(parts.join(' · '), { ms: 9000 });
       }
       await s.load();
       onClose();
@@ -484,8 +596,19 @@ function ImportModal({ imp, onClose }) {
     }
   };
   return (
-    <Modal wide title={imp.type === 'clients' ? 'Import clients' : 'Import invoices'} onClose={step ? null : onClose} footer={<><Button onClick={onClose} disabled={!!step}>Cancel</Button><Button variant="primary" busy={!!step} disabled={!preview.length} onClick={run}>{step || `Import ${preview.length}`}</Button></>}>
-      {imp.csv && (
+    <Modal wide title={imp.type === 'clients' ? 'Import clients' : 'Import invoices'} onClose={step ? null : onClose} footer={<><Button onClick={onClose} disabled={!!step}>Cancel</Button><Button variant="primary" busy={!!step} disabled={!count} onClick={run}>{step || `Import ${count}`}</Button></>}>
+      {wave && (
+        <>
+          <div className="banner good"><Icon name="check" /><span>Wave accounting export found, covering {w.from} to {w.to}. It has <b>{w.invoices.length} invoices</b>, <b>{w.unpaidCount} still unpaid ({money(w.unpaidTotal)})</b>, and <b>{w.expenses.length} expenses</b>. Payments are matched to each invoice, so only the unpaid ones show as owed.</span></div>
+          <div className="row wrap" style={{ gap: 18 }}>
+            <label className="check"><input type="checkbox" checked={withInvoices} onChange={(e) => setWithInvoices(e.target.checked)} />Invoices &amp; payments</label>
+            <label className="check"><input type="checkbox" checked={withExpenses} onChange={(e) => setWithExpenses(e.target.checked)} />Expenses ({w.expenses.length}, without receipt images)</label>
+            <label className="row small muted" style={{ gap: 6 }}>Due date = invoice date +<input className="input num" style={{ width: 64 }} value={terms} onChange={(e) => setTerms(e.target.value)} aria-label="Payment terms in days" /> days</label>
+          </div>
+          <p className="small muted">Wave’s export doesn’t include line descriptions like “Felicis (04/06)”, so lines come in with their item name and amount. Numbers already in Wrap are skipped, so it’s safe to import your unpaid invoices’ PDFs first to keep their full details.</p>
+        </>
+      )}
+      {imp.csv && !wave && (
         <>
           <p className="small muted">Match your file’s columns. We guessed what we could.</p>
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
@@ -497,20 +620,30 @@ function ImportModal({ imp, onClose }) {
               </Field>
             ))}
           </div>
+          {imp.type === 'invoices' && !map.amount_due && (
+            <Field label="Your file has no “amount still due” column. Treat these invoices as:" style={{ maxWidth: 420 }}>
+              <select className="input" value={assume} onChange={(e) => setAssume(e.target.value)}>
+                <option value="unpaid">Unpaid (I'll record payments myself)</option>
+                <option value="paid">Paid in full</option>
+              </select>
+            </Field>
+          )}
         </>
       )}
       {step && !preview.length && <span className="row muted"><span className="spinner" />{step}</span>}
       {errors.map((e) => <div key={e} className="banner bad">{e}</div>)}
-      <div className="table-wrap" style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 12 }}>
-        <table className="table">
-          <tbody>
-            {preview.slice(0, 100).map((r, i) => imp.type === 'clients'
-              ? <tr key={i}><td>{r.name}</td><td className="muted">{r.email}</td><td className="small muted" style={{ whiteSpace: 'pre-line' }}>{r.address}</td></tr>
-              : <tr key={i}><td>#{r.number}</td><td>{r.client}</td><td className="muted">{r.date}</td><td className="small muted">{r.lines.length} lines</td><td className="right num">{money(r.total)}</td><td className="right num muted">{r.amountDue > 0 ? `${money(r.amountDue)} due` : 'Paid'}</td></tr>)}
-          </tbody>
-        </table>
-      </div>
-      <span className="small muted">{preview.length} found{preview.length > 100 ? ' (showing 100)' : ''}</span>
+      {(!wave || withInvoices) && (
+        <div className="table-wrap" style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 12 }}>
+          <table className="table">
+            <tbody>
+              {preview.slice(0, 100).map((r, i) => imp.type === 'clients'
+                ? <tr key={i}><td>{r.name}</td><td className="muted">{r.email}</td><td className="small muted" style={{ whiteSpace: 'pre-line' }}>{r.address}</td></tr>
+                : <tr key={i} style={{ opacity: existingNums.has(String(r.number)) ? 0.45 : 1 }}><td>#{r.number}</td><td>{r.client}</td><td className="muted">{r.date}</td><td className="small muted">{r.lines.length} lines{r.notes ? ` · ${r.notes}` : ''}</td><td className="right num">{money(r.total)}</td><td className="right num" style={{ color: r.amountDue > 0 ? 'var(--bad)' : 'var(--muted)' }}>{existingNums.has(String(r.number)) ? 'Already in Wrap' : r.amountDue > 0 ? `${money(r.amountDue)} due` : 'Paid'}</td></tr>)}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {(!wave || withInvoices) && <span className="small muted">{preview.length} found{preview.length > 100 ? ' (showing 100; unpaid first)' : ''}</span>}
     </Modal>
   );
 }

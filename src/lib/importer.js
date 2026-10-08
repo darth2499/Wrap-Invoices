@@ -1,5 +1,7 @@
 // Import clients and past invoices from CSV (e.g. Wave exports) or from Wave invoice PDFs.
 import { num, round2, todayISO, addDays } from './format.js';
+import { totals } from './calc.js';
+import { looksSame } from './receipts.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -27,6 +29,8 @@ export const CLIENT_FIELDS = [
   { key: 'state', label: 'State', guess: ['province/state', 'state', 'province', 'region'] },
   { key: 'zip', label: 'ZIP', guess: ['postal code/zip code', 'postal code', 'zip code', 'zip', 'postcode'] },
   { key: 'country', label: 'Country', guess: ['country'] },
+  { key: 'first', label: 'Contact first name', guess: ['contact first name', 'first name'] },
+  { key: 'last', label: 'Contact last name', guess: ['contact last name', 'last name'] },
 ];
 
 export const INVOICE_FIELDS = [
@@ -66,13 +70,14 @@ export function clientsFromCsv(rows, map) {
     .map((r) => {
       const cityLine = [get(r, 'city'), [get(r, 'state'), get(r, 'zip')].filter(Boolean).join(' ')].filter(Boolean).join(', ');
       const address = [get(r, 'address1'), get(r, 'address2'), cityLine, get(r, 'country')].filter(Boolean).join('\n');
-      return { name: get(r, 'name'), email: get(r, 'email') || null, phone: get(r, 'phone') || null, address: address || null };
+      const contact = [get(r, 'first'), get(r, 'last')].filter(Boolean).join(' ');
+      return { name: get(r, 'name'), email: get(r, 'email') || null, phone: get(r, 'phone') || null, address: address || null, notes: contact && contact !== get(r, 'name') ? `Contact: ${contact}` : null };
     })
-    .filter((c) => c.name);
+    .filter((c) => c.name && !/^n\/?a$/i.test(c.name.trim()));
 }
 
 /** Groups CSV rows into invoices (one row per invoice, or one row per line item). */
-export function invoicesFromCsv(rows, map) {
+export function invoicesFromCsv(rows, map, { assume = 'unpaid' } = {}) {
   const get = (r, k) => (map[k] ? r[map[k]] : '');
   const groups = new Map();
   for (const r of rows) {
@@ -93,7 +98,8 @@ export function invoicesFromCsv(rows, map) {
     let total = num(get(first, 'total'));
     if (!total && lines.length) total = round2(lines.reduce((s, l) => s + l.amount, 0));
     if (!lines.length) lines.push({ kind: 'labor', item: 'Imported invoice', description: 'Imported from previous invoicing app', qty: 1, rate: total, amount: total });
-    const amountDue = map.amount_due ? num(get(first, 'amount_due')) : 0;
+    // No "amount due" column: use what the person chose (unpaid by default, so nothing is wrongly marked paid).
+    const amountDue = map.amount_due ? num(get(first, 'amount_due')) : assume === 'paid' ? 0 : total;
     const date = toDate(get(first, 'date')) || todayISO();
     return { number, client: get(first, 'client'), date, due: toDate(get(first, 'due')) || addDays(date, 30), total, amountDue, lines };
   });
@@ -113,17 +119,24 @@ export async function importInvoices(list, { db, api, onStep = () => {} }) {
       client = await api.insert('clients', { name: inv.client, email: inv.clientEmail || null, address: inv.clientAddress || null });
       clientsByName.set(norm(inv.client), client);
     }
-    const total = round2(inv.total);
+    const t = totals(inv.lines, 'amount', inv.discount || 0);
     const id = await api.rpc('save_invoice', {
-      inv: { number: String(inv.number), client_id: client?.id || null, issue_date: inv.date, due_date: inv.due, notes: inv.notes || null, subtotal: total, total, discount_total: 0, tax_total: 0, terms: null },
+      inv: {
+        number: String(inv.number), client_id: client?.id || null, issue_date: inv.date, due_date: inv.due, notes: inv.notes || null,
+        discount_type: 'amount', discount_value: round2(inv.discount || 0), ...t, terms: null,
+      },
       lines: inv.lines,
       summary: null,
     });
+    const total = t.total;
     await api.update('invoices', id, { status: 'sent', sent_at: new Date(inv.date + 'T12:00:00').toISOString() });
-    const paid = round2(total - num(inv.amountDue));
-    const pays = inv.payments?.length ? inv.payments : paid > 0 ? [{ date: inv.amountDue > 0 ? inv.date : inv.due, amount: paid, method: 'Imported' }] : [];
-    for (const p of pays) {
-      await api.insert('payments', { invoice_id: id, paid_on: toDate(p.date) || inv.due, amount: round2(p.amount), method: p.method || 'Imported' });
+    let pays = inv.payments?.length ? inv.payments : [];
+    if (!pays.length) {
+      const paid = round2(total - num(inv.amountDue));
+      if (paid > 0) pays = [{ date: inv.amountDue > 0 ? inv.date : inv.due, amount: paid, method: 'Imported' }];
+    }
+    if (pays.length) {
+      await api.insert('payments', pays.map((p) => ({ invoice_id: id, paid_on: toDate(p.date) || inv.due, amount: round2(p.amount), method: p.method || 'Imported' })));
     }
     existingNumbers.add(String(inv.number));
     created++;
@@ -134,26 +147,44 @@ export async function importInvoices(list, { db, api, onStep = () => {} }) {
   return { created, skipped };
 }
 
-/** Reads a Wave invoice PDF with AI and returns an import-ready invoice. */
-export async function invoiceFromPdf(file, api) {
-  const key = await api.files.upload(file, { folder: 'imports', ext: 'pdf' });
-  try {
-    const r = await api.readInvoicePdf(key);
-    return {
-      number: String(r.number || '').replace(/^#/, ''),
-      client: r.client_name,
-      clientEmail: r.client_email,
-      clientAddress: r.client_address,
-      date: toDate(r.issue_date) || todayISO(),
-      due: toDate(r.due_date) || addDays(toDate(r.issue_date) || todayISO(), 30),
-      total: num(r.total),
-      amountDue: num(r.amount_due),
-      notes: r.notes || null,
-      payments: (r.payments || []).map((p) => ({ date: p.date, amount: num(p.amount), method: p.method })),
-      lines: (r.lines || []).map((l) => ({ kind: 'labor', item: l.item, description: l.description || '', note: l.note || '', qty: num(l.qty) || 1, rate: num(l.rate), amount: num(l.amount) })),
-      fileName: file.name,
-    };
-  } finally {
-    await api.files.remove([key]).catch(() => {});
+/** Adds expenses (no receipt image) — e.g. from Wave — skipping ones that are already in Wrap. */
+export async function importExpenses(list, { db, api, onStep = () => {} }) {
+  const known = db.receipts;
+  const rows = [];
+  let skipped = 0;
+  for (const e of list) {
+    const row = { vendor: e.vendor, receipt_date: e.date, total: e.amount, category: e.category, notes: e.notes, status: 'confirmed', ai: { source: 'wave', wave_account: e.waveAccount, wave_id: e.waveId } };
+    // Only compare with what was already in Wrap: two identical charges in the same export are real (e.g. two bag fees).
+    if (known.some((r) => (r.ai?.wave_id && r.ai.wave_id === e.waveId) || looksSame(r, row))) { skipped++; continue; }
+    rows.push(row);
   }
+  for (let i = 0; i < rows.length; i += 200) {
+    onStep(`Adding expenses ${Math.min(i + 200, rows.length)} / ${rows.length}`);
+    await api.insert('receipts', rows.slice(i, i + 200));
+  }
+  return { created: rows.length, skipped };
+}
+
+/** Reads a Wave invoice PDF (its text, pulled out in the browser) and returns an import-ready invoice. */
+export async function invoiceFromPdf(file, api) {
+  const { pdfText, pdfFirstPageImage, blobToBase64 } = await import('./pdftext.js');
+  const text = await pdfText(file);
+  const payload = text.replace(/\s/g, '').length > 30
+    ? { text }
+    : { image_b64: await blobToBase64(await pdfFirstPageImage(file, 2000)), image_mime: 'image/jpeg' };
+  const r = await api.readInvoicePdf(payload);
+  return {
+    number: String(r.number || '').replace(/^#/, ''),
+    client: r.client_name,
+    clientEmail: r.client_email,
+    clientAddress: r.client_address,
+    date: toDate(r.issue_date) || todayISO(),
+    due: toDate(r.due_date) || addDays(toDate(r.issue_date) || todayISO(), 30),
+    total: num(r.total),
+    amountDue: num(r.amount_due),
+    notes: r.notes || null,
+    payments: (r.payments || []).map((p) => ({ date: p.date, amount: num(p.amount), method: p.method })),
+    lines: (r.lines || []).map((l) => ({ kind: 'labor', item: l.item, description: l.description || '', note: l.note || '', qty: num(l.qty) || 1, rate: num(l.rate), amount: num(l.amount) })),
+    fileName: file.name,
+  };
 }

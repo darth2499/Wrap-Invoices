@@ -143,11 +143,11 @@ export const api = {
     },
   },
 
-  readReceipt(key, mime) {
-    return call('receipt-read', { key, mime });
+  readReceipt(key, mime, extra = {}) {
+    return call('receipt-read', { key, mime, ...extra });
   },
-  readInvoicePdf(key) {
-    return call('receipt-read', { key, mime: 'application/pdf', mode: 'invoice' });
+  readInvoicePdf(extra) {
+    return call('receipt-read', { mode: 'invoice', ...extra });
   },
   gmail(action, payload = {}) {
     return call('gmail', { action, ...payload });

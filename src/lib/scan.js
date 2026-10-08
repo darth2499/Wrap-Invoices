@@ -322,7 +322,9 @@ export async function scanReceipt(file, { mode = 'clean', crop = true } = {}) {
   const sized = toCanvas(page, 2000);
   const cleaned = enhance(sized, mode);
   const scan = await blobOf(cleaned, 'image/jpeg', 0.85);
-  return { scan, cropped, width: cleaned.width, height: cleaned.height };
+  // A smaller copy for automatic reading: plenty of detail for text, quicker to send.
+  const read = await blobOf(toCanvas(cleaned, 1400), 'image/jpeg', 0.82);
+  return { scan, read, cropped, width: cleaned.width, height: cleaned.height };
 }
 
 /** Shrinks a big original photo before storing it (keeps it readable, saves space). */

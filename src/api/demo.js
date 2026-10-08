@@ -285,8 +285,20 @@ export const api = {
   },
 
   // In demo mode there's no AI: fake a plausible read so the review screen can be tried.
-  async readReceipt(key) {
+  async readReceipt(key, mime, extra = {}) {
     await delay(700);
+    if (extra.text) {
+      // PDF receipts: a simple text read so the demo shows real values.
+      const lines = extra.text.split('\n').map((l) => l.trim()).filter(Boolean);
+      const tot = extra.text.match(/total[^\d$]*\$?\s*([\d,]+\.\d{2})/i);
+      const dm = extra.text.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+      return {
+        is_receipt: true, vendor: lines[0] || null, total_paid: tot ? Number(tot[1].replace(/,/g, '')) : null,
+        date: dm ? `${dm[3].length === 2 ? '20' + dm[3] : dm[3]}-${dm[1].padStart(2, '0')}-${dm[2].padStart(2, '0')}` : todayISO(),
+        subtotal: null, tax: null, tip: null, currency: 'USD', amounts: [], category: 'Travel', confidence: 'medium', check: 'unknown',
+        reasoning: 'Demo mode: read from the PDF’s text with a simple rule. The live reader is smarter.', demo: true,
+      };
+    }
     const vendors = ['Parking', 'Oyamel', 'Delta Hotels', 'United Baggage', 'Uber', 'B&H Photo'];
     const v = vendors[Math.floor(Math.random() * vendors.length)];
     const subtotal = round2(10 + Math.random() * 80);
@@ -294,7 +306,7 @@ export const api = {
     const total = round2(subtotal + tax);
     return {
       is_receipt: true, vendor: v, date: todayISO(), total_paid: total, subtotal, tax, tip: null, currency: 'USD',
-      reasoning: 'Demo mode — connect Supabase + an Anthropic key to read real receipts.',
+      reasoning: 'Demo mode makes up these numbers. Once Supabase and the free Cloudflare reader are connected, real receipts are read.',
       amounts: [{ label: 'Subtotal', amount: subtotal }, { label: 'Tax', amount: tax }],
       category: v === 'Oyamel' ? 'Meals' : v === 'B&H Photo' ? 'Supplies' : v === 'Parking' ? 'Parking & tolls' : 'Travel',
       confidence: 'medium', check: 'ok', demo: true,
@@ -302,7 +314,7 @@ export const api = {
   },
   async readInvoicePdf() {
     await delay(500);
-    throw new Error('Reading Wave PDFs needs the live backend (Anthropic key). Use CSV import in demo mode.');
+    throw new Error('Reading Wave PDFs needs the live backend (the free Cloudflare reader). Use CSV import in demo mode.');
   },
 
   async gmail(action, payload) {

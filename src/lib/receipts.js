@@ -2,6 +2,7 @@
 import { sha256, extFor } from './files.js';
 import { scanReceipt, shrinkOriginal } from './scan.js';
 import { round2 } from './format.js';
+import { pdfText, pdfFirstPageImage, blobToBase64 } from './pdftext.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -35,7 +36,16 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
     let originalKey = null;
     let mime;
     let cropped = false;
+    let readWith = {};
     if (isPdf) {
+      onStep('Reading the PDF…');
+      try {
+        const text = await pdfText(file, 3);
+        if (text.replace(/\s/g, '').length > 30) readWith = { text };
+        else readWith = { image_b64: await blobToBase64(await pdfFirstPageImage(file)), image_mime: 'image/jpeg' };
+      } catch (e) {
+        console.warn('PDF read failed', e);
+      }
       onStep('Uploading PDF…');
       mime = 'application/pdf';
       fileKey = await api.files.upload(file, { folder: 'receipts', ext: 'pdf' });
@@ -50,6 +60,7 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
       }
       cropped = scan.cropped;
       mime = 'image/jpeg';
+      readWith = { image_b64: await blobToBase64(scan.read), image_mime: 'image/jpeg' };
       onStep('Uploading…');
       const original = await shrinkOriginal(file);
       [fileKey, originalKey] = await Promise.all([
@@ -62,7 +73,7 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
     onStep('Reading the receipt…');
     let ai = null;
     try {
-      ai = await api.readReceipt(fileKey, mime);
+      ai = await api.readReceipt(fileKey, mime, readWith);
     } catch (e) {
       ai = { error: e.message };
     }

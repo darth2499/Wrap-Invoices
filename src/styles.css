@@ -212,3 +212,5 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
   .basic-line .c-menu { grid-area: menu; }
   h1 { font-size: 24px; }
 }
+.btn.primary.danger-fill { background: var(--bad); border-color: var(--bad); color: #fff; }
+.btn.primary.danger-fill:disabled { opacity: .45; }
