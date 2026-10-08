@@ -1,0 +1,26 @@
+# Uploads the server functions (supabase/functions) to Supabase.
+# Runs when you change anything in supabase/functions, or by hand from the Actions tab.
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+    paths: ['supabase/functions/**', 'supabase/config.toml']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Deploy functions
+        run: |
+          for fn in files receipt-read public gmail reminders; do
+            supabase functions deploy "$fn" --project-ref "$PROJECT_REF"
+          done
