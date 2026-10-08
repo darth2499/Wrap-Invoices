@@ -117,3 +117,8 @@ export function uid() {
 export function slug(s) {
   return String(s || '').replace(/[^\w\- .$]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'file';
 }
+
+/** Payment method to show, hiding placeholders older imports saved (e.g. "Imported from Wave"). */
+export function payMethod(m) {
+  return m && !/^imported\b/i.test(String(m).trim()) ? m : null;
+}

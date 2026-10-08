@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useStore } from '../store.jsx';
-import { Button, Icon, Pill, Empty, Seg } from '../components/ui.jsx';
+import { Button, Icon, Pill, Empty } from '../components/ui.jsx';
 import { ForecastChart, MonthBars, MONTHS } from '../components/charts.jsx';
 import { forecastYear } from '../lib/forecast.js';
 import { statusOf, dueText } from '../lib/calc.js';
@@ -13,8 +13,6 @@ export default function Overview() {
   const year = Number(today.slice(0, 4));
   const name = (db.profile.business_name || '').split(' ')[0];
 
-  const [basis, setBasis] = useState(() => { try { return localStorage.getItem('wrap_chart_basis') || 'billed'; } catch { return 'billed'; } });
-  const pickBasis = (v) => { setBasis(v); try { localStorage.setItem('wrap_chart_basis', v); } catch { /* not saved */ } };
   const data = useMemo(() => {
     const open = db.invoices
       .filter((i) => i.kind === 'invoice' && i.status === 'sent')
@@ -27,7 +25,6 @@ export default function Overview() {
     const owed = Object.entries(byClient).map(([id, v]) => ({ name: derived.clients[id]?.name || 'No client', id, v })).sort((a, b) => b.v - a.v);
     // last 12 months income (payments) vs expenses (receipts)
     const labels = [];
-    const inc = [];
     const billed = [];
     const exp = [];
     const sent = db.invoices.filter((i) => i.kind === 'invoice' && !['draft', 'void'].includes(i.status));
@@ -36,7 +33,6 @@ export default function Overview() {
       const m = new Date(d.getFullYear(), d.getMonth() - k, 1);
       const key = `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}`;
       labels.push(MONTHS[m.getMonth()]);
-      inc.push(db.payments.filter((p) => p.paid_on?.startsWith(key)).reduce((s, p) => s + num(p.amount), 0));
       billed.push(sent.filter((i) => i.issue_date?.startsWith(key)).reduce((s, i) => s + num(i.total), 0));
       exp.push(
         db.receipts.filter((r) => r.receipt_date?.startsWith(key)).reduce((s, r) => s + num(r.total), 0)
@@ -45,7 +41,7 @@ export default function Overview() {
     }
     const drafts = db.invoices.filter((i) => i.kind === 'invoice' && i.status === 'draft');
     const accepted = db.invoices.filter((i) => i.kind === 'quote' && i.status === 'accepted');
-    return { open, overdue, paidYtd, expYtd, owed, labels, inc, billed, exp, drafts, accepted, f: forecastYear(db.invoices, today) };
+    return { open, overdue, paidYtd, expYtd, owed, labels, billed, exp, drafts, accepted, f: forecastYear(db.invoices, today) };
   }, [db, derived, today, year]);
 
   const outstanding = data.open.reduce((s, i) => s + i.due, 0);
@@ -105,12 +101,9 @@ export default function Overview() {
 
       <div className="grid-2">
         <section className="card" style={{ gridColumn: '1 / -1' }}>
-          <div className="card-head">
-            <div><h2>Money in vs. out</h2><p className="small muted">Last 12 months · {basis === 'billed' ? 'invoiced (by invoice date)' : 'payments received (by date paid)'} vs. expenses</p></div>
-            <Seg value={basis} onChange={pickBasis} label="Income shown" options={[{ value: 'billed', label: 'Invoiced' }, { value: 'paid', label: 'Received' }]} />
-          </div>
+          <div className="card-head"><div><h2>Money in vs. out</h2><p className="small muted">Last 12 months · invoiced (by invoice date) vs. expenses</p></div></div>
           <div style={{ padding: '0 20px 20px' }}>
-            <MonthBars labels={data.labels} series={[{ name: basis === 'billed' ? 'Invoiced' : 'Received', color: 'var(--accent)', values: basis === 'billed' ? data.billed : data.inc }, { name: 'Expenses', color: 'var(--expense)', values: data.exp }]} />
+            <MonthBars labels={data.labels} series={[{ name: 'Invoiced', color: 'var(--accent)', values: data.billed }, { name: 'Expenses', color: 'var(--expense)', values: data.exp }]} />
           </div>
         </section>
 

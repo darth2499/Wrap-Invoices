@@ -1,7 +1,7 @@
 // GENERATED from src/lib/pdf.js by scripts/sync-shared.mjs. Edit the original, not this copy.
 // Builds the invoice/quote PDF in the browser (pdf-lib). Matches components/InvoiceDoc.jsx.
 import { PDFDocument, StandardFonts, rgb } from 'npm:pdf-lib@1.17.1';
-import { money, fmtLong, num } from './format.js';
+import { money, fmtLong, num, payMethod } from './format.js';
 import { depositAmount } from './calc.js';
 
 const W = 612;
@@ -237,7 +237,7 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
   if (num(invoice.discount_total) > 0) rows.push(['Discount:', `-${money(invoice.discount_total)}`]);
   if (num(invoice.tax_total) > 0) rows.push(['Tax:', money(invoice.tax_total)]);
   rows.push(['Total:', money(invoice.total), true]);
-  for (const p of payments) rows.push([`Payment on ${fmtLong(p.paid_on)}${p.method ? ` using ${p.method.toLowerCase()}` : ''}:`, `-${money(p.amount)}`]);
+  for (const p of payments) rows.push([`Payment on ${fmtLong(p.paid_on)}${payMethod(p.method) ? ` using ${payMethod(p.method).toLowerCase()}` : ''}:`, `-${money(p.amount)}`]);
   if (!isQuote) rows.push(['Amount Due (USD):', money(due), true, true]);
   const deposit = depositAmount(invoice);
   if (deposit > 0 && paid < deposit) rows.push([`Deposit due now (${num(invoice.deposit_percent)}%):`, money(deposit - paid), true]);

@@ -1,5 +1,5 @@
 // The invoice as the client sees it (screen version). The PDF is drawn to match in lib/pdf.js.
-import { money, fmtLong, num } from '../lib/format.js';
+import { money, fmtLong, num, payMethod } from '../lib/format.js';
 import { depositAmount } from '../lib/calc.js';
 
 export default function InvoiceDoc({ business = {}, invoice, client, lines, payments = [], logoUrl }) {
@@ -90,7 +90,7 @@ export default function InvoiceDoc({ business = {}, invoice, client, lines, paym
             {num(invoice.discount_total) > 0 && <TotRow label="Discount" value={`−${money(invoice.discount_total)}`} />}
             {num(invoice.tax_total) > 0 && <TotRow label="Tax" value={money(invoice.tax_total)} />}
             <TotRow label="Total" value={money(invoice.total)} strong />
-            {payments.map((p, i) => <TotRow key={i} label={`Payment on ${fmtLong(p.paid_on)}${p.method ? ` (${p.method})` : ''}`} value={`−${money(p.amount)}`} muted />)}
+            {payments.map((p, i) => <TotRow key={i} label={`Payment on ${fmtLong(p.paid_on)}${payMethod(p.method) ? ` (${payMethod(p.method)})` : ''}`} value={`−${money(p.amount)}`} muted />)}
             {!isQuote && <TotRow label="Amount due (USD)" value={money(due)} strong big />}
             {deposit > 0 && paid < deposit && <TotRow label={`Deposit due now (${num(invoice.deposit_percent)}%)`} value={money(deposit - paid)} strong />}
           </tbody>

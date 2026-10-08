@@ -181,10 +181,10 @@ export async function importInvoices(list, { db, api, onStep = () => {}, fill = 
     let pays = inv.payments?.length ? inv.payments : [];
     if (!pays.length) {
       const paid = round2(total - num(inv.amountDue));
-      if (paid > 0) pays = [{ date: inv.amountDue > 0 ? inv.date : inv.due, amount: paid, method: 'Imported' }];
+      if (paid > 0) pays = [{ date: inv.amountDue > 0 ? inv.date : inv.due, amount: paid, method: null }];
     }
     if (pays.length) {
-      await api.insert('payments', pays.map((p) => ({ invoice_id: id, paid_on: toDate(p.date) || inv.due, amount: round2(p.amount), method: p.method || 'Imported' })));
+      await api.insert('payments', pays.map((p) => ({ invoice_id: id, paid_on: toDate(p.date) || inv.due, amount: round2(p.amount), method: p.method || null })));
     }
     existingNumbers.add(String(inv.number));
     created++;

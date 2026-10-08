@@ -91,7 +91,7 @@ export function parseWaveInvoiceText(text) {
     else if (/^Amount Due/i.test(label)) amountDue = value;
     else if (/^Payment on /i.test(label)) {
       const pm = label.match(/^Payment on (.+?\d{4})(?: using (?:an? )?(.+))?$/i);
-      payments.push({ date: longDate(pm?.[1]), amount: Math.abs(value), method: pm?.[2] ? pm[2].replace(/^\w/, (c) => c.toUpperCase()) : 'Imported' });
+      payments.push({ date: longDate(pm?.[1]), amount: Math.abs(value), method: pm?.[2] ? pm[2].replace(/^\w/, (c) => c.toUpperCase()) : null });
     } else if (/discount/i.test(label) || value < 0) discount += Math.abs(value);
     else tax += value;
   }

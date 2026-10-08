@@ -3,7 +3,7 @@ import { useStore } from '../store.jsx';
 import { Button, Field, Icon, Menu, Modal, MoneyInput, Pill, Switch, Empty } from '../components/ui.jsx';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import { statusOf, dueText } from '../lib/calc.js';
-import { money, fmtDate, fmtDateTime, fmtShort, fmtTsDate, num, todayISO, round2 } from '../lib/format.js';
+import { money, fmtDate, fmtDateTime, fmtShort, fmtTsDate, num, todayISO, round2, payMethod } from '../lib/format.js';
 import * as A from '../lib/actions.js';
 import { go, shareUrl } from '../router.js';
 
@@ -126,7 +126,7 @@ export default function InvoiceDetail({ id }) {
               {payments.length === 0 && <p className="small muted" style={{ padding: '0 20px 16px' }}>No payments yet.</p>}
               {payments.map((p) => (
                 <div key={p.id} className="list-row" style={{ gridTemplateColumns: '1fr auto auto', cursor: 'default' }}>
-                  <span className="col" style={{ gap: 0 }}><span>{fmtDate(p.paid_on)}</span><span className="small muted">{p.method || 'Payment'}{p.note ? ` · ${p.note}` : ''}</span></span>
+                  <span className="col" style={{ gap: 0 }}><span>{fmtDate(p.paid_on)}</span><span className="small muted">{payMethod(p.method) || 'Payment'}{p.note ? ` · ${p.note}` : ''}</span></span>
                   <span className="num">{money(p.amount)}</span>
                   <Menu label="" icon="more" variant="ghost icon" items={[{ label: 'Edit', icon: 'edit', onClick: () => setModal({ type: 'pay', payment: p }) }, { label: 'Delete payment', icon: 'trash', danger: true, onClick: async () => (await s.confirm({ title: 'Delete this payment?', body: `${money(p.amount)} on ${fmtDate(p.paid_on)}`, ok: 'Delete', danger: true })) && run('dp', () => A.deletePayment(s, p), 'Payment deleted') }]} />
                 </div>

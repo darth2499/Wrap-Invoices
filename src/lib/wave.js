@@ -90,7 +90,7 @@ export function parseWaveAccounting(rows, { termsDays = 30 } = {}) {
         it.date = it.date || date;
       } else if (amount < 0) {
         const other = get(r, 'Other Accounts for this Transaction');
-        it.payments.push({ date, amount: round2(-amount), method: /payroll clearing|wave/i.test(other) ? 'Wave Payments' : 'Imported from Wave' });
+        it.payments.push({ date, amount: round2(-amount), method: /payroll clearing|wave/i.test(other) ? 'Wave Payments' : null });
       }
       continue;
     }
