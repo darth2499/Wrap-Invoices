@@ -1,0 +1,17 @@
+# Used by the "Deploy backend" GitHub Action when it uploads the edge functions.
+project_id = "wrap"
+
+[functions.public]
+verify_jwt = false
+
+[functions.reminders]
+verify_jwt = false
+
+[functions.files]
+verify_jwt = true
+
+[functions.receipt-read]
+verify_jwt = true
+
+[functions.gmail]
+verify_jwt = true
