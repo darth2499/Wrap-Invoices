@@ -2,7 +2,7 @@
 import { uid, toISO, addDays, round2, datesCode } from '../lib/format.js';
 
 // Bump this whenever the sample data changes, so browsers drop their old copy.
-export const SEED_VERSION = 'v5';
+export const SEED_VERSION = 'v6';
 
 const addDaysDate = (d, n) => new Date(d.getTime() + n * 86400000);
 
@@ -77,11 +77,11 @@ export function seedDemo(owner, token) {
         const ot = rnd() < 0.15 ? 1 : 0;
         const amt = dates.length * 750 + ot * 112.5;
         lines.push(ot
-          ? { kind: 'labor', item: 'Camera Operator', description: `${co} (${datesCode(dates)})`, qty: 1, rate: amt, amount: amt, note: `${dates.map(() => '$750').join(' + ')} (plus 1 hour OT)` }
-          : { kind: 'labor', item: 'Camera Operator', description: `${co} (${datesCode(dates)})`, qty: dates.length, rate: 750, amount: amt, note: null });
+          ? { kind: 'labor', item: 'Camera Operator', dates, description: `${co} (${datesCode(dates)})`, qty: 1, rate: amt, amount: amt, note: `${dates.map(() => '$750').join(' + ')} (plus 1 hour OT)` }
+          : { kind: 'labor', item: 'Camera Operator', dates, description: `${co} (${datesCode(dates)})`, qty: dates.length, rate: 750, amount: amt, note: null });
         if (rnd() < 0.5) {
           const p = round2(15 + rnd() * 50);
-          lines.push({ kind: 'expense', item: 'Parking', description: `${co} (${datesCode([dates[0]])})`, qty: 1, rate: p, amount: p, note: null });
+          lines.push({ kind: 'expense', item: 'Parking', dates: [dates[0]], description: `${co} (${datesCode([dates[0]])})`, qty: 1, rate: p, amount: p, note: null });
         }
       }
       const total = round2(lines.reduce((s, l) => s + l.amount, 0));
@@ -122,10 +122,10 @@ export function seedDemo(owner, token) {
   };
   const recent = addDays(toISO(now), -8);
   const benInv = oneOff(ben, recent, [
-    { kind: 'labor', item: 'Sound Mixer', description: `Sep shoot (${datesCode([recent])})`, qty: 1, rate: 850, amount: 850 },
-    { kind: 'gear', item: 'Sound Gear', description: `(${datesCode([recent])})`, qty: 1, rate: 450, amount: 450 },
+    { kind: 'labor', item: 'Sound Mixer', dates: [recent], description: `Universal press day (${datesCode([recent])})`, qty: 1, rate: 850, amount: 850 },
+    { kind: 'gear', item: 'Sound Gear', dates: [recent], description: `Lav kit + recorder (${datesCode([recent])})`, qty: 1, rate: 450, amount: 450 },
   ]);
-  oneOff(chad, addDays(recent, -3), [{ kind: 'labor', item: 'Camera Operator', description: 'Brand shoot', qty: 2, rate: 750, amount: 1500 }, { kind: 'gear', item: 'Camera Package (FX6)', description: '2 days', qty: 2, rate: 400, amount: 800 }, { kind: 'expense', item: 'Meal', description: 'Crew lunch', qty: 1, rate: 200, amount: 200 }]);
+  oneOff(chad, addDays(recent, -3), [{ kind: 'labor', item: 'Camera Operator', dates: [addDays(recent, -6), addDays(recent, -5)], description: `Brand shoot (${datesCode([addDays(recent, -6), addDays(recent, -5)])})`, qty: 2, rate: 750, amount: 1500 }, { kind: 'gear', item: 'Camera Package (FX6)', description: '2 days', qty: 2, rate: 400, amount: 800 }, { kind: 'expense', item: 'Meal', description: 'Crew lunch', qty: 1, rate: 200, amount: 200 }]);
   oneOff(simz, addDays(recent, -1), [{ kind: 'labor', item: 'Editing', description: 'Social cutdowns', qty: 8, rate: 85, amount: 680 }, { kind: 'expense', item: 'Music license', description: '', qty: 1, rate: 70, amount: 70 }]);
   oneOff(simz, at(Y - 1, 5, 12), [{ kind: 'labor', item: 'Sound Mixer', description: 'Doc interview', qty: 2, rate: 850, amount: 1700 }], 'paid');
 
@@ -141,7 +141,7 @@ export function seedDemo(owner, token) {
     const when = new Date(Y - 1, 0, 6 + k * 27 + Math.floor(rnd() * 9), 12);
     if (when > addDaysDate(now, -20)) break;
     const iso = toISO(when);
-    const ls = jobs[Math.floor(rnd() * jobs.length)].map((l) => ({ ...l, description: `${l.description} (${datesCode([iso])})`, amount: round2(l.qty * l.rate) }));
+    const ls = jobs[Math.floor(rnd() * jobs.length)].map((l) => ({ ...l, dates: [iso], description: `${l.description} (${datesCode([iso])})`, amount: round2(l.qty * l.rate) }));
     oneOff(others[k % others.length], iso, ls, 'paid');
   }
 

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { Icon } from './ui.jsx';
+import Search, { useSearchShortcut } from './Search.jsx';
 import { queueFiles } from '../lib/scanQueue.js';
 import { go } from '../router.js';
 import { useStore } from '../store.jsx';
@@ -18,6 +19,8 @@ const NAV = [
 ];
 
 export default function Layout({ route, children }) {
+  const [searching, setSearching] = useState(false);
+  useSearchShortcut(setSearching);
   const { db, user } = useStore();
   const section = route.parts[0] || '';
   const review = db.receipts.filter((r) => r.status === 'review').length;
@@ -35,6 +38,7 @@ export default function Layout({ route, children }) {
         <button className="btn primary new-btn" style={{ margin: '0 0 12px', flex: 'none' }} onClick={() => go('/invoices/new')} aria-label="New invoice">
           <Icon name="plus" size={16} /><span>New invoice</span>
         </button>
+        <button type="button" className="nav" onClick={() => setSearching(true)}><Icon name="search" /><span>Search</span></button>
         {NAV.map((n) => (
           <a key={n.id} href={`#/${n.id}`} className={`nav ${current === n.id ? 'on' : ''}`} aria-current={current === n.id ? 'page' : undefined}>
             <Icon name={n.icon} />
@@ -49,12 +53,13 @@ export default function Layout({ route, children }) {
         </div>
       </nav>
       <main className="main">{children}</main>
-      <MobileNav current={current} review={review} />
+      {searching && <Search onClose={() => setSearching(false)} />}
+      <MobileNav current={current} review={review} onSearch={() => setSearching(true)} />
     </div>
   );
 }
 
-function MobileNav({ current, review }) {
+function MobileNav({ current, review, onSearch }) {
   const [open, setOpen] = useState(false);
   const cam = useRef(null);
   const item = (id, label, icon) => (
@@ -67,6 +72,7 @@ function MobileNav({ current, review }) {
       {open && <div className="scrim" style={{ background: 'rgba(0,0,0,.2)', zIndex: 39 }} onClick={() => setOpen(false)} />}
       {open && (
         <div className="sheet" role="menu">
+          <button onClick={() => { setOpen(false); onSearch(); }}><Icon name="search" />Search</button>
           <a href="#/invoices/new" onClick={() => setOpen(false)}><Icon name="plus" />New invoice</a>
           <a href="#/invoices/new?kind=quote" onClick={() => setOpen(false)}><Icon name="quote" />New quote</a>
           <a href="#/quotes" onClick={() => setOpen(false)}><Icon name="quote" />Quotes</a>

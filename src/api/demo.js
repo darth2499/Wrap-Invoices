@@ -249,16 +249,23 @@ export const api = {
       const { inv, lines, summary } = args;
       const id = inv.id || uid();
       let row = state.invoices.find((i) => i.id === id);
-      if (row && row.status !== 'draft') {
+      // Same rules as the live database: edits within 10 minutes of the last version are merged into it;
+      // at most 10 earlier versions and 30 history events per invoice.
+      const recent = row && state.invoice_revisions.some((r) => r.invoice_id === id && Date.now() - new Date(r.created_at).getTime() < 600000);
+      let merged = false;
+      if (row && row.status !== 'draft' && recent) {
+        const last = state.invoice_events.filter((e) => e.invoice_id === id && e.type === 'edited').sort((x, y) => (x.created_at < y.created_at ? 1 : -1))[0];
+        if (last) Object.assign(last, { detail: summary || last.detail, created_at: nowTs() });
+        merged = true;
+      } else if (row && row.status !== 'draft') {
         state.invoice_revisions.push({
           id: uid(), owner_id: DEMO_UID, invoice_id: id, version: row.version, summary: summary || null, created_at: nowTs(),
           snapshot: { invoice: clone(row), lines: clone(state.invoice_lines.filter((l) => l.invoice_id === id).sort((a, b) => a.position - b.position)) },
         });
         state.invoice_events.push({ id: uid(), owner_id: DEMO_UID, invoice_id: id, type: 'edited', detail: summary || `Invoice updated (version ${row.version + 1})`, created_at: nowTs() });
-        // Same limits as the live database: 20 earlier versions, 60 history events per invoice.
-        const revs = state.invoice_revisions.filter((r) => r.invoice_id === id).sort((x, y) => y.version - x.version).slice(20).map((r) => r.id);
+        const revs = state.invoice_revisions.filter((r) => r.invoice_id === id).sort((x, y) => y.version - x.version).slice(10).map((r) => r.id);
         state.invoice_revisions = state.invoice_revisions.filter((r) => !revs.includes(r.id));
-        const evs = state.invoice_events.filter((e) => e.invoice_id === id).sort((x, y) => (x.created_at < y.created_at ? 1 : -1)).slice(60).map((e) => e.id);
+        const evs = state.invoice_events.filter((e) => e.invoice_id === id).sort((x, y) => (x.created_at < y.created_at ? 1 : -1)).slice(30).map((e) => e.id);
         state.invoice_events = state.invoice_events.filter((e) => !evs.includes(e.id));
       }
       const fields = ['number', 'client_id', 'project_id', 'issue_date', 'due_date', 'terms', 'notes', 'mode', 'jobs', 'discount_type', 'discount_value', 'deposit_percent', 'subtotal', 'discount_total', 'tax_total', 'total', 'auto_remind'];
@@ -266,7 +273,7 @@ export const api = {
       for (const f of fields) if (f in inv) patch[f] = inv[f] === '' ? null : inv[f];
       if (row) {
         checkUnique('invoices', { ...row, ...patch });
-        const bump = row.status !== 'draft';
+        const bump = row.status !== 'draft' && !merged;
         Object.assign(row, patch, { updated_at: nowTs(), version: bump ? row.version + 1 : row.version });
       } else {
         row = { id, owner_id: DEMO_UID, kind: inv.kind || 'invoice', quote_id: inv.quote_id || null, created_at: nowTs(), updated_at: nowTs(), ...DEFAULTS.invoices(), ...patch };
@@ -276,7 +283,7 @@ export const api = {
       }
       state.invoice_lines = state.invoice_lines.filter((l) => l.invoice_id !== id);
       (lines || []).forEach((l, i) =>
-        state.invoice_lines.push({ id: uid(), owner_id: DEMO_UID, invoice_id: id, position: i, kind: l.kind || 'labor', item: l.item || '', description: l.description || null, note: l.note || null, qty: num(l.qty), rate: num(l.rate), amount: num(l.amount), tax_rate: num(l.tax_rate), day_type: l.day_type || null, receipt_id: l.receipt_id || null }),
+        state.invoice_lines.push({ id: uid(), owner_id: DEMO_UID, invoice_id: id, position: i, kind: l.kind || 'labor', item: l.item || '', description: l.description || null, note: l.note || null, qty: num(l.qty), rate: num(l.rate), amount: num(l.amount), tax_rate: num(l.tax_rate), day_type: l.day_type || null, receipt_id: l.receipt_id || null, dates: Array.isArray(l.dates) && l.dates.length ? l.dates : null }),
       );
       refreshStatus(id);
       save();

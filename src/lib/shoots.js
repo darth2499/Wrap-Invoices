@@ -40,6 +40,15 @@ export function shootDays(invoices, linesFor) {
       continue;
     }
     const lines = linesFor(inv.id);
+    // Dates picked with the line's date picker win; otherwise read them from the description.
+    const picked = lines.filter((l) => Array.isArray(l.dates) && l.dates.length && (!l.kind || l.kind === 'labor'));
+    if (picked.length) {
+      for (const l of picked) {
+        const label = String(l.description || '').replace(CODE, '').trim() || l.item || 'Shoot';
+        for (const d of l.dates) add(d, label);
+      }
+      continue;
+    }
     // Work lines first; gear/expense lines (parking, meals) only count if there's no work line with dates.
     const work = lines.filter((l) => (!l.kind || l.kind === 'labor') && CODE.test(l.description || ''));
     for (const l of work.length ? work : lines.filter((x) => CODE.test(x.description || ''))) {

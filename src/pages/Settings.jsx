@@ -359,6 +359,7 @@ function Data() {
   const [wave, setWave] = useState(null);
   const counts = { invoices: s.db.invoices.length, receipts: s.db.receipts.length, clients: s.db.clients.length };
   const backup = async () => {
+    if (DEMO) return; // demo: downloads are switched off
     setStep('Preparing…');
     try {
       const { blob, name, missing } = await exportBackup(s.api, s.db, setStep);
@@ -373,19 +374,17 @@ function Data() {
   const last = (() => { try { return localStorage.getItem('wrap_last_backup'); } catch { return null; } })();
   return (
     <>
-      {!DEMO && (
-        <>
       <div className="grid-2">
         <section className="card card-pad col" style={{ gap: 12 }}>
           <h2>Back up everything</h2>
           <p className="muted" style={{ lineHeight: 1.6 }}>Downloads one .zip with all your data ({plural(counts.invoices, 'invoice')}, {plural(counts.receipts, 'receipt')}, {plural(counts.clients, 'client')}…) and every receipt image. Keep it somewhere safe, like Google Drive.</p>
-          <Button variant="primary" icon="download" busy={!!step} onClick={backup} style={{ alignSelf: 'flex-start' }}>{step || 'Download backup'}</Button>
+          <Button disabled={DEMO} variant="primary" icon="download" busy={!!step} onClick={() => !DEMO && backup()} style={{ alignSelf: 'flex-start' }}>{step || 'Download backup'}</Button>
           <span className="small muted">{last ? `Last backup from this browser: ${last}` : 'Tip: back up once a month.'}</span>
         </section>
         <section className="card card-pad col" style={{ gap: 12 }}>
           <h2>Restore from a backup</h2>
           <p className="muted" style={{ lineHeight: 1.6 }}>Upload a Wrap backup .zip to bring everything back — data, receipts and settings. Links you shared keep working.</p>
-          <Button icon="upload" style={{ alignSelf: 'flex-start' }} onClick={async () => {
+          <Button disabled={DEMO} icon="upload" style={{ alignSelf: 'flex-start' }} onClick={async () => { if (DEMO) return;
             const [file] = await pickFiles({ accept: '.zip,application/zip' });
             if (!file) return;
             try { setRestore({ ...(await readBackup(file)), name: file.name }); } catch (e) { s.toast(e.message, { error: true }); }
@@ -396,16 +395,14 @@ function Data() {
         <h2>Import from Wave or another app</h2>
         <p className="muted" style={{ lineHeight: 1.6 }}>Bring in your clients and past invoices so reports and the year-end forecast have history.</p>
         <div className="row wrap">
-          <Button variant="primary" icon="upload" onClick={async () => { const files = await pickFiles({ accept: '.zip,.csv,application/zip,text/csv', multiple: true }); if (files.length) setWave(files); }}>Wave export (.zip)</Button>
-          <Button icon="clients" onClick={async () => { const [f] = await pickFiles({ accept: '.csv,text/csv' }); if (f) setImp({ type: 'clients', csv: parseCSV(await f.text()) }); }}>Clients from CSV</Button>
-          <Button icon="invoice" onClick={async () => { const [f] = await pickFiles({ accept: '.csv,text/csv' }); if (f) setImp({ type: 'invoices', csv: parseCSV(await f.text()) }); }}>Invoices from CSV</Button>
-          <Button icon="sparkle" onClick={async () => { const files = await pickFiles({ accept: 'application/pdf', multiple: true }); if (files.length) setImp({ type: 'pdfs', files }); }}>Wave invoice PDFs</Button>
+          <Button disabled={DEMO} variant="primary" icon="upload" onClick={async () => { if (DEMO) return; const files = await pickFiles({ accept: '.zip,.csv,application/zip,text/csv', multiple: true }); if (files.length) setWave(files); }}>Wave export (.zip)</Button>
+          <Button disabled={DEMO} icon="clients" onClick={async () => { if (DEMO) return; const [f] = await pickFiles({ accept: '.csv,text/csv' }); if (f) setImp({ type: 'clients', csv: parseCSV(await f.text()) }); }}>Clients from CSV</Button>
+          <Button disabled={DEMO} icon="invoice" onClick={async () => { if (DEMO) return; const [f] = await pickFiles({ accept: '.csv,text/csv' }); if (f) setImp({ type: 'invoices', csv: parseCSV(await f.text()) }); }}>Invoices from CSV</Button>
+          <Button disabled={DEMO} icon="sparkle" onClick={async () => { if (DEMO) return; const files = await pickFiles({ accept: 'application/pdf', multiple: true }); if (files.length) setImp({ type: 'pdfs', files }); }}>Wave invoice PDFs</Button>
         </div>
         <p className="small muted"><b>Easiest:</b> pick the .zip from Wave (or select its CSV files together). Wrap figures out which file is which and imports customers first, then invoices, payments and expenses. Safe to run again: anything already in Wrap is skipped.</p>
         <p className="small muted">In Wave: Sales &amp; Payments → Customers → Export for clients. Invoice PDFs (Wrap reads line items and payments) can be added any time: if the invoice is already in Wrap from the zip, its line details are filled in instead of making a duplicate.</p>
       </section>
-        </>
-      )}
       {DEMO && (
         <section className="card card-pad col" style={{ gap: 10 }}>
           <h2>Demo data</h2>
@@ -413,8 +410,8 @@ function Data() {
           <Button className="danger" style={{ alignSelf: 'flex-start' }} onClick={async () => { if (await s.confirm({ title: 'Reset demo data?', body: 'Puts the sample data back.', ok: 'Reset', danger: true })) { resetDemo(); window.location.reload(); } }}>Reset demo data</Button>
         </section>
       )}
-      {!DEMO && <StorageCard />}
-      {!DEMO && <ResetSection onBackup={backup} backupBusy={!!step} />}
+      <StorageCard />
+      <ResetSection onBackup={backup} backupBusy={!!step} />
       {restore && <RestoreModal backup={restore} onClose={() => setRestore(null)} />}
       {imp && <ImportModal imp={imp} onClose={() => setImp(null)} />}
       {wave && <WaveModal files={wave} onClose={() => setWave(null)} />}
@@ -433,7 +430,7 @@ function StorageCard() {
     try { setU(await s.api.files.usage(recount)); setErr(''); } catch (e) { setErr(e.message); }
     setBusy(false);
   };
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!DEMO) load(); else setU({ used: 0, limit: 9.5 * 1024 ** 3, mine: 0 }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const GB = 1024 ** 3;
   const fmt = (n) => (n >= GB ? `${(n / GB).toFixed(2)} GB` : `${Math.max(0, n / 1024 ** 2).toFixed(n < 10 * 1024 ** 2 ? 1 : 0)} MB`);
   const pct = u ? Math.min(100, (u.used / u.limit) * 100) : 0;
@@ -475,7 +472,7 @@ function ResetSection({ onBackup, backupBusy }) {
   const s = useStore();
   const [unlocked, setUnlocked] = useState(false);
   const [open, setOpen] = useState(false);
-  const start = async () => {
+  const start = async () => { if (DEMO) return;
     const ok = await s.confirm({
       title: 'Delete all your data?',
       body: 'Every invoice, quote, client, receipt, expense, payment and report in this account will be deleted. This can’t be undone.',
@@ -490,7 +487,7 @@ function ResetSection({ onBackup, backupBusy }) {
       <h2 style={{ color: 'var(--bad)' }}>Reset account</h2>
       <p className="muted" style={{ lineHeight: 1.6 }}>Deletes all your data and receipt files so you can start from scratch. Your login, Gmail connection and invites stay. Download a backup first if you might want it back.</p>
       <label className="row" style={{ gap: 10, alignSelf: 'flex-start', cursor: 'pointer' }}>
-        <Switch checked={unlocked} onChange={setUnlocked} label="Unlock reset" />
+        <Switch checked={unlocked} disabled={DEMO} onChange={(v) => !DEMO && setUnlocked(v)} label="Unlock reset" />
         <span>{unlocked ? 'Reset unlocked' : 'Turn on to unlock reset'}</span>
       </label>
       <Button className="danger" icon="trash" disabled={!unlocked} style={{ alignSelf: 'flex-start', opacity: unlocked ? 1 : 0.45 }} onClick={start}>{'Reset account…'}</Button>
@@ -506,7 +503,7 @@ function ResetModal({ onBackup, backupBusy, onClose }) {
   const [step, setStep] = useState('');
   const ready = typed.trim().toUpperCase() === 'RESET';
   const counts = { invoices: s.db.invoices.length, clients: s.db.clients.length, receipts: s.db.receipts.length };
-  const run = async () => {
+  const run = async () => { if (DEMO) return;
     if (!ready) return;
     try {
       const keys = s.db.receipts.flatMap((r) => [r.file_key, r.original_key]).filter(Boolean);
@@ -557,7 +554,7 @@ function RestoreModal({ backup, onClose }) {
   const s = useStore();
   const [mode, setMode] = useState('replace');
   const [step, setStep] = useState('');
-  const run = async () => {
+  const run = async () => { if (DEMO) return;
     if (mode === 'replace' && !(await s.confirm({ title: 'Replace everything?', body: 'Your current data in Wrap is deleted and replaced with the backup. Download a backup of the current data first if you might need it.', ok: 'Replace', danger: true }))) return;
     setStep('Starting…');
     try {
@@ -618,7 +615,7 @@ function ImportModal({ imp, onClose }) {
       : imp.type === 'invoices' ? invoicesFromCsv(imp.csv.rows, map, { assume }) : pdfList || [];
   const count = wave ? (withInvoices ? w.invoices.length : 0) + (withExpenses ? w.expenses.length : 0) : imp.type === 'pdfs' ? preview.filter((r) => pdfMatch(r, s.db).action !== 'skip').length : preview.length;
 
-  const run = async () => {
+  const run = async () => { if (DEMO) return;
     setStep('Importing…');
     try {
       if (imp.type === 'clients') {
@@ -732,7 +729,7 @@ function WaveModal({ files, onClose }) {
   const on = (k) => has[k] && want[k];
   const nothing = !on('clients') && !on('invoices') && !on('expenses');
 
-  const run = async () => {
+  const run = async () => { if (DEMO) return;
     const parts = [];
     try {
       let db = s.db;

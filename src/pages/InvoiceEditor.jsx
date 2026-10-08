@@ -4,6 +4,7 @@ import { Button, Combobox, Field, Icon, Menu, Modal, MoneyInput, Seg, Switch, Ca
 import { totals, compileJobs, otRule, jobLabor, lineAmount } from '../lib/calc.js';
 import { money, num, round2, todayISO, addDays, uid, datesLabel, datesCode, mmdd, fmtShort } from '../lib/format.js';
 import { saveInvoice, copyLink } from '../lib/actions.js';
+import { datesFromCode } from '../lib/shoots.js';
 import { go } from '../router.js';
 
 const TERMS = [
@@ -15,7 +16,7 @@ const TERMS = [
   { label: 'Net 60', days: 60 },
 ];
 
-const blankLine = (extra = {}) => ({ key: uid(), kind: 'labor', item: '', description: '', note: '', qty: 1, rate: 0, base_rate: 0, tax_rate: 0, day_type: null, receipt_id: null, ...extra });
+const blankLine = (extra = {}) => ({ key: uid(), kind: 'labor', item: '', description: '', note: '', dates: [], qty: 1, rate: 0, base_rate: 0, tax_rate: 0, day_type: null, receipt_id: null, ...extra });
 const blankJob = (rate = 750, role = 'Camera Operator') => ({ id: uid(), company: '', role, rate, days: [], gear: [], expenses: [] });
 
 export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, clientId }) {
@@ -158,8 +159,12 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
       }
       dirty.current = false;
       const fresh = (await s.api.reload('invoices')).find((i) => i.id === savedId);
-      if (after === 'link' && fresh) await copyLink(s, fresh);
-      else s.toast(existing && existing.status !== 'draft' ? 'Saved — your client sees the update at the same link' : 'Saved');
+      if (after === 'final' && fresh && fresh.status === 'draft') {
+        // "Save" finalizes it: no longer a draft, ready to send (it only says Sent once it's actually sent).
+        await s.update('invoices', savedId, { status: 'sent', sent_at: null });
+        await s.insert('invoice_events', { invoice_id: savedId, type: 'edited', detail: 'Saved — ready to send' });
+        s.toast('Saved — ready to send');
+      } else s.toast(existing && existing.status !== 'draft' ? 'Saved — your client sees the update at the same link' : 'Saved');
       await s.reload('invoices', 'invoice_events');
       go(`/invoices/${savedId}`);
     } catch (e) {
@@ -184,7 +189,7 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
         </div>
         <div className="row wrap">
           {!sentAlready && <Button busy={busy} onClick={() => save()}>Save draft</Button>}
-          <Button variant="primary" busy={busy} icon={sentAlready ? 'check' : 'link'} onClick={() => save(sentAlready ? null : 'link')}>{sentAlready ? 'Save changes' : 'Save & copy link'}</Button>
+          <Button variant="primary" busy={busy} icon="check" onClick={() => save(sentAlready ? null : 'final')}>{sentAlready ? 'Save changes' : 'Save'}</Button>
         </div>
       </div>
 
@@ -217,7 +222,7 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
       </section>
 
       {form.mode === 'basic' ? (
-        <BasicLines lines={lines} setLines={(fn) => { dirty.current = true; setLines(fn); }} db={db} derived={derived} openPicker={setPicker} mileageIds={mileageIds} setMileageIds={setMileageIds} />
+        <BasicLines issueDate={form.issue_date} lines={lines} setLines={(fn) => { dirty.current = true; setLines(fn); }} db={db} derived={derived} openPicker={setPicker} mileageIds={mileageIds} setMileageIds={setMileageIds} />
       ) : (
         <AdvancedJobs jobs={jobs} setJobs={(fn) => { dirty.current = true; setJobs(fn); }} rule={rule} db={db} openPicker={setPicker} finalLines={finalLines} total={t.total} />
       )}
@@ -270,7 +275,7 @@ function defaultRole(db) {
 /* ------------------------------------------------------------------ */
 /* Basic: Wave-style line items                                        */
 /* ------------------------------------------------------------------ */
-function BasicLines({ lines, setLines, db, openPicker, mileageIds, setMileageIds }) {
+function BasicLines({ lines, setLines, db, openPicker, mileageIds, setMileageIds, issueDate }) {
   const catalog = db.catalog_items.filter((c) => !c.archived).sort((a, b) => a.position - b.position);
   const hasTax = db.tax_rates.length > 0;
   const upd = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
@@ -318,7 +323,7 @@ function BasicLines({ lines, setLines, db, openPicker, mileageIds, setMileageIds
             <span>Item</span><span>Description</span><span>Qty</span><span>Price</span>{hasTax && <span>Tax</span>}<span className="right">Amount</span><span />
           </div>
           {lines.map((l) => (
-            <BasicLine key={l.key} l={l} cols={cols} dragging={dragKey === l.key} onGrip={(e) => startDrag(l.key, e)} catalog={catalog} db={db} hasTax={hasTax} upd={upd} move={move} remove={() => setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== l.key) : [blankLine()]))} dup={() => setLines((ls) => { const i = ls.findIndex((x) => x.key === l.key); const c = [...ls]; c.splice(i + 1, 0, { ...l, key: uid(), receipt_id: null }); return c; })} />
+            <BasicLine key={l.key} l={l} issueDate={issueDate} cols={cols} dragging={dragKey === l.key} onGrip={(e) => startDrag(l.key, e)} catalog={catalog} db={db} hasTax={hasTax} upd={upd} move={move} remove={() => setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== l.key) : [blankLine()]))} dup={() => setLines((ls) => { const i = ls.findIndex((x) => x.key === l.key); const c = [...ls]; c.splice(i + 1, 0, { ...l, key: uid(), receipt_id: null }); return c; })} />
           ))}
         </div>
       </div>
@@ -335,9 +340,10 @@ function BasicLines({ lines, setLines, db, openPicker, mileageIds, setMileageIds
   );
 }
 
-function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup, dragging, onGrip }) {
+function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup, dragging, onGrip, issueDate }) {
   const [calOpen, setCalOpen] = useState(false);
-  const [calDates, setCalDates] = useState([]);
+  // Shoot dates are saved on the line (they show on the Calendar); older lines fall back to the dates in the description.
+  const [calDates, setCalDates] = useState(() => (Array.isArray(l.dates) && l.dates.length ? l.dates : (() => { const m = String(l.description || '').match(/\((\d{2}\/\d{2}(?:-\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:-\d{2}\/\d{2})?)*)\)/); return m ? datesFromCode(m[1], issueDate) : []; })()));
   const isDay = l.kind === 'labor' || l.kind === 'gear';
   const listId = `cat-${l.key}`;
   const pickItem = (name) => {
@@ -349,7 +355,7 @@ function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup, dragg
     setCalDates(dates);
     const code = datesCode(dates);
     const desc = l.description.replace(/\s*\((\d\d\/\d\d(-\d\d\/\d\d)?(, )?)+\)\s*$/, '').trim();
-    upd(l.key, { description: code ? `${desc}${desc ? ' ' : ''}(${code})` : desc, qty: isDay && dates.length ? dates.length : l.qty });
+    upd(l.key, { dates, description: code ? `${desc}${desc ? ' ' : ''}(${code})` : desc, qty: isDay && dates.length ? dates.length : l.qty });
   };
   return (
     <div className={`line basic-line ${dragging ? 'dragging' : ''}`} data-line-key={l.key} style={{ gridTemplateColumns: cols }}>

@@ -1,3 +1,4 @@
+import { DEMO } from '../config.js';
 // Import clients and past invoices from CSV (e.g. Wave exports) or from Wave invoice PDFs.
 import { num, round2, todayISO, addDays } from './format.js';
 import { totals } from './calc.js';
@@ -81,6 +82,7 @@ export function clientsFromCsv(rows, map) {
  * Returns the full, updated client list so invoices imported next can link to them.
  */
 export async function importClients(list, { db, api }) {
+  if (DEMO) throw new Error('Not available in the demo');
   const byName = new Map(db.clients.map((c) => [norm(c.name), c]));
   const seen = new Set();
   const fresh = [];
@@ -150,6 +152,7 @@ export function pdfMatch(inv, db) {
 
 /** Creates clients and invoices. store: the app store (insert/rpc/reload). */
 export async function importInvoices(list, { db, api, onStep = () => {}, fill = false }) {
+  if (DEMO) throw new Error('Not available in the demo');
   const clientsByName = new Map(db.clients.map((c) => [norm(c.name), c]));
   const existingNumbers = new Set(db.invoices.filter((i) => i.kind === 'invoice').map((i) => String(i.number)));
   let created = 0;
@@ -215,6 +218,7 @@ async function fillInvoice({ ex, t, discount }, inv, { db, api }) {
 
 /** Adds expenses (no receipt image) — e.g. from Wave — skipping ones that are already in Wrap. */
 export async function importExpenses(list, { db, api, onStep = () => {} }) {
+  if (DEMO) throw new Error('Not available in the demo');
   const known = db.receipts;
   const rows = [];
   let skipped = 0;

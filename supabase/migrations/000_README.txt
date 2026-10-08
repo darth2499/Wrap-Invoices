@@ -6,3 +6,4 @@ Run these in the Supabase SQL Editor, in this order:
   5. 005_storage_limit.sql  (only if you set up before Oct 8, 2026 — already included in 001)
   6. 006_links_on_send.sql  (only if you set up before Oct 8, 2026 — already included in 001)
   7. 007_history_limit.sql  (only if you set up before Oct 8, 2026 — already included in 001)
+  8. 008_dates_history.sql  (only if you set up before Oct 8, 2026 — already included in 001)

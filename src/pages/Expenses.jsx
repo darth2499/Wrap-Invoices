@@ -31,7 +31,7 @@ function Receipts({ query }) {
   const [year, setYear] = useState('all');
   const [q, setQ] = useState('');
   const [queue, setQueue] = useState([]); // { name, step, status, message }
-  const [open, setOpen] = useState(null);
+  const [open, setOpen] = useState(query.open || null);
   const [urls, setUrls] = useState({});
   const [over, setOver] = useState(false);
   const busy = queue.some((x) => x.status === 'working');

@@ -107,8 +107,8 @@ export function Seg({ value, options, onChange, label }) {
   );
 }
 
-export function Switch({ checked, onChange, label }) {
-  return <button type="button" role="switch" aria-checked={!!checked} aria-label={label} className={`switch ${checked ? 'on' : ''}`} onClick={() => onChange(!checked)} />;
+export function Switch({ checked, onChange, label, disabled }) {
+  return <button type="button" role="switch" aria-checked={!!checked} aria-label={label} disabled={disabled} className={`switch ${checked ? 'on' : ''}`} onClick={() => !disabled && onChange(!checked)} />;
 }
 
 export function Modal({ title, onClose, children, footer, wide }) {

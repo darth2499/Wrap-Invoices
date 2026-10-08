@@ -37,7 +37,7 @@ export async function copyLink(s, inv) {
   } catch {
     window.prompt('Copy this link:', url);
   }
-  if (inv.status === 'draft') {
+  if (inv.status === 'draft' || !inv.sent_at) {
     await s.update('invoices', inv.id, { status: 'sent', sent_at: new Date().toISOString() });
     await logEvent(s, inv.id, 'sent', 'Client link copied');
     s.toast('Link copied — marked as sent');

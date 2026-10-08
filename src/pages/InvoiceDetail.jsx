@@ -19,6 +19,7 @@ export default function InvoiceDetail({ id }) {
   const [receiptUrls, setReceiptUrls] = useState({});
   const route = useRoute();
   // Quick actions from the invoice list open straight into the right window (?do=pay|send|remind).
+  const [showAll, setShowAll] = useState(false);
   const [modal, setModal] = useState(() => ({ pay: { type: 'pay' }, send: { type: 'email', reminder: false }, remind: { type: 'email', reminder: true } }[route.query.do] || null));
   const [busy, setBusy] = useState('');
 
@@ -44,7 +45,8 @@ export default function InvoiceDetail({ id }) {
   const st = statusOf(inv, paid);
   const events = db.invoice_events.filter((e) => e.invoice_id === inv.id).sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   const revisions = db.invoice_revisions.filter((r) => r.invoice_id === inv.id).sort((a, b) => b.version - a.version);
-  const canRemind = !isQuote && inv.status === 'sent';
+  const isDraft = inv.status === 'draft' && !isQuote; // drafts can't be sent or paid until saved as final
+  const canRemind = !isQuote && inv.status === 'sent' && !!inv.sent_at;
 
   const run = async (key, fn, ok) => {
     setBusy(key);
@@ -60,7 +62,8 @@ export default function InvoiceDetail({ id }) {
 
   const more = [
     { label: 'Duplicate', icon: 'copy', onClick: () => go(`/invoices/new?from=${inv.id}`) },
-    inv.status === 'draft' && { label: 'Mark as sent', icon: 'check', onClick: () => run('sent', () => A.markSent(s, inv), 'Marked as sent') },
+    !isQuote && inv.status === 'sent' && !inv.sent_at && { label: 'Mark as sent (sent another way)', icon: 'check', onClick: () => run('sent', () => A.markSent(s, inv), 'Marked as sent') },
+    isQuote && inv.status === 'draft' && { label: 'Mark as sent', icon: 'check', onClick: () => run('sent', () => A.markSent(s, inv), 'Marked as sent') },
     isQuote && ['sent', 'draft'].includes(inv.status) && { label: 'Mark accepted', icon: 'check', onClick: () => run('acc', () => s.update('invoices', inv.id, { status: 'accepted' }), 'Marked accepted') },
     isQuote && ['sent', 'draft', 'accepted'].includes(inv.status) && { label: 'Mark declined', icon: 'x', onClick: () => run('dec', () => s.update('invoices', inv.id, { status: 'declined' }), 'Marked declined') },
     inv.share_token && { label: 'Open client link', icon: 'eye', onClick: () => window.open(shareUrl(inv.share_token) + '?preview=1', '_blank') },
@@ -92,7 +95,8 @@ export default function InvoiceDetail({ id }) {
           {inv.status !== 'void' && inv.status !== 'converted' && <Button icon="edit" onClick={() => go(`/invoices/${inv.id}/edit`)}>Edit</Button>}
           {isQuote && ['accepted', 'sent', 'draft'].includes(inv.status) && <Button variant="primary" icon="convert" busy={busy === 'conv'} onClick={() => run('conv', async () => { const nid = await A.convertQuote(s, inv); go(`/invoices/${nid}`); }, 'Invoice created from quote')}>Turn into invoice</Button>}
           {isQuote && inv.converted_invoice_id && <Button onClick={() => go(`/invoices/${inv.converted_invoice_id}`)}>Open invoice</Button>}
-          {!isQuote && inv.status !== 'void' && inv.status !== 'paid' && <Button variant="primary" icon="cash" onClick={() => setModal({ type: 'pay' })}>Record payment</Button>}
+          {!isQuote && !isDraft && inv.status !== 'void' && inv.status !== 'paid' && <Button variant="primary" icon="cash" onClick={() => setModal({ type: 'pay' })}>Record payment</Button>}
+          {isDraft && <Button variant="primary" icon="check" busy={busy === 'final'} onClick={() => run('final', async () => { await s.update('invoices', inv.id, { status: 'sent', sent_at: null }); await A.logEvent(s, inv.id, 'edited', 'Saved — ready to send'); }, 'Saved — ready to send')}>Save as final</Button>}
           <Menu label="More" items={more} />
         </div>
       </div>
@@ -108,7 +112,7 @@ export default function InvoiceDetail({ id }) {
         <div className="col" style={{ gap: 16, minWidth: 0, flex: '1 1 320px' }}>
           <section className="card card-pad col" style={{ gap: 10 }}>
             <h2>{inv.share_token ? 'Share & download' : 'Send'}</h2>
-            {inv.status !== 'void' && inv.status !== 'paid' && (
+            {inv.status !== 'void' && inv.status !== 'paid' && !isDraft && (
               <>
                 <Button variant="primary" icon="mail" onClick={() => setModal({ type: 'email', reminder: false })}>{inv.share_token ? 'Email again' : 'Send from Gmail'}</Button>
                 <Button icon="link" busy={busy === 'link'} onClick={() => run('link', () => A.copyLink(s, inv))}>{inv.share_token ? 'Copy client link' : 'Send as link (copy)'}</Button>
@@ -167,7 +171,7 @@ export default function InvoiceDetail({ id }) {
           <section className="card card-pad col" style={{ gap: 10 }}>
             <h2>History</h2>
             {events.length === 0 && <span className="small muted">Nothing yet.</span>}
-            {events.slice(0, 30).map((e) => (
+            {events.slice(0, showAll ? 30 : 4).map((e) => (
               <div key={e.id} className="row" style={{ alignItems: 'flex-start', gap: 10 }}>
                 <span style={{ width: 8, height: 8, marginTop: 6, borderRadius: '50%', background: e.type === 'payment' ? 'var(--good)' : e.type === 'viewed' ? 'var(--accent)' : '#9a9ba1', flex: 'none' }} />
                 <span className="col" style={{ gap: 0 }}>
@@ -179,12 +183,17 @@ export default function InvoiceDetail({ id }) {
             {revisions.length > 0 && (
               <div className="col" style={{ gap: 6, borderTop: '1px solid var(--line-2)', paddingTop: 10 }}>
                 <span className="small muted">Earlier versions (what the client saw before each change)</span>
-                {revisions.map((r) => (
+                {revisions.slice(0, showAll ? 10 : 2).map((r) => (
                   <button key={r.id} className="btn sm" style={{ justifyContent: 'space-between' }} onClick={() => setModal({ type: 'rev', rev: r })}>
                     <span>Version {r.version}{r.summary ? ` — ${r.summary}` : ''}</span><span className="muted small">{fmtTsDate(r.created_at)}</span>
                   </button>
                 ))}
               </div>
+            )}
+            {(events.length > 4 || revisions.length > 2) && (
+              <button type="button" className="expander" aria-expanded={showAll} aria-label={showAll ? 'Show less history' : 'Show all history'} onClick={() => setShowAll(!showAll)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+              </button>
             )}
           </section>
         </div>

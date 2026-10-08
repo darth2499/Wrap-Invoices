@@ -60,8 +60,15 @@ export default function Invoices({ kind }) {
   const sum = shown.reduce((t, r) => t + (isQuote || filter === 'paid' || filter === 'all' ? num(r.total) : r.due), 0);
 
   // Same client more than once in this view → small count next to their name (tap it to show only them).
+  // Same client more than once → each of their invoices is numbered 1, 2, 3… oldest first.
   const counts = {};
-  for (const r of shown) if (r.client_id) counts[r.client_id] = (counts[r.client_id] || 0) + 1;
+  const byClient = {};
+  for (const r of shown) if (r.client_id) (byClient[r.client_id] ||= []).push(r);
+  for (const list of Object.values(byClient)) {
+    if (list.length < 2) continue;
+    [...list].sort((a, b) => String(a.issue_date).localeCompare(String(b.issue_date)) || (Number(a.number) || 0) - (Number(b.number) || 0))
+      .forEach((r, i) => { counts[r.id] = { n: i + 1, of: list.length }; });
+  }
 
   // Columns can be dragged into any order (remembered on this device).
   const [cols, setCols] = useState(() => {
@@ -80,11 +87,11 @@ export default function Invoices({ kind }) {
 
   const store = useStore();
   const actions = (r) => {
-    const open = r.status !== 'void' && r.status !== 'paid';
+    const open = r.status !== 'void' && r.status !== 'paid' && (isQuote || r.status !== 'draft');
     return [
       { label: 'Edit', icon: 'edit', onClick: () => go(`/invoices/${r.id}/edit`) },
       open && { label: r.share_token ? 'Send again' : `Send ${isQuote ? 'quote' : 'invoice'}`, icon: 'mail', onClick: () => go(`/invoices/${r.id}?do=send`) },
-      !isQuote && r.status === 'sent' && { label: 'Send reminder', icon: 'bell', onClick: () => go(`/invoices/${r.id}?do=remind`) },
+      !isQuote && r.status === 'sent' && r.sent_at && { label: 'Send reminder', icon: 'bell', onClick: () => go(`/invoices/${r.id}?do=remind`) },
       !isQuote && open && { label: 'Record payment', icon: 'cash', onClick: () => go(`/invoices/${r.id}?do=pay`) },
       { label: 'Download PDF', icon: 'download', onClick: () => A.downloadPdf(store, r).catch((e) => store.toast(e.message, { error: true })) },
       { label: 'Duplicate', icon: 'copy', onClick: () => go(`/invoices/new?from=${r.id}`) },
@@ -181,7 +188,7 @@ const COLS = {
       <>
         <div className="row" style={{ gap: 8 }}>
           <span style={{ fontWeight: 500 }}>{r.client?.name || <span className="muted">No client</span>}</span>
-          {counts[r.client_id] > 1 && <button type="button" className="count-badge" onClick={(e) => { e.stopPropagation(); setQ(r.client?.name || ''); }} aria-label={`Show only ${r.client?.name} (${counts[r.client_id]})`}>{counts[r.client_id]}</button>}
+          {counts[r.id] && <button type="button" className="count-badge" onClick={(e) => { e.stopPropagation(); setQ(r.client?.name || ''); }} aria-label={`${counts[r.id].n} of ${counts[r.id].of} for ${r.client?.name} — show only them`} title={`${counts[r.id].n} of ${counts[r.id].of}`}>{counts[r.id].n}</button>}
         </div>
         {(r.project || r.notes) && <div className="small muted">{r.project?.name || r.notes}</div>}
       </>

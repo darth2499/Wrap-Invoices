@@ -1,7 +1,7 @@
 // Shoot calendar: every day you worked (from invoice line dates), so you can see where each invoice lands.
 import { useMemo, useState } from 'react';
 import { useStore } from '../store.jsx';
-import { Button, Icon, Pill } from '../components/ui.jsx';
+import { Button, Pill, Seg } from '../components/ui.jsx';
 import { shootDays } from '../lib/shoots.js';
 import { statusOf } from '../lib/calc.js';
 import { money, todayISO } from '../lib/format.js';
@@ -15,17 +15,22 @@ export default function Calendar() {
   const today = todayISO();
   const [ym, setYm] = useState(today.slice(0, 7));
   const [sel, setSel] = useState(today);
+  const [view, setView] = useState(() => { try { return localStorage.getItem('wrap_cal_view') || 'shoots'; } catch { return 'shoots'; } });
+  const pickView = (v) => { setView(v); try { localStorage.setItem('wrap_cal_view', v); } catch { /* not saved */ } };
 
   const byDate = useMemo(() => {
     const map = {};
-    for (const s of shootDays(db.invoices, derived.linesFor)) {
+    const entries = view === 'shoots'
+      ? shootDays(db.invoices, derived.linesFor)
+      : db.invoices.filter((i) => i.status !== 'void' && i.issue_date).map((i) => ({ date: i.issue_date, invoiceId: i.id, label: derived.clients[i.client_id]?.name || `#${i.number}` }));
+    for (const s of entries) {
       const inv = derived.invoices[s.invoiceId];
       if (!inv) continue;
       const st = inv.kind === 'quote' ? { key: 'draft', label: 'Quote' } : statusOf(inv, derived.paidFor(inv.id), today);
       (map[s.date] ||= []).push({ ...s, inv, st, client: derived.clients[inv.client_id]?.name || '' });
     }
     return map;
-  }, [db.invoices, derived, today]);
+  }, [db.invoices, derived, today, view]);
 
   const [y, m] = ym.split('-').map(Number);
   const first = new Date(y, m - 1, 1);
@@ -40,14 +45,16 @@ export default function Calendar() {
     <div className="page">
       <div className="page-head">
         <h1>Calendar</h1>
-        <div className="row" style={{ gap: 6 }}>
+        <div className="row cal-nav" style={{ gap: 6, flexWrap: 'nowrap' }}>
+          {/* Today keeps its spot even when hidden, so the arrows never move. */}
+          <Button size="sm" style={{ visibility: ym === today.slice(0, 7) ? 'hidden' : 'visible' }} onClick={() => { setYm(today.slice(0, 7)); setSel(today); }}>Today</Button>
           <Button variant="icon" icon="chev-left" aria-label="Previous month" onClick={() => shift(-1)} />
-          <strong style={{ minWidth: 150, textAlign: 'center' }}>{first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</strong>
+          <strong style={{ width: 150, textAlign: 'center' }}>{first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</strong>
           <Button variant="icon" icon="chev-right" aria-label="Next month" onClick={() => shift(1)} />
-          {ym !== today.slice(0, 7) && <Button size="sm" onClick={() => { setYm(today.slice(0, 7)); setSel(today); }}>Today</Button>}
         </div>
       </div>
 
+      <Seg value={view} onChange={pickView} label="Show" options={[{ value: 'shoots', label: 'Shoot days' }, { value: 'issued', label: 'Invoice dates' }]} />
       <section className="card cal" aria-label={`${monthDays} shoot days`}>
         <div className="cal-grid cal-dow">{DOW.map((d) => <span key={d}>{d}</span>)}</div>
         <div className="cal-grid">

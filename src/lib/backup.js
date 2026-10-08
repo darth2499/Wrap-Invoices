@@ -1,3 +1,4 @@
+import { DEMO } from '../config.js';
 // Full backup (all data + every receipt file in one .zip) and restore from that zip.
 import JSZip from 'jszip';
 import { TABLES } from '../api/tables.js';
@@ -17,6 +18,7 @@ function fileKeys(db) {
 }
 
 export async function exportBackup(api, db, onStep = () => {}) {
+  if (DEMO) throw new Error('Not available in the demo');
   const zip = new JSZip();
   const data = { app: 'wrap', format: 1, exported_at: new Date().toISOString(), owner_id: db.profile.id, profile: db.profile, tables: {} };
   for (const t of TABLES) data.tables[t] = db[t];
@@ -65,6 +67,7 @@ export async function readBackup(file) {
  * mode 'merge':   keeps current data, adds/updates rows from the backup.
  */
 export async function restoreBackup(api, { zip, data }, uid, mode, onStep = () => {}, current = null) {
+  if (DEMO) throw new Error('Not available in the demo');
   const oldPrefix = `${data.owner_id}/`;
   const newPrefix = `${uid}/`;
   const remap = (k) => (k && k.startsWith(oldPrefix) ? newPrefix + k.slice(oldPrefix.length) : k);

@@ -104,6 +104,7 @@ export function statusOf(inv, paid = 0, today = todayISO()) {
   if (inv.status === 'void') return { key: 'void', label: 'Void' };
   if (inv.status === 'paid') return { key: 'paid', label: 'Paid' };
   if (inv.status === 'draft') return { key: 'draft', label: 'Draft' };
+  if (inv.kind === 'invoice' && !inv.sent_at && paid <= 0) return { key: 'ready', label: 'Not sent' };
   const overdue = inv.due_date && inv.due_date < today;
   if (overdue) {
     const d = daysBetween(inv.due_date, today);
