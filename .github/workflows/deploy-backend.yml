@@ -5,7 +5,7 @@ name: Deploy backend
 on:
   push:
     branches: [main]
-    paths: ['supabase/functions/**', 'supabase/config.toml', 'src/lib/pdf.js', 'src/lib/format.js', 'src/lib/calc.js', 'scripts/sync-shared.mjs']
+    paths: ['supabase/functions/**', 'supabase/config.toml', 'src/lib/pdf.js', 'src/lib/format.js', 'src/lib/calc.js', 'src/lib/emailTemplate.js', 'scripts/sync-shared.mjs']
   workflow_dispatch:
 
 jobs:
