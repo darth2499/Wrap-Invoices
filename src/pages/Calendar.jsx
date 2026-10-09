@@ -1,5 +1,5 @@
 // Shoot calendar: every day you worked (from invoice line dates), so you can see where each invoice lands.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store.jsx';
 import { Button, Pill, Seg } from '../components/ui.jsx';
 import { shootDays } from '../lib/shoots.js';
@@ -14,7 +14,7 @@ export default function Calendar() {
   const { db, derived } = useStore();
   const today = todayISO();
   const [ym, setYm] = useState(today.slice(0, 7));
-  const [sel, setSel] = useState(today);
+  const [pick, setPick] = useState(null); // a day with several invoices: { items, x, y }
   const [view, setView] = useState(() => { try { return localStorage.getItem('wrap_cal_view') || 'shoots'; } catch { return 'shoots'; } });
   const pickView = (v) => { setView(v); try { localStorage.setItem('wrap_cal_view', v); } catch { /* not saved */ } };
 
@@ -39,7 +39,22 @@ export default function Calendar() {
   while (cells.length % 7) cells.push(null);
   const shift = (k) => { const d = new Date(y, m - 1 + k, 1); setYm(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`); };
   const monthDays = Object.keys(byDate).filter((d) => d.startsWith(ym)).length;
-  const list = byDate[sel] || [];
+  useEffect(() => {
+    if (!pick) return undefined;
+    const close = (e) => { if (!e.target.closest?.('.cal-pick')) setPick(null); };
+    const esc = (e) => e.key === 'Escape' && setPick(null);
+    document.addEventListener('pointerdown', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('pointerdown', close); window.removeEventListener('scroll', close, true); window.removeEventListener('keydown', esc); };
+  }, [pick]);
+  // Tap a day: one invoice opens it; several show a short list to pick from.
+  const open = (items, e) => {
+    if (items.length === 1) return go(`/invoices/${items[0].inv.id}`);
+    const r = e.currentTarget.getBoundingClientRect();
+    const w = 260;
+    return setPick({ items, x: Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)), y: r.bottom + 6 });
+  };
 
   return (
     <div className="page">
@@ -47,26 +62,27 @@ export default function Calendar() {
         <h1>Calendar</h1>
         <div className="row cal-nav" style={{ gap: 6, flexWrap: 'nowrap' }}>
           {/* Today keeps its spot even when hidden, so the arrows never move. */}
-          <Button size="sm" style={{ visibility: ym === today.slice(0, 7) ? 'hidden' : 'visible' }} onClick={() => { setYm(today.slice(0, 7)); setSel(today); }}>Today</Button>
-          <Button variant="icon" icon="chev-left" aria-label="Previous month" onClick={() => shift(-1)} />
+          <Button size="sm" style={{ visibility: ym === today.slice(0, 7) ? 'hidden' : 'visible' }} onClick={() => setYm(today.slice(0, 7))}>Today</Button>
+          <Button variant="icon" icon="chevL" aria-label="Previous month" onClick={() => shift(-1)} />
           <strong style={{ width: 150, textAlign: 'center' }}>{first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</strong>
-          <Button variant="icon" icon="chev-right" aria-label="Next month" onClick={() => shift(1)} />
+          <Button variant="icon" icon="chevR" aria-label="Next month" onClick={() => shift(1)} />
         </div>
       </div>
 
       <Seg value={view} onChange={pickView} label="Show" options={[{ value: 'shoots', label: 'Shoot days' }, { value: 'issued', label: 'Invoice dates' }]} />
-      <section className="card cal" aria-label={`${monthDays} shoot days`}>
-        <div className="cal-grid cal-dow">{DOW.map((d) => <span key={d}>{d}</span>)}</div>
-        <div className="cal-grid">
+      <section className="card scal" aria-label={`${monthDays} shoot days`}>
+        <div className="scal-grid scal-dow">{DOW.map((d) => <span key={d}>{d}</span>)}</div>
+        <div className="scal-grid">
           {cells.map((d, i) => {
-            if (!d) return <span key={i} className="cal-cell empty" />;
+            if (!d) return <span key={i} className="cal-blank" />;
             const items = byDate[d] || [];
+            if (!items.length) return <span key={d} className={`cal-cell ${d === today ? 'today' : ''}`}><span className="cal-num">{Number(d.slice(8))}</span></span>;
             return (
-              <button type="button" key={d} className={`cal-cell ${d === today ? 'today' : ''} ${d === sel ? 'sel' : ''} ${items.length ? 'has' : ''}`} onClick={() => setSel(d)} aria-label={`${d}: ${items.length ? items.map((x) => `${x.label} (#${x.inv.number})`).join(', ') : 'no shoots'}`}>
+              <button type="button" key={d} className={`cal-cell has ${d === today ? 'today' : ''}`} onClick={(e) => open(items, e)} aria-label={`${d}: ${items.length ? items.map((x) => `${x.label} (#${x.inv.number})`).join(', ') : 'no shoots'}`}>
                 <span className="cal-num">{Number(d.slice(8))}</span>
                 <span className="cal-chips">
                   {items.slice(0, 3).map((x, k) => (
-                    <span key={k} className={`cal-chip st-${x.st.key}`} onClick={(e) => { e.stopPropagation(); go(`/invoices/${x.inv.id}`); }}>{x.label}</span>
+                    <span key={k} className={`cal-chip st-${x.st.key}`}>{x.label}</span>
                   ))}
                   {items.length > 3 && <span className="cal-more">+{items.length - 3}</span>}
                 </span>
@@ -77,19 +93,15 @@ export default function Calendar() {
         </div>
       </section>
 
-      {list.length > 0 && (
-        <section className="card">
-          <div className="m-list" style={{ display: 'flex' }}>
-            {list.map((x, k) => (
-              <button type="button" key={k} className="m-card cal-row" onClick={() => go(`/invoices/${x.inv.id}`)}>
-                <span className="who">{x.label}</span>
-                <span className="amt num">{money(x.inv.total)}</span>
-                <span className="meta">{x.client} · #{x.inv.number}</span>
-                <span className="st"><Pill kind={x.st.key}>{x.st.label}</Pill></span>
-              </button>
-            ))}
-          </div>
-        </section>
+      {pick && (
+        <div className="cal-pick" style={{ left: pick.x, top: pick.y }} role="menu">
+          {pick.items.map((x, k) => (
+            <button type="button" role="menuitem" key={k} onClick={() => go(`/invoices/${x.inv.id}`)}>
+              <span className="col" style={{ gap: 0, minWidth: 0 }}><b className="ellip">{x.label}</b><span className="small muted">#{x.inv.number} · {money(x.inv.total)}</span></span>
+              <Pill kind={x.st.key}>{x.st.label}</Pill>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

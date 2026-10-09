@@ -141,3 +141,9 @@ export function periodOptions(dates) {
     ...years.map((y) => ({ value: y, label: y })),
   ];
 }
+
+/** File name for an invoice/quote PDF, e.g. Invoice_149_2026-10-08.pdf */
+export function pdfFileName(invoice) {
+  const label = invoice.kind === 'quote' ? 'Quote' : 'Invoice';
+  return `${label}_${String(invoice.number).replace(/[^\w-]/g, '')}_${invoice.issue_date || ''}.pdf`;
+}

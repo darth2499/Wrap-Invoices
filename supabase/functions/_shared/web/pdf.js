@@ -363,7 +363,4 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
   return pdf.save();
 }
 
-export function pdfFileName(invoice) {
-  const label = invoice.kind === 'quote' ? 'Quote' : 'Invoice';
-  return `${label}_${String(invoice.number).replace(/[^\w-]/g, '')}_${invoice.issue_date || ''}.pdf`;
-}
+export { pdfFileName } from './format.js';

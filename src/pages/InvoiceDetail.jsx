@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.jsx';
-import { Button, Field, Icon, Menu, Modal, MoneyInput, Pill, Switch, Empty } from '../components/ui.jsx';
+import { Button, Field, Menu, Modal, MoneyInput, Pill, Switch, Empty } from '../components/ui.jsx';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import EmailPreview from '../components/EmailPreview.jsx';
 import { buildInvoiceEmail } from '../lib/emailTemplate.js';
@@ -70,13 +70,13 @@ export default function InvoiceDetail({ id }) {
     inv.share_token && { label: 'Open client link', icon: 'eye', onClick: () => window.open(shareUrl(inv.share_token) + '?preview=1', '_blank') },
     inv.share_token && { label: 'Turn off client link', icon: 'x', onClick: async () => (await s.confirm({ title: 'Turn off the client link?', body: 'The link you sent stops working right away. Sending again makes a new link.', ok: 'Turn off' })) && run('unshare', () => s.update('invoices', inv.id, { share_token: null }), 'Client link turned off') },
     inv.status === 'void' && { label: 'Undo void', icon: 'history', onClick: () => run('unvoid', () => A.unvoidInvoice(s, inv), 'Restored') },
+    {
+      label: `Delete ${label.toLowerCase()}`, icon: 'trash', danger: true,
+      onClick: async () => { if (await A.confirmDelete(s, inv)) go(isQuote ? '/quotes' : '/invoices'); },
+    },
     inv.status !== 'void' && inv.status !== 'draft' && !isQuote && {
       label: 'Void invoice', icon: 'x', danger: true,
       onClick: async () => (await s.confirm({ title: `Void invoice #${inv.number}?`, body: 'It stays in your records (numbers stay in order) but no longer counts as owed. The client link will say it’s no longer active.', ok: 'Void', danger: true })) && run('void', () => A.voidInvoice(s, inv), 'Voided'),
-    },
-    (inv.status === 'draft' || isQuote) && {
-      label: `Delete ${label.toLowerCase()}`, icon: 'trash', danger: true,
-      onClick: async () => { if (await s.confirm({ title: `Delete #${inv.number}?`, body: 'This can’t be undone. Attached receipts are kept.', ok: 'Delete', danger: true })) { await A.deleteInvoice(s, inv); go(isQuote ? '/quotes' : '/invoices'); } },
     },
   ];
 

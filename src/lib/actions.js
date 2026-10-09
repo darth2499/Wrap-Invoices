@@ -1,6 +1,8 @@
 // Things you do to invoices, shared by several screens.
 import { totals, compileJobs, otRule } from './calc.js';
-import { buildInvoicePdf, imageBytes, pdfFileName } from './pdf.js';
+import { pdfFileName } from './format.js';
+// The PDF maker (pdf-lib) only loads the first time you download or email a PDF.
+const pdfLib = () => import('./pdf.js');
 import { buildInvoiceZip, downloadBlob } from './files.js';
 import { mmdd, round2, todayISO, num, money } from './format.js';
 import { shareUrl } from '../router.js';
@@ -75,6 +77,20 @@ export async function unvoidInvoice(s, inv) {
   await s.api.rpc('refresh_invoice_status', { inv: inv.id });
   await logEvent(s, inv.id, 'edited', 'Void undone');
   await s.reload('invoices');
+}
+
+/** Asks first (saying what goes with it), then deletes. Returns true when deleted. */
+export async function confirmDelete(s, inv) {
+  const pays = s.db.payments.filter((p) => p.invoice_id === inv.id).length;
+  const body = [
+    'This can’t be undone. Attached receipts and mileage are kept.',
+    inv.share_token && 'The client link stops working.',
+    pays && `Its ${pays === 1 ? 'payment is' : `${pays} payments are`} deleted too.`,
+  ].filter(Boolean).join(' ');
+  if (!(await s.confirm({ title: `Delete #${inv.number}?`, body, ok: 'Delete', danger: true }))) return false;
+  await deleteInvoice(s, inv);
+  s.toast('Deleted');
+  return true;
 }
 
 export async function deleteInvoice(s, inv) {
@@ -184,6 +200,7 @@ export async function invoiceBundle(s, inv) {
 
 export async function downloadPdf(s, inv) {
   const b = await invoiceBundle(s, inv);
+  const { buildInvoicePdf, imageBytes } = await pdfLib();
   const logo = b.logoUrl ? await imageBytes(b.logoUrl) : null;
   const bytes = await buildInvoicePdf({ ...b, invoice: inv, logo });
   downloadBlob(new Blob([bytes], { type: 'application/pdf' }), pdfFileName(inv));
@@ -191,6 +208,7 @@ export async function downloadPdf(s, inv) {
 
 export async function downloadZip(s, inv) {
   const b = await invoiceBundle(s, inv);
+  const { buildInvoicePdf, imageBytes } = await pdfLib();
   const logo = b.logoUrl ? await imageBytes(b.logoUrl) : null;
   const bytes = await buildInvoicePdf({ ...b, invoice: inv, logo });
   const zip = await buildInvoiceZip(bytes, pdfFileName(inv), b.receipts);

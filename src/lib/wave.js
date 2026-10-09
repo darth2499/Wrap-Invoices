@@ -4,7 +4,8 @@
 //   Sales Discounts rows  → invoice discount (negative amounts)
 //   Accounts Receivable   → positive = invoice total, negative = a payment on that invoice
 //   Expense-group rows    → expenses (become receipts without an image)
-import JSZip from 'jszip';
+// jszip loads only when a zip is made or opened.
+const loadZip = () => import('jszip').then((m) => m.default);
 import { round2, addDays } from './format.js';
 import { parseCSV } from './files.js';
 import { guessColumn } from './importer.js';
@@ -160,7 +161,7 @@ export async function readWaveFiles(files) {
   const csvs = [];
   for (const f of files) {
     if (/\.zip$/i.test(f.name) || /zip/.test(f.type)) {
-      const zip = await JSZip.loadAsync(f);
+      const zip = await (await loadZip()).loadAsync(f);
       for (const e of Object.values(zip.files)) {
         if (e.dir || e.name.includes('__MACOSX') || !/\.csv$/i.test(e.name)) continue;
         csvs.push({ name: e.name.split('/').pop(), text: await e.async('string') });

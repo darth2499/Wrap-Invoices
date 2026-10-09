@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/index.js';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import { Button, Icon, Spinner } from '../components/ui.jsx';
-import { pdfFileName } from '../lib/pdf.js';
+import { pdfFileName } from '../lib/format.js';
 import { buildInvoiceZip, downloadBlob } from '../lib/files.js';
 import { money, fmtLong, fmtShort, fmtTsDate, num } from '../lib/format.js';
 import { useRoute } from '../router.js';

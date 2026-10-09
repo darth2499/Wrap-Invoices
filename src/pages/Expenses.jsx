@@ -8,6 +8,7 @@ import { money, fmtDate, fmtShort, num, todayISO, round2, plural, inPeriod, peri
 import { pickFiles, sha256 } from '../lib/files.js';
 import { go } from '../router.js';
 import { takeFiles, onFiles } from '../lib/scanQueue.js';
+import { rateFor, followsIrs } from '../lib/mileage.js';
 
 export default function Expenses({ tab, query }) {
   return (
@@ -27,8 +28,13 @@ export default function Expenses({ tab, query }) {
 function Receipts({ query }) {
   const s = useStore();
   const { db, derived } = s;
-  const [filter, setFilter] = useState(query.status === 'review' ? 'review' : 'all');
-  const [year, setYear] = useState('all');
+  // The filter and period you picked are remembered on this device.
+  const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem('wrap_exp_view')) || {}; } catch { return {}; } });
+  const [filter, setFilterState] = useState(query.status === 'review' ? 'review' : saved.filter || 'all');
+  const [year, setYearState] = useState(saved.year || 'all');
+  const remember = (patch) => { try { localStorage.setItem('wrap_exp_view', JSON.stringify({ filter, year, ...patch })); } catch { /* not saved */ } };
+  const setFilter = (v) => { setFilterState(v); remember({ filter: v }); };
+  const setYear = (v) => { setYearState(v); remember({ year: v }); };
   const [q, setQ] = useState('');
   const [queue, setQueue] = useState([]); // { name, step, status, message }
   const [open, setOpen] = useState(query.open || null);
@@ -36,7 +42,6 @@ function Receipts({ query }) {
   const [over, setOver] = useState(false);
   const busy = queue.some((x) => x.status === 'working');
 
-  const years = [...new Set(db.receipts.map((r) => r.receipt_date?.slice(0, 4)).filter(Boolean))].sort().reverse();
   const list = useMemo(() => {
     const t = q.trim().toLowerCase();
     return db.receipts
@@ -278,7 +283,7 @@ export function ReceiptModal({ id, onClose, onNext }) {
       <div className="row wrap" style={{ alignItems: 'flex-start', gap: 20 }}>
         <div className="col" style={{ flex: '1 1 280px', minWidth: 0, gap: 8 }}>
           {r.original_key && <Seg value={view} onChange={setView} label="Image" options={[{ value: 'scan', label: ai.cropped === false ? 'Cleaned up' : 'Cropped · sharpened' }, { value: 'orig', label: 'Original photo' }]} />}
-          <div style={{ background: '#e9e9e5', borderRadius: 12, minHeight: 240, maxHeight: 'min(520px, 48vh)', overflow: 'auto', display: 'grid', placeItems: 'center' }}>
+          <div style={{ background: 'var(--sunken)', borderRadius: 12, minHeight: 240, maxHeight: 'min(520px, 48vh)', overflow: 'auto', display: 'grid', placeItems: 'center' }}>
             {!r.file_key
               ? <button type="button" className="file-drop" onClick={attachFile} disabled={fileBusy}>{fileBusy ? <span className="spinner" /> : <Icon name="upload" size={22} />}<span>Add receipt image or PDF</span></button>
               : !url ? <span className="spinner" /> : r.mime === 'application/pdf' && view === 'scan' ? <iframe title="Receipt PDF" src={url} style={{ width: '100%', height: 500, border: 0 }} /> : <a href={url} target="_blank" rel="noreferrer"><img src={url} alt="Receipt" style={{ maxWidth: '100%', display: 'block' }} /></a>}
@@ -353,7 +358,7 @@ function Mileage() {
     <>
       <div className="grid">
         <div className="card kpi"><span className="muted">Business miles · {year}</span><span className="v">{totalMiles.toLocaleString('en-US')}</span><span className="small muted">{plural(trips.length, 'trip')}</span></div>
-        <div className="card kpi"><span className="muted">Mileage deduction</span><span className="v">{money(deduction, { cents: false })}</span><span className="small muted">At {money(db.profile.mileage_rate)}/mile · change in Settings</span></div>
+        <div className="card kpi"><span className="muted">Mileage deduction</span><span className="v">{money(deduction, { cents: false })}</span><span className="small muted">{followsIrs(db.profile.mileage_rate) ? 'IRS rate' : 'Your rate'} ${rateFor(db.profile, todayISO())}/mile</span></div>
       </div>
       <div className="row wrap between">
         <select className="input" style={{ width: 110 }} value={year} onChange={(e) => setYear(e.target.value)} aria-label="Year">{years.map((y) => <option key={y}>{y}</option>)}</select>
@@ -401,7 +406,7 @@ function TripModal({ trip, onClose }) {
   const isNew = !trip.id;
   const [f, setF] = useState({ trip_date: trip.trip_date || todayISO(), start_place: trip.start_place || '', end_place: trip.end_place || '', miles: trip.miles ?? '', round_trip: trip.round_trip ?? true, purpose: trip.purpose || '', client_id: trip.client_id || null, billable: !!trip.billable });
   const save = async () => {
-    const row = { ...f, miles: num(f.miles), rate: trip.rate ?? s.db.profile.mileage_rate };
+    const row = { ...f, miles: num(f.miles), rate: trip.rate ?? rateFor(s.db.profile, f.trip_date) };
     if (isNew) await s.insert('mileage_trips', row);
     else await s.update('mileage_trips', trip.id, row);
     onClose();

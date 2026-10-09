@@ -3,11 +3,12 @@ import { useStore } from '../store.jsx';
 import { Button, Combobox, Field, Icon, Menu, Modal, MoneyInput, Seg, Switch, Calendar, Popover, Empty } from '../components/ui.jsx';
 import { totals, compileJobs, otRule, jobLabor, lineAmount } from '../lib/calc.js';
 import { money, num, round2, todayISO, addDays, uid, datesLabel, datesCode, mmdd, fmtShort } from '../lib/format.js';
-import { saveInvoice, copyLink } from '../lib/actions.js';
+import { saveInvoice } from '../lib/actions.js';
 import { datesFromCode } from '../lib/shoots.js';
 import { suggestContext, rankReceipts } from '../lib/suggest.js';
 import { go } from '../router.js';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
+import { rateFor } from '../lib/mileage.js';
 
 const TERMS = [
   { label: 'Due on receipt', days: 0 },
@@ -37,19 +38,23 @@ function compileLine(l) {
   const desc = [
     l.description || '',
     num(l.qty) !== 1 ? `${l.item || 'Base'} (${shortMoney(l.rate)} x${num(l.qty)})` : '',
-    ...l.addons.map((a) => `${a.label || 'Other'} (${shortMoney(a.rate)}${num(a.qty) !== 1 ? ` x${num(a.qty)}` : ''})`),
+    ...l.addons.map((a) => (a.unit === 'mi'
+      ? `${a.label || 'Mileage'} (${num(a.qty)} mi x $${num(a.rate)})`
+      : `${a.label || 'Other'} (${shortMoney(a.rate)}${num(a.qty) !== 1 ? ` x${num(a.qty)}` : ''})`)),
   ].filter(Boolean).join('\n');
   return {
     ...l, description: desc, qty: 1, rate: total, amount: total,
-    extras: { desc: l.description || '', qty: num(l.qty), rate: num(l.rate), base_rate: num(l.base_rate) || num(l.rate), items: l.addons.map(({ label, qty, rate }) => ({ label: label || '', qty: num(qty), rate: num(rate) })) },
+    extras: { desc: l.description || '', qty: num(l.qty), rate: num(l.rate), base_rate: num(l.base_rate) || num(l.rate), items: l.addons.map(({ label, qty, rate, unit, receipt_id }) => ({ label: label || '', qty: num(qty), rate: num(rate), ...(unit ? { unit } : {}), ...(receipt_id ? { receipt_id } : {}) })) },
   };
 }
 /** A saved line back into its editable pieces. */
 function openLine(l) {
   const x = l.extras;
   if (!x || !Array.isArray(x.items)) return {};
-  return { description: x.desc || '', qty: num(x.qty) || 1, rate: num(x.rate), base_rate: num(x.base_rate) || num(x.rate), addons: x.items.map((a) => ({ id: uid(), label: a.label, qty: num(a.qty) || 1, rate: num(a.rate) })) };
+  return { description: x.desc || '', qty: num(x.qty) || 1, rate: num(x.rate), base_rate: num(x.base_rate) || num(x.rate), addons: x.items.map((a) => ({ id: uid(), label: a.label, qty: num(a.qty) || 1, rate: num(a.rate), unit: a.unit || null, receipt_id: a.receipt_id || null })) };
 }
+/** Receipts billed on a line: the line itself, or any of its add-ons. */
+const lineReceipts = (l) => [l.receipt_id, ...(l.addons || l.extras?.items || []).map((a) => a.receipt_id)].filter(Boolean);
 const blankJob = (rate = 750, role = 'Camera Operator') => ({ id: uid(), company: '', role, rate, days: [], gear: [], expenses: [] });
 
 export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, clientId }) {
@@ -175,7 +180,7 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
       const lineRows = finalLines.map(({ key, base_rate, showNote, addons, focus, id: _id, owner_id, invoice_id, position, ...l }) => l);
       const savedId = await saveInvoice(s, inv, lineRows, existing && existing.status !== 'draft' ? summary || null : null);
       // Receipts: billed lines + backup attachments
-      const billed = new Set(lineRows.map((l) => l.receipt_id).filter(Boolean));
+      const billed = new Set(lineRows.flatMap(lineReceipts));
       const keep = new Set([...attachIds, ...billed]);
       for (const r of db.receipts) {
         const shouldLink = keep.has(r.id);
@@ -234,7 +239,7 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
   // Details card: open while there's no client yet, otherwise a one-line summary you tap to change.
   const [detailsOpen, setDetailsOpen] = useState(() => !form.client_id);
   const [extra, setExtra] = useState(null);
-  const billedIds = new Set(finalLines.map((l) => l.receipt_id).filter(Boolean));
+  const billedIds = new Set(finalLines.flatMap(lineReceipts));
   const receiptCount = new Set([...attachIds, ...billedIds]).size;
   const chips = [
     { key: 'receipts', icon: 'receipt', on: receiptCount > 0, label: receiptCount ? `${receiptCount} receipt${receiptCount === 1 ? '' : 's'}` : 'Receipts' },
@@ -310,7 +315,7 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
               <Seg value={form.mode} onChange={switchMode} label="Editor mode" options={[{ value: 'basic', label: 'Lines' }, { value: 'advanced', label: 'Jobs & OT' }]} />
             </div>
             {form.mode === 'basic' ? (
-              <BasicLines issueDate={form.issue_date} lines={lines} setLines={(fn) => { dirty.current = true; setLines(fn); }} db={db} />
+              <BasicLines issueDate={form.issue_date} lines={lines} setLines={(fn) => { dirty.current = true; setLines(fn); }} db={db} openPicker={setPicker} />
             ) : (
               <AdvancedJobs jobs={jobs} setJobs={(fn) => { dirty.current = true; setJobs(fn); }} rule={rule} db={db} openPicker={setPicker} />
             )}
@@ -385,7 +390,7 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
           <InvoiceDoc business={p} invoice={previewInv} client={client} lines={previewLines} logoUrl={logoUrl} />
         </Modal>
       )}
-      {picker?.type === 'receipts' && <ReceiptPicker ctx={suggestContext({ lines: finalLines, jobs, issueDate: form.issue_date, clientName: derived.clients[form.client_id]?.name })} db={db} exclude={picker.exclude} title={picker.title} onClose={() => setPicker(null)} onPick={(rs) => { picker.onPick(rs); setPicker(null); }} />}
+      {picker?.type === 'receipts' && <ReceiptPicker ctx={picker.ctx || suggestContext({ lines: finalLines, jobs, issueDate: form.issue_date, clientName: derived.clients[form.client_id]?.name })} db={db} exclude={picker.exclude} title={picker.title} onClose={() => setPicker(null)} onPick={(rs) => { picker.onPick(rs); setPicker(null); }} />}
       {picker?.type === 'mileage' && <MileagePicker db={db} derived={derived} selected={mileageIds} onClose={() => setPicker(null)} onPick={(trips) => { picker.onPick(trips); setPicker(null); }} />}
     </div>
   );
@@ -415,7 +420,7 @@ function defaultRole(db) {
 /* ------------------------------------------------------------------ */
 /* Basic: Wave-style line items                                        */
 /* ------------------------------------------------------------------ */
-function BasicLines({ lines, setLines, db, issueDate }) {
+function BasicLines({ lines, setLines, db, issueDate, openPicker }) {
   const catalog = db.catalog_items.filter((c) => !c.archived).sort((a, b) => a.position - b.position);
   const hasTax = db.tax_rates.length > 0;
   const upd = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
@@ -476,6 +481,14 @@ function BasicLines({ lines, setLines, db, issueDate }) {
       .forEach((l) => l.extras.items.forEach((a) => { if (a.label) r[a.label.toLowerCase()] = num(a.rate); }));
     return r;
   }, [db.invoice_lines, db.invoices]);
+  // What the add-on menu needs: the IRS mileage rate for this invoice, and a receipt picker for this line.
+  const addonCtx = {
+    mileRate: rateFor(db.profile, issueDate),
+    pickReceipt: (l, onPick) => openPicker({
+      type: 'receipts', title: 'Add a receipt to this line', ctx: suggestContext({ lines: [compileLine(l)], issueDate }),
+      exclude: new Set(lines.flatMap(lineReceipts)), onPick,
+    }),
+  };
   const addChoice = (c) => setLines((ls) => [...ls.filter((l) => l.item || num(l.rate) || l.description || l.addons?.length), blankLine({ kind: c.kind || 'labor', item: c.name, description: c.desc || '', rate: c.rate || 0, base_rate: c.rate || 0, day_type: c.day ? 'Full day' : null, focus: true })]);
 
   return (
@@ -486,7 +499,7 @@ function BasicLines({ lines, setLines, db, issueDate }) {
             <span>Item</span><span>Description</span><span>Qty</span><span>Price</span>{hasTax && <span>Tax</span>}<span className="right">Amount</span><span />
           </div>}
           {lines.map((l) => (
-            <BasicLine key={l.key} l={l} issueDate={issueDate} cols={cols} dragging={dragKey === l.key} onGrip={(e) => startDrag(l.key, e)} catalog={catalog} db={db} hasTax={hasTax} addonRates={addonRates} upd={upd} move={move} remove={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} dup={() => setLines((ls) => { const i = ls.findIndex((x) => x.key === l.key); const c = [...ls]; c.splice(i + 1, 0, { ...l, key: uid(), receipt_id: null }); return c; })} />
+            <BasicLine key={l.key} l={l} issueDate={issueDate} cols={cols} dragging={dragKey === l.key} onGrip={(e) => startDrag(l.key, e)} catalog={catalog} db={db} hasTax={hasTax} addonRates={addonRates} addonCtx={addonCtx} upd={upd} move={move} remove={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} dup={() => setLines((ls) => { const i = ls.findIndex((x) => x.key === l.key); const c = [...ls]; c.splice(i + 1, 0, { ...l, key: uid(), receipt_id: null }); return c; })} />
           ))}
         </div>
       </div>
@@ -555,11 +568,12 @@ const ADDONS = [
   { label: 'Per Diem' },
   { label: 'Hotel' },
   { label: 'Parking' },
-  { label: 'Mileage' },
+  { label: 'Mileage', unit: 'mi' }, // miles × the IRS rate
+  { receipt: true, name: 'From a receipt…' },
   { label: '', name: 'Other' },
 ];
 
-function BasicLine({ l, cols, catalog, db, hasTax, addonRates, upd, move, remove, dup, dragging, onGrip, issueDate }) {
+function BasicLine({ l, cols, catalog, db, hasTax, addonRates, addonCtx, upd, move, remove, dup, dragging, onGrip, issueDate }) {
   const [calOpen, setCalOpen] = useState(false);
   // Shoot dates are saved on the line (they show on the Calendar); older lines fall back to the dates in the description.
   const [calDates, setCalDates] = useState(() => (Array.isArray(l.dates) && l.dates.length ? l.dates : (() => { const m = String(l.description || '').match(/\((\d{2}\/\d{2}(?:-\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:-\d{2}\/\d{2})?)*)\)/); return m ? datesFromCode(m[1], issueDate) : []; })()));
@@ -608,7 +622,7 @@ function BasicLine({ l, cols, catalog, db, hasTax, addonRates, upd, move, remove
         ) : (
           <span className="row" style={{ gap: 14 }}>
             <button type="button" className="btn link small" style={{ fontSize: 12 }} onClick={() => upd(l.key, { showNote: true, note: l.note || '' })}>+ Note</button>
-            {!l.addons?.length && <AddonMenu l={l} addonRates={addonRates} upd={upd} />}
+            {!l.addons?.length && <AddonMenu l={l} addonRates={addonRates} ctx={addonCtx} upd={upd} />}
           </span>
         )}
       </div>
@@ -626,31 +640,41 @@ function BasicLine({ l, cols, catalog, db, hasTax, addonRates, upd, move, remove
         { label: 'Duplicate', icon: 'copy', onClick: dup },
         { label: 'Delete line', icon: 'trash', danger: true, onClick: remove },
       ]} /></div>
-      {l.addons?.length > 0 && <Addons l={l} cols={cols} hasTax={hasTax} addonRates={addonRates} upd={upd} />}
+      {l.addons?.length > 0 && <Addons l={l} cols={cols} hasTax={hasTax} addonRates={addonRates} ctx={addonCtx} upd={upd} />}
     </div>
   );
 }
 
 /** Small menu of add-ons for a line; travel starts at half the day rate, others at the last price you used. */
-function AddonMenu({ l, addonRates, upd, button }) {
+function AddonMenu({ l, addonRates, ctx, upd }) {
+  const push = (items) => upd(l.key, { addons: [...(l.addons || []), ...items] });
   const add = (a) => {
-    const rate = a.rate ? a.rate(l) : num(addonRates[a.label.toLowerCase()]);
-    upd(l.key, { addons: [...(l.addons || []), { id: uid(), label: a.label, qty: 1, rate, fresh: true }] });
+    if (a.receipt) {
+      return ctx.pickReceipt(l, (rs) => push(rs.map((r) => ({
+        id: uid(), label: r.category === 'Parking & tolls' ? 'Parking' : r.category === 'Meals' ? 'Meal' : r.vendor || 'Expense',
+        qty: 1, rate: num(r.total), receipt_id: r.id,
+      }))));
+    }
+    const rate = a.unit === 'mi' ? ctx.mileRate : a.rate ? a.rate(l) : num(addonRates[a.label.toLowerCase()]);
+    return push([{ id: uid(), label: a.label, qty: a.unit === 'mi' ? '' : 1, rate, unit: a.unit || null, fresh: true }]);
   };
-  return <Menu label={button || '+ Add-on'} icon="" variant={button ? 'sm ghost' : 'link small addon-link'} align="left" items={ADDONS.map((a) => ({ label: a.name || a.label, onClick: () => add(a) }))} />;
+  return <Menu label="+ Add-on" icon="" variant="link small addon-link" align="left" items={ADDONS.map((a) => ({ label: a.name || a.label, icon: a.receipt ? 'receipt' : a.unit === 'mi' ? 'car' : undefined, onClick: () => add(a) }))} />;
 }
 
 /** The add-ons under a line, lined up with its Qty / Price / Amount columns, and the line's total. */
-function Addons({ l, cols, hasTax, addonRates, upd }) {
+function Addons({ l, cols, hasTax, addonRates, ctx, upd }) {
   const set = (id, patch) => upd(l.key, { addons: l.addons.map((a) => (a.id === id ? { ...a, ...patch, fresh: false } : a)) });
   return (
     <div className="addons">
       {l.addons.map((a) => (
         <div key={a.id} className="addon-row" style={{ gridTemplateColumns: cols }}>
           <span className="addon-tick" aria-hidden="true" />
-          <input className="input addon-label" value={a.label} placeholder="e.g. Kit fee" autoFocus={a.fresh && !a.label} onChange={(e) => set(a.id, { label: e.target.value })} aria-label="Add-on" />
-          <label className="m-field"><span className="m-lbl">Qty</span><MoneyInput value={a.qty} onChange={(v) => set(a.id, { qty: v })} aria-label={`${a.label || 'Add-on'} quantity`} /></label>
-          <label className="m-field"><span className="m-lbl">Price</span><MoneyInput value={a.rate} autoFocus={a.fresh && !!a.label && !a.rate} onChange={(v) => set(a.id, { rate: v })} aria-label={`${a.label || 'Add-on'} price`} /></label>
+          <span className="addon-name">
+            <input className="input addon-label" value={a.label} placeholder="e.g. Kit fee" autoFocus={a.fresh && !a.label} onChange={(e) => set(a.id, { label: e.target.value })} aria-label="Add-on" />
+            {a.receipt_id && <span className="addon-badge" title="Receipt attached"><Icon name="receipt" size={14} /></span>}
+          </span>
+          <label className="m-field addon-qty"><MoneyInput value={a.qty} placeholder={a.unit === 'mi' ? 'Miles' : ''} autoFocus={a.fresh && a.unit === 'mi'} onChange={(v) => set(a.id, { qty: v })} aria-label={a.unit === 'mi' ? 'Miles' : `${a.label || 'Add-on'} quantity`} />{a.unit === 'mi' && <span className="unit">mi</span>}</label>
+          <label className="m-field"><MoneyInput value={a.rate} autoFocus={a.fresh && !!a.label && !a.rate && a.unit !== 'mi'} onChange={(v) => set(a.id, { rate: v })} aria-label={`${a.label || 'Add-on'} price`} /></label>
           {hasTax && <span className="addon-tax" />}
           <span className="num right muted addon-amt">{money(lineAmount(a.qty, a.rate))}</span>
           <Button variant="ghost icon" icon="x" aria-label={`Remove ${a.label || 'add-on'}`} onClick={() => upd(l.key, { addons: l.addons.filter((x) => x.id !== a.id) })} />
@@ -658,7 +682,7 @@ function Addons({ l, cols, hasTax, addonRates, upd }) {
       ))}
       <div className="addon-foot" style={{ gridTemplateColumns: cols }}>
         <span />
-        <span className="addon-more"><AddonMenu l={l} addonRates={addonRates} upd={upd} /></span>
+        <span className="addon-more"><AddonMenu l={l} addonRates={addonRates} ctx={ctx} upd={upd} /></span>
         <span className="addon-total"><span className="muted small">Total</span><b className="num">{money(lineTotal(l))}</b></span>
       </div>
     </div>

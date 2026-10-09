@@ -1,5 +1,6 @@
 // File helpers: hashing, downloads, zips, CSV.
-import JSZip from 'jszip';
+// jszip loads only when a zip is made or opened.
+const loadZip = () => import('jszip').then((m) => m.default);
 import { slug } from './format.js';
 
 export async function sha256(blob) {
@@ -29,7 +30,7 @@ export function receiptFileName(r, ext) {
 
 /** Zip of the invoice PDF plus every attached receipt. receipts: [{ url, vendor, receipt_date|date, total, mime }] */
 export async function buildInvoiceZip(pdfBytes, pdfName, receipts) {
-  const zip = new JSZip();
+  const zip = new (await loadZip())();
   zip.file(pdfName, pdfBytes);
   const used = new Set();
   const withFiles = receipts.filter((r) => r.url);

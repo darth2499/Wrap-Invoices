@@ -7,6 +7,7 @@ import { parseCSV, downloadBlob, pickFiles } from '../lib/files.js';
 import { CLIENT_FIELDS, INVOICE_FIELDS, autoMap, clientsFromCsv, invoicesFromCsv, importInvoices, importExpenses, importClients, invoiceFromPdf, pdfMatch } from '../lib/importer.js';
 import { isWaveAccounting, parseWaveAccounting, readWaveFiles } from '../lib/wave.js';
 import { money, num, todayISO, addDays, plural } from '../lib/format.js';
+import { irsRate, followsIrs } from '../lib/mileage.js';
 import { DEMO } from '../config.js';
 import { CATEGORIES, ownCategories } from '../lib/categories.js';
 import { resetDemo } from '../api/demo.js';
@@ -140,7 +141,7 @@ function Look() {
         <Seg value={f.template} onChange={(v) => setF({ ...f, template: v })} label="Template" options={[{ value: 'minimal', label: 'Minimal' }, { value: 'classic', label: 'Classic' }, { value: 'bold', label: 'Bold' }]} />
         <Field label="Accent color" hint="(used by Bold and on emails)">
           <div className="row">
-            <input type="color" value={f.accent || '#16161A'} onChange={(e) => setF({ ...f, accent: e.target.value })} style={{ width: 48, height: 40, border: '1px solid var(--field)', borderRadius: 10, padding: 3, background: '#fff' }} aria-label="Accent color" />
+            <input type="color" value={f.accent || '#16161A'} onChange={(e) => setF({ ...f, accent: e.target.value })} style={{ width: 48, height: 40, border: '1px solid var(--field)', borderRadius: 10, padding: 3, background: 'var(--surface)' }} aria-label="Accent color" />
             {['#16161A', '#3346D3', '#0F7B6C', '#B4441F', '#7A3FB8'].map((c) => <button key={c} type="button" aria-label={`Use ${c}`} onClick={() => setF({ ...f, accent: c })} style={{ width: 28, height: 28, borderRadius: 8, border: f.accent === c ? '2px solid var(--ink)' : '1px solid var(--field)', background: c, cursor: 'pointer' }} />)}
           </div>
         </Field>
@@ -200,7 +201,14 @@ function Rates() {
             <Field label="Then multiplier"><MoneyInput value={f.ot_mult2} onChange={(v) => setF({ ...f, ot_mult2: v })} /></Field>
           </div>
           <p className="small muted">Example: $750 day, {f.ot_base_hours} h base, 13 h worked → {money(750 + Math.min(Math.max(0, 13 - num(f.ot_base_hours)), num(f.ot_mult1_hours)) * (750 / (num(f.ot_base_hours) || 10)) * num(f.ot_mult1) + Math.max(0, 13 - num(f.ot_base_hours) - num(f.ot_mult1_hours)) * (750 / (num(f.ot_base_hours) || 10)) * num(f.ot_mult2))}</p>
-          <Field label="Mileage rate ($ per mile)" hint="— check the IRS standard rate each January"><MoneyInput value={f.mileage_rate} onChange={(v) => setF({ ...f, mileage_rate: v })} /></Field>
+          <Field label="Mileage rate ($ per mile)">
+            <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+              <MoneyInput value={f.mileage_rate} onChange={(v) => setF({ ...f, mileage_rate: v })} style={{ maxWidth: 140 }} />
+              {followsIrs(f.mileage_rate)
+                ? <span className="pill sent">IRS {todayISO().slice(0, 4)} · updates itself</span>
+                : <Button size="sm" variant="ghost" onClick={() => setF({ ...f, mileage_rate: irsRate() })}>Use IRS ${irsRate()}</Button>}
+            </div>
+          </Field>
           <Button variant="primary" busy={busy} disabled={!dirty} style={{ alignSelf: 'flex-start' }} onClick={() => save()}>Save</Button>
         </section>
         <DayTypes />

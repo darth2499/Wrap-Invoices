@@ -95,7 +95,7 @@ export default function Invoices({ kind }) {
       !isQuote && open && { label: 'Record payment', icon: 'cash', onClick: () => go(`/invoices/${r.id}?do=pay`) },
       { label: 'Download PDF', icon: 'download', onClick: () => A.downloadPdf(store, r).catch((e) => store.toast(e.message, { error: true })) },
       { label: 'Duplicate', icon: 'copy', onClick: () => go(`/invoices/new?from=${r.id}`) },
-      (r.status === 'draft' || isQuote) && { label: 'Delete', icon: 'trash', danger: true, onClick: async () => { if (await store.confirm({ title: `Delete #${r.number}?`, body: 'This can’t be undone. Attached receipts are kept.', ok: 'Delete', danger: true })) await A.deleteInvoice(store, r); } },
+      { label: 'Delete', icon: 'trash', danger: true, onClick: () => A.confirmDelete(store, r) },
       !isQuote && r.status !== 'draft' && r.status !== 'void' && { label: 'Void', icon: 'x', danger: true, onClick: async () => { if (await store.confirm({ title: `Void invoice #${r.number}?`, body: 'It stays in your records but no longer counts as owed.', ok: 'Void', danger: true })) await A.voidInvoice(store, r); } },
     ];
   };

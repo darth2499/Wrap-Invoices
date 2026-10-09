@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { api } from './api/index.js';
 import { StoreProvider, useStore } from './store.jsx';
 import { useRoute, go } from './router.js';
@@ -8,15 +8,24 @@ import { APP_NAME, DEMO, LIVE_CONFIGURED, setDemoMode } from './config.js';
 import Overview from './pages/Overview.jsx';
 import Invoices from './pages/Invoices.jsx';
 import InvoiceDetail from './pages/InvoiceDetail.jsx';
-import InvoiceEditor from './pages/InvoiceEditor.jsx';
-import Expenses from './pages/Expenses.jsx';
-import Clients from './pages/Clients.jsx';
-import Reports from './pages/Reports.jsx';
-import Calendar from './pages/Calendar.jsx';
-import Taxes from './pages/Taxes.jsx';
-import Settings from './pages/Settings.jsx';
-import PublicInvoice from './pages/PublicInvoice.jsx';
-import PublicStatement from './pages/PublicStatement.jsx';
+
+// Pages load the first time you open them, so the app starts faster.
+// After an update, an open tab may ask for a page file that's been replaced: reload once to get the new version.
+const page = (load) => lazy(() => load().then((m) => { sessionStorage.removeItem('wrap_reloaded'); return m; }).catch((e) => {
+  if (sessionStorage.getItem('wrap_reloaded')) throw e;
+  sessionStorage.setItem('wrap_reloaded', '1');
+  window.location.reload();
+  return new Promise(() => {});
+}));
+const InvoiceEditor = page(() => import('./pages/InvoiceEditor.jsx'));
+const Expenses = page(() => import('./pages/Expenses.jsx'));
+const Clients = page(() => import('./pages/Clients.jsx'));
+const Reports = page(() => import('./pages/Reports.jsx'));
+const Calendar = page(() => import('./pages/Calendar.jsx'));
+const Taxes = page(() => import('./pages/Taxes.jsx'));
+const Settings = page(() => import('./pages/Settings.jsx'));
+const PublicInvoice = page(() => import('./pages/PublicInvoice.jsx'));
+const PublicStatement = page(() => import('./pages/PublicStatement.jsx'));
 
 function readAuthError() {
   const all = new URLSearchParams(window.location.search + '&' + window.location.hash.replace(/^#\/?/, ''));
@@ -62,8 +71,9 @@ export default function App() {
     };
   }, [isPublic]);
 
-  if (route.parts[0] === 'i') return <PublicInvoice token={route.parts[1]} />;
-  if (route.parts[0] === 's') return <PublicStatement token={route.parts[1]} />;
+  const loading = <div className="login"><Spinner label="Loading…" /></div>;
+  if (route.parts[0] === 'i') return <Suspense fallback={loading}><PublicInvoice token={route.parts[1]} /></Suspense>;
+  if (route.parts[0] === 's') return <Suspense fallback={loading}><PublicStatement token={route.parts[1]} /></Suspense>;
   if (user === undefined) return <div className="login"><Spinner label="Loading…" /></div>;
   if (!user) return <Login error={authError} />;
   return (
@@ -92,7 +102,7 @@ function Shell({ route }) {
   else if (a === 'taxes') page = <Taxes />;
   else if (a === 'settings') page = <Settings section={route.query.section} />;
   else page = <div className="page"><h1>Not found</h1><a href="#/">Go to overview</a></div>;
-  return <Layout route={route}>{page}</Layout>;
+  return <Layout route={route}><Suspense fallback={<div className="page"><Spinner /></div>}>{page}</Suspense></Layout>;
 }
 
 function Login({ error }) {

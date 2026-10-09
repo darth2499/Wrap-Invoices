@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from './ui.jsx';
 import Search, { useSearchShortcut } from './Search.jsx';
 import ThemeToggle from './ThemeToggle.jsx';
@@ -7,6 +7,7 @@ import { go } from '../router.js';
 import { useStore } from '../store.jsx';
 import { APP_NAME, DEMO, LIVE_CONFIGURED } from '../config.js';
 import { api } from '../api/index.js';
+import { irsRate, followsIrs } from '../lib/mileage.js';
 
 const NAV = [
   { id: '', label: 'Overview', icon: 'overview' },
@@ -23,7 +24,13 @@ const NAV = [
 export default function Layout({ route, children }) {
   const [searching, setSearching] = useState(false);
   useSearchShortcut(setSearching);
-  const { db, user } = useStore();
+  const store = useStore();
+  const { db, user } = store;
+  // Mileage follows the IRS rate: when a new year's rate applies, update it (unless you set your own).
+  const rate = db.profile.mileage_rate;
+  useEffect(() => {
+    if (rate != null && followsIrs(rate) && Math.abs(Number(rate) - irsRate()) > 0.0005) store.updateProfile({ mileage_rate: irsRate() }).catch(() => {});
+  }, [rate]); // eslint-disable-line react-hooks/exhaustive-deps
   const section = route.parts[0] || '';
   const review = db.receipts.filter((r) => r.status === 'review').length;
   const current = section === 'invoices' && route.query.kind === 'quote' ? 'quotes' : section;

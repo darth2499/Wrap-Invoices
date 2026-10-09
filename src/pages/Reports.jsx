@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import JSZip from 'jszip';
+// jszip loads only when a zip is made or opened.
+const loadZip = () => import('jszip').then((m) => m.default);
 import { useStore } from '../store.jsx';
 import { Button, Empty, Field, MoneyInput, Seg, Icon } from '../components/ui.jsx';
 import { MonthBars, MONTHS } from '../components/charts.jsx';
@@ -199,7 +200,7 @@ function Quarterly({ year }) {
 
 function Ten99({ year }) {
   const s = useStore();
-  const { db, derived } = s;
+  const { db } = s;
   const rows = db.clients.map((c) => {
     const ids = new Set(db.invoices.filter((i) => i.client_id === c.id).map((i) => i.id));
     const paid = db.payments.filter((p) => ids.has(p.invoice_id) && p.paid_on?.startsWith(String(year))).reduce((t, p) => t + num(p.amount), 0);
@@ -281,7 +282,7 @@ function TaxExport({ year }) {
     setBusy('zip');
     try {
       const c = csvs();
-      const zip = new JSZip();
+      const zip = new (await loadZip())();
       zip.file(`${year} summary by Schedule C line.csv`, c.summary);
       zip.file(`${year} income received.csv`, c.income);
       zip.file(`${year} invoices.csv`, c.invoices);

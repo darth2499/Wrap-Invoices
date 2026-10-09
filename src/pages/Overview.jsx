@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useStore } from '../store.jsx';
 import { Button, Icon, Pill, Empty } from '../components/ui.jsx';
 import { ForecastChart, MonthBars, MONTHS } from '../components/charts.jsx';

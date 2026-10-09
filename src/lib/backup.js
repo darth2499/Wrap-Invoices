@@ -1,6 +1,7 @@
 import { DEMO } from '../config.js';
 // Full backup (all data + every receipt file in one .zip) and restore from that zip.
-import JSZip from 'jszip';
+// jszip loads only when a zip is made or opened.
+const loadZip = () => import('jszip').then((m) => m.default);
 import { TABLES } from '../api/tables.js';
 import { todayISO } from './format.js';
 
@@ -19,7 +20,7 @@ function fileKeys(db) {
 
 export async function exportBackup(api, db, onStep = () => {}) {
   if (DEMO) throw new Error('Not available in the demo');
-  const zip = new JSZip();
+  const zip = new (await loadZip())();
   const data = { app: 'wrap', format: 1, exported_at: new Date().toISOString(), owner_id: db.profile.id, profile: db.profile, tables: {} };
   for (const t of TABLES) data.tables[t] = db[t];
   zip.file('data.json', JSON.stringify(data, null, 1));
@@ -51,7 +52,7 @@ export async function exportBackup(api, db, onStep = () => {}) {
 }
 
 export async function readBackup(file) {
-  const zip = await JSZip.loadAsync(file);
+  const zip = await (await loadZip()).loadAsync(file);
   const json = zip.file('data.json');
   if (!json) throw new Error("This doesn't look like a Wrap backup (no data.json inside).");
   const data = JSON.parse(await json.async('string'));
