@@ -1,7 +1,6 @@
 // File helpers: hashing, downloads, zips, CSV.
 // jszip loads only when a zip is made or opened.
 const loadZip = () => import('jszip').then((m) => m.default);
-import { slug } from './format.js';
 
 export async function sha256(blob) {
   const buf = await blob.arrayBuffer();
@@ -23,9 +22,10 @@ export function downloadBlob(blob, name) {
 export const extFor = (mime, fallback = 'bin') =>
   ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf', 'image/heic': 'heic' }[mime] || fallback);
 
+/** Wave-style name: 2026-10-06-McDonalds.jpg */
 export function receiptFileName(r, ext) {
-  const amt = r.total != null ? ` $${Number(r.total).toFixed(2)}` : '';
-  return `${r.receipt_date || 'undated'} ${slug(r.vendor || 'Receipt')}${amt}.${ext}`;
+  const vendor = String(r.vendor || 'Receipt').normalize('NFKD').replace(/[\u0300-\u036f'’]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'Receipt';
+  return `${r.receipt_date || 'undated'}-${vendor}.${ext}`;
 }
 
 /** Zip of the invoice PDF plus every attached receipt. receipts: [{ url, vendor, receipt_date|date, total, mime }] */

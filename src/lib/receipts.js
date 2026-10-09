@@ -129,3 +129,33 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
     return { status: 'error', message: `${file.name}: ${e.message}` };
   }
 }
+
+/**
+ * Puts a file on an existing receipt (one imported without a file, or a swap). Photos are compressed the same way
+ * as new receipts: a cleaned-up scan plus a shrunk original. Old files are deleted after the new ones are saved.
+ */
+export async function attachToReceipt(s, r, file) {
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp)$/i.test(file.name);
+  if (!isPdf && !isImage) throw new Error('Only photos and PDFs can be added');
+  const hash = await sha256(file);
+  const up = (blob, folder, ext) => s.api.files.upload(blob, { folder, ext });
+  let patch;
+  if (isPdf) {
+    patch = { file_key: await up(file, 'receipts', 'pdf'), original_key: null, mime: 'application/pdf' };
+  } else {
+    let scan = null;
+    try { scan = await scanReceipt(file); } catch { /* format this browser can't open: store as is */ }
+    if (scan) {
+      const original = await shrinkOriginal(file);
+      const [fileKey, originalKey] = await Promise.all([up(scan.scan, 'receipts', 'jpg'), up(original, 'originals', extFor(original.type, 'jpg'))]);
+      patch = { file_key: fileKey, original_key: originalKey, mime: 'image/jpeg', ai: { ...(r.ai || {}), cropped: scan.cropped } };
+    } else {
+      patch = { file_key: await up(file, 'receipts', extFor(file.type, 'jpg')), original_key: null, mime: file.type || 'image/jpeg' };
+    }
+  }
+  const old = [r.file_key, r.original_key].filter(Boolean);
+  await s.update('receipts', r.id, { ...patch, file_hash: hash });
+  if (old.length) await s.api.files.remove(old).catch(() => {});
+  return old.length ? 'replaced' : 'added';
+}

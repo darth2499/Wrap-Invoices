@@ -3,10 +3,10 @@ import { useStore } from '../store.jsx';
 import AddressInput from '../components/AddressInput.jsx';
 import { Button, Empty, Field, Icon, Modal, MoneyInput, Pill, Seg, Switch, Combobox, DateInput, useTableColumns } from '../components/ui.jsx';
 import { categoryList, categoryLabel } from '../lib/categories.js';
-import { addReceiptFile } from '../lib/receipts.js';
+import { addReceiptFile, attachToReceipt } from '../lib/receipts.js';
 import { setBillable } from '../lib/actions.js';
 import { money, fmtDate, fmtShort, num, todayISO, round2, plural, inPeriod, periodOptions } from '../lib/format.js';
-import { pickFiles, sha256 } from '../lib/files.js';
+import { pickFiles } from '../lib/files.js';
 import { go } from '../router.js';
 import { takeFiles, onFiles } from '../lib/scanQueue.js';
 import { rateFor, followsIrs } from '../lib/mileage.js';
@@ -127,6 +127,24 @@ function Receipts({ query }) {
   const highConf = db.receipts.filter((r) => r.status === 'review' && r.ai?.confidence === 'high' && r.ai?.check !== 'mismatch' && r.total != null && r.receipt_date);
   const total = list.reduce((t, r) => t + num(r.total), 0);
   const cameraRef = useRef(null);
+  // Drop a file straight onto a receipt in the list to attach it (or replace its file).
+  const [rowOver, setRowOver] = useState(null);
+  const [rowBusy, setRowBusy] = useState(null);
+  const rowDrop = (r) => ({
+    onDragOver: (e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); e.stopPropagation(); setRowOver(r.id); } },
+    onDragLeave: () => setRowOver((x) => (x === r.id ? null : x)),
+    onDrop: async (e) => {
+      e.preventDefault(); e.stopPropagation(); setRowOver(null);
+      const file = e.dataTransfer.files[0];
+      if (!file || rowBusy) return;
+      if (r.file_key && !(await s.confirm({ title: `Replace the file on ${r.vendor || 'this receipt'}?`, body: `${file.name} takes the place of the current file.`, ok: 'Replace' }))) return;
+      setRowBusy(r.id);
+      try { s.toast((await attachToReceipt(s, r, file)) === 'replaced' ? 'File replaced' : 'File added'); } catch (err) { s.toast(err.message, { error: true }); }
+      setRowBusy(null);
+    },
+  });
+  const rowCls = (r) => (rowOver === r.id ? ' row-drop' : '');
+  const thumb = (r) => (rowBusy === r.id ? <span className="spinner" /> : urls[r.file_key] && r.mime !== 'application/pdf' ? <img src={urls[r.file_key]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : r.mime === 'application/pdf' ? 'PDF' : <Icon name="receipt" size={16} />);
 
   return (
     <>
@@ -195,8 +213,8 @@ function Receipts({ query }) {
           <>
           <div className="m-list">
             {list.slice(0, 400).map((r) => (
-              <button type="button" key={r.id} className="m-card m-card-thumb" onClick={() => setOpen(r.id)}>
-                <span className="thumb">{urls[r.file_key] && r.mime !== 'application/pdf' ? <img src={urls[r.file_key]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : r.mime === 'application/pdf' ? 'PDF' : <Icon name="receipt" size={16} />}</span>
+              <button type="button" key={r.id} className={`m-card m-card-thumb${rowCls(r)}`} onClick={() => setOpen(r.id)} {...rowDrop(r)}>
+                <span className="thumb">{thumb(r)}</span>
                 <span className="who">{r.vendor || 'Unknown vendor'}</span>
                 <span className="amt num">{r.total != null ? money(r.total) : '—'}</span>
                 <span className="meta">{fmtDate(r.receipt_date) || '—'} · {r.category || 'Uncategorized'}</span>
@@ -210,8 +228,8 @@ function Receipts({ query }) {
               <thead><tr><th style={{ width: 56 }} />{table.headers}</tr></thead>
               <tbody>
                 {table.sorted(list).slice(0, 400).map((r) => (
-                  <tr key={r.id} className="click" onClick={() => setOpen(r.id)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setOpen(r.id)}>
-                    <td><span className="thumb">{urls[r.file_key] && r.mime !== 'application/pdf' ? <img src={urls[r.file_key]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : r.mime === 'application/pdf' ? 'PDF' : <Icon name="receipt" size={16} />}</span></td>
+                  <tr key={r.id} className={`click${rowCls(r)}`} onClick={() => setOpen(r.id)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setOpen(r.id)} {...rowDrop(r)}>
+                    <td><span className="thumb">{thumb(r)}</span></td>
                     {table.order.map((k) => <td key={k} className={RCOLS[k].right ? 'right num' : undefined}>{RCOLS[k].cell(r, derived)}</td>)}
                   </tr>
                 ))}
@@ -237,9 +255,20 @@ export function ReceiptModal({ id, onClose, onNext }) {
   const [urls, setUrls] = useState({});
   const [busy, setBusy] = useState(false);
   const [fileBusy, setFileBusy] = useState(false); // (all hooks must sit above the early return below)
+  const [over, setOver] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState(null);
   useEffect(() => {
     if (r) s.api.files.urls([r.file_key, r.original_key].filter(Boolean)).then(setUrls).catch(() => {});
   }, [r?.file_key]); // eslint-disable-line react-hooks/exhaustive-deps
+  // PDFs preview from a local copy: the storage link itself can't be framed by the page.
+  useEffect(() => {
+    const u = r?.mime === 'application/pdf' && urls[r.file_key];
+    if (!u) { setPdfUrl(null); return undefined; }
+    let local = null;
+    let gone = false;
+    fetch(u).then((x) => x.blob()).then((b) => { if (!gone) { local = URL.createObjectURL(new Blob([b], { type: 'application/pdf' })); setPdfUrl(local); } }).catch(() => {});
+    return () => { gone = true; if (local) URL.revokeObjectURL(local); };
+  }, [urls, r?.file_key, r?.mime]);
   if (!r) return null;
   const ai = r.ai || {};
   const chips = [];
@@ -254,24 +283,24 @@ export function ReceiptModal({ id, onClose, onNext }) {
     .map((i) => ({ i, sc: receiptScore({ ...f, invoice_id: null }, suggestContext({ lines: derived.linesFor(i.id), jobs: i.jobs, issueDate: i.issue_date, clientName: derived.clients[i.client_id]?.name })) }))
     .filter((x) => x.sc >= 7).sort((a, b) => b.sc - a.sc).slice(0, 4).map((x) => x.i) : [];
   const url = view === 'scan' ? urls[r.file_key] : urls[r.original_key];
-  // Add a file to a receipt that has none (e.g. imported from Wave), or swap in a new one.
-  const attachFile = async () => {
-    const [file] = await pickFiles({ accept: 'image/*,application/pdf' });
-    if (!file) return;
+  // Add a file to a receipt that has none (e.g. imported from Wave), or swap in a new one. Pick or drop.
+  const attachFile = async (dropped) => {
+    const file = dropped || (await pickFiles({ accept: 'image/*,application/pdf' }))[0];
+    if (!file || fileBusy) return;
     setFileBusy(true);
     try {
-      const isPdf = file.type === 'application/pdf';
-      const ext = isPdf ? 'pdf' : (file.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
-      const key = await s.api.files.upload(file, { folder: 'receipts', ext });
-      const old = [r.file_key, r.original_key].filter(Boolean);
-      await s.update('receipts', r.id, { file_key: key, original_key: null, mime: file.type || (isPdf ? 'application/pdf' : 'image/jpeg'), file_hash: await sha256(file) });
-      if (old.length) await s.api.files.remove(old).catch(() => {});
+      const how = await attachToReceipt(s, r, file);
       setView('scan');
-      s.toast(old.length ? 'File replaced' : 'File added');
+      s.toast(how === 'replaced' ? 'File replaced' : 'File added');
     } catch (e) {
       s.toast(e.message, { error: true });
     }
     setFileBusy(false);
+  };
+  const dropProps = {
+    onDragOver: (e) => { e.preventDefault(); setOver(true); },
+    onDragLeave: () => setOver(false),
+    onDrop: (e) => { e.preventDefault(); setOver(false); const file = e.dataTransfer.files[0]; if (file) attachFile(file); },
   };
 
   const save = async (next) => {
@@ -305,22 +334,23 @@ export function ReceiptModal({ id, onClose, onNext }) {
   };
 
   return (
-    <Modal wide title={r.status === 'review' ? 'Check this receipt' : 'Receipt'} onClose={onClose} footer={
+    <Modal wide title={r.status === 'review' ? 'Check this receipt' : 'Receipt'} onClose={fileBusy ? () => {} : onClose} footer={
       <>
         <Button variant="ghost" className="danger" icon="trash" onClick={del} style={{ marginRight: 'auto' }}>Delete</Button>
-        {r.status === 'review' && reviewQueue.length > 0 && <Button busy={busy} onClick={() => save(true)}>Save &amp; next ({reviewQueue.length})</Button>}
-        <Button variant="primary" busy={busy} onClick={() => save(false)}>{r.status === 'review' ? 'Looks right — save' : 'Save'}</Button>
+        {r.status === 'review' && reviewQueue.length > 0 && <Button busy={busy} disabled={fileBusy} onClick={() => save(true)}>Save &amp; next ({reviewQueue.length})</Button>}
+        <Button variant="primary" busy={busy} disabled={fileBusy} onClick={() => save(false)}>{r.status === 'review' ? 'Looks right — save' : 'Save'}</Button>
       </>
     }>
       <div className="row wrap" style={{ alignItems: 'flex-start', gap: 20 }}>
         <div className="col" style={{ flex: '1 1 280px', minWidth: 0, gap: 8 }}>
           {r.original_key && <Seg value={view} onChange={setView} label="Image" options={[{ value: 'scan', label: ai.cropped === false ? 'Cleaned up' : 'Cropped · sharpened' }, { value: 'orig', label: 'Original photo' }]} />}
-          <div style={{ background: 'var(--sunken)', borderRadius: 12, minHeight: 240, maxHeight: 'min(520px, 48vh)', overflow: 'auto', display: 'grid', placeItems: 'center' }}>
+          <div className={`receipt-view ${over ? 'over' : ''}`} {...dropProps}>
             {!r.file_key
-              ? <button type="button" className="file-drop" onClick={attachFile} disabled={fileBusy}>{fileBusy ? <span className="spinner" /> : <Icon name="upload" size={22} />}<span>Add receipt image or PDF</span></button>
-              : !url ? <span className="spinner" /> : r.mime === 'application/pdf' && view === 'scan' ? <iframe title="Receipt PDF" src={url} style={{ width: '100%', height: 500, border: 0 }} /> : <a href={url} target="_blank" rel="noreferrer"><img src={url} alt="Receipt" style={{ maxWidth: '100%', display: 'block' }} /></a>}
+              ? <button type="button" className="file-drop" onClick={() => attachFile()} disabled={fileBusy}>{fileBusy ? <span className="spinner" /> : <Icon name="upload" size={22} />}<span>Add or drop a receipt image or PDF</span></button>
+              : !url ? <span className="spinner" /> : r.mime === 'application/pdf' && view === 'scan' ? (pdfUrl ? <iframe title="Receipt PDF" src={pdfUrl} style={{ width: '100%', height: 500, border: 0 }} /> : <span className="spinner" />) : <a href={url} target="_blank" rel="noreferrer"><img src={url} alt="Receipt" style={{ maxWidth: '100%', display: 'block' }} /></a>}
+            {fileBusy && r.file_key && <span className="receipt-busy"><span className="spinner" /></span>}
           </div>
-          {r.file_key && <Button size="sm" variant="ghost" icon="upload" busy={fileBusy} onClick={attachFile} style={{ alignSelf: 'flex-start' }}>Replace file</Button>}
+          {r.file_key && <Button size="sm" variant="ghost" icon="upload" busy={fileBusy} onClick={() => attachFile()} style={{ alignSelf: 'flex-start' }}>Replace file</Button>}
         </div>
         <div className="col" style={{ flex: '1 1 300px', gap: 12 }}>
           {r.status === 'review' && ai.reasoning && (

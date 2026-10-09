@@ -27,11 +27,25 @@ export function sunTimes(date = new Date(), lat = 37.7, lon = -122.2) {
   return { rise: 720 - 4 * (lon + ha) - eq - off, set: 720 - 4 * (lon - ha) - eq - off };
 }
 
+/**
+ * Where to compute the sun for. The last address typed is a good hint, but only if it's in this device's time zone
+ * (an address picked for a client across the country, or the demo's, would put sunset hours off).
+ * Otherwise the time zone's own longitude is used: the standard-time meridian is a close stand-in.
+ */
+function place(now) {
+  const y = now.getFullYear();
+  const std = Math.max(new Date(y, 0, 1).getTimezoneOffset(), new Date(y, 6, 1).getTimezoneOffset());
+  const meridian = -std / 4;
+  try {
+    const b = JSON.parse(localStorage.getItem('wrap_geo_bias'));
+    if (Number.isFinite(b?.lat) && Number.isFinite(b?.lon) && Math.abs(b.lon - meridian) <= 15) return { lat: b.lat, lon: b.lon };
+  } catch { /* no hint yet */ }
+  return { lat: Math.abs(meridian + 122) < 15 ? 37.7 : 38, lon: meridian };
+}
+
 /** 0 = full day (light) … 1 = full night (dark). */
 export function darkness(now = new Date()) {
-  let lat = 37.7;
-  let lon = -122.2;
-  try { const b = JSON.parse(localStorage.getItem('wrap_geo_bias')); if (b?.lat) ({ lat, lon } = b); } catch { /* default: Bay Area */ }
+  const { lat, lon } = place(now);
   const { rise, set } = sunTimes(now, lat, lon);
   const m = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
   if (m >= rise + FADE && m <= set - FADE) return 0;

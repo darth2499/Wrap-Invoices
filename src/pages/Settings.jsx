@@ -523,6 +523,53 @@ function FreeUpSpace({ onDone }) {
   );
 }
 
+/**
+ * Receipt photos stored before compression existed (or attached to an existing receipt) are full size.
+ * This shrinks them in place, the same way new uploads are: at most 2000 px, JPEG. Already small files are left alone.
+ */
+function CompressStored({ onDone }) {
+  const s = useStore();
+  const [busy, setBusy] = useState('');
+  const list = s.db.receipts.filter((r) => r.file_key && !r.original_key && String(r.mime || '').startsWith('image/') && !r.ai?.compressed);
+  if (!list.length || DEMO) return null;
+  const run = async () => {
+    let saved = 0;
+    let done = 0;
+    try {
+      const { shrinkOriginal } = await import('../lib/scan.js');
+      for (let i = 0; i < list.length; i += 20) {
+        const batch = list.slice(i, i + 20);
+        const urls = await s.api.files.urls(batch.map((r) => r.file_key));
+        for (const r of batch) {
+          setBusy(`Compressing ${++done} / ${list.length}`);
+          try {
+            const blob = await (await fetch(urls[r.file_key])).blob();
+            const file = new File([blob], 'receipt', { type: blob.type || r.mime });
+            const small = await shrinkOriginal(file);
+            if (small !== file && small.size < blob.size * 0.8) {
+              const key = await s.api.files.upload(small, { folder: 'receipts', ext: 'jpg' });
+              await s.update('receipts', r.id, { file_key: key, mime: 'image/jpeg', ai: { ...(r.ai || {}), compressed: true } });
+              await s.api.files.remove([r.file_key]).catch(() => {});
+              saved += blob.size - small.size;
+            } else {
+              await s.update('receipts', r.id, { ai: { ...(r.ai || {}), compressed: true } });
+            }
+          } catch (e) { console.warn('compress failed', r.id, e); }
+        }
+      }
+      s.toast(`Done — ${(saved / 1048576).toFixed(1)} MB freed`);
+      onDone();
+    } catch (e) { s.toast(e.message, { error: true }); }
+    setBusy('');
+  };
+  return (
+    <div className="banner" style={{ flexWrap: 'wrap' }}>
+      <span className="grow" style={{ minWidth: 220 }}>{list.length} receipt photo{list.length === 1 ? ' is' : 's are'} stored full size.</span>
+      <Button size="sm" busy={!!busy} onClick={run}>{busy || 'Compress them'}</Button>
+    </div>
+  );
+}
+
 /** How much of Cloudflare's free 10 GB is used. Uploads stop at the limit, so it never costs anything. */
 function StorageCard() {
   const s = useStore();
@@ -566,6 +613,7 @@ function StorageCard() {
           </span>
           <p className="small muted" style={{ lineHeight: 1.6 }}>Cloudflare is free up to 10 GB. Wrap stops uploads at {fmt(u.limit)}, so you’re never charged: when it’s full, new receipts can’t be added until you delete old receipt images. Shared by everyone you’ve invited.</p>
           {pct >= 75 && <FreeUpSpace onDone={() => { usageCache = null; load(); }} />}
+          <CompressStored onDone={() => { usageCache = null; load(true); }} />
         </>
       )}
     </section>
