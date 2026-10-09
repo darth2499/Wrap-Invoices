@@ -189,7 +189,7 @@ export function Combobox({ value, options, onChange, onCreate, placeholder, labe
 
   const matches = useMemo(() => {
     const s = q.trim().toLowerCase();
-    const list = !s || s === (selected?.label || '').toLowerCase() ? options : options.filter((o) => o.label.toLowerCase().includes(s));
+    const list = !s || s === (selected?.label || '').toLowerCase() ? options : options.filter((o) => `${o.label} ${o.meta || ''}`.toLowerCase().includes(s));
     return list.slice(0, 50);
   }, [q, options, selected]);
   const exact = options.some((o) => o.label.toLowerCase() === q.trim().toLowerCase());

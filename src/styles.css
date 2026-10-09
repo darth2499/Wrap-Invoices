@@ -692,7 +692,7 @@ html.vt-wipe::view-transition-old(wrap-orb) { display: none; }
 }
 @media (max-width: 600px) { .kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; } }
 .feed-row.is-new b { font-weight: 600; }
-button.count-badge { border: 0; cursor: pointer; font: inherit; }
+h2 .count-badge { vertical-align: 3px; font-family: var(--font); }
 .addr-busy { position: absolute; right: 10px; top: 12px; width: 14px; height: 14px; }
 @media (max-width: 600px) { .ov-actions { flex-wrap: nowrap; gap: 6px; width: 100%; } .ov-actions .btn { flex: 1 1 0 !important; min-height: 38px; padding: 0 8px; font-size: 13px; gap: 5px; white-space: nowrap; } .ov-actions .btn svg { width: 15px; height: 15px; } }
 @media (max-width: 800px) { .toasts { top: calc(10px + env(safe-area-inset-top)); right: 10px; width: calc(100vw - 20px); } }

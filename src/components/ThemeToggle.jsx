@@ -15,7 +15,7 @@ export function initialTheme() {
 }
 export function applyTheme(t) {
   document.documentElement.dataset.theme = t;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t === 'dark' ? '#1b1c21' : '#16161A');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t === 'dark' ? '#1b1c21' : getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#f6f6f4');
 }
 
 // cubic-bezier(.12,.72,.88,.28): fast up, hangs at the top, fast down.

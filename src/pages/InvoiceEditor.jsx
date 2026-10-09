@@ -136,7 +136,20 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
   }, [form.mode, jobs, lines, rule, db.day_types]);
   const t = totals(finalLines, form.discount_type, form.discount_value);
 
-  const clientOptions = db.clients.filter((c) => !c.archived || c.id === form.client_id).map((c) => ({ value: c.id, label: c.name, meta: c.email || '' }));
+  // Clients you're most likely to bill first: invoiced most recently (and most often), then everyone else A–Z.
+  const clientOptions = useMemo(() => {
+    const use = {};
+    for (const i of db.invoices) {
+      if (!i.client_id || i.kind !== kind) continue;
+      const u = (use[i.client_id] ||= { last: '', n: 0 });
+      u.n += 1;
+      if (String(i.issue_date) > u.last) u.last = String(i.issue_date);
+    }
+    const recent = (c) => use[c.id]?.last || '';
+    return db.clients.filter((c) => !c.archived || c.id === form.client_id)
+      .sort((a, b) => recent(b).slice(0, 7).localeCompare(recent(a).slice(0, 7)) || (use[b.id]?.n || 0) - (use[a.id]?.n || 0) || a.name.localeCompare(b.name))
+      .map((c) => ({ value: c.id, label: c.name, meta: [c.contact_first, c.contact_last].filter(Boolean).join(' ') || c.email || '' }));
+  }, [db.clients, db.invoices, kind, form.client_id]);
   const projectOptions = db.projects.filter((pr) => !pr.archived && (!form.client_id || !pr.client_id || pr.client_id === form.client_id)).map((pr) => ({ value: pr.id, label: pr.name, meta: derived.clients[pr.client_id]?.name || '' }));
 
   // New client from the invoice: a quick form (email, address with suggestions) without leaving the invoice.
