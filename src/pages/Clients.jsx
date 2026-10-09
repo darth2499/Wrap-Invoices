@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../store.jsx';
+import { DEMO } from '../config.js';
 import AddressInput from '../components/AddressInput.jsx';
 import { Button, Empty, Field, Menu, Modal, Pill } from '../components/ui.jsx';
 import { statusOf } from '../lib/calc.js';
@@ -237,7 +238,7 @@ function StatementEmail({ client, owed, onClose }) {
     link: shareUrl(client.statement_token, 's'), clientName: client.name, message, accent: p.accent, invoices: open,
     business: { name: p.business_name || p.gmail_email, email: p.business_email, phone: p.phone, website: p.website },
   }).html;
-  if (!p.gmail_email) return <Modal title="Connect Gmail first" onClose={onClose} footer={<Button variant="primary" onClick={() => s.api.auth.connectGmail()}>Connect Gmail</Button>}><p>Or copy the statement link and send it yourself.</p></Modal>;
+  if (!p.gmail_email && !DEMO) return <Modal title="Connect Gmail first" onClose={onClose} footer={<Button variant="primary" onClick={() => s.api.auth.connectGmail()}>Connect Gmail</Button>}><p>Or copy the statement link and send it yourself.</p></Modal>;
   return (
     <Modal wide title="Email statement" onClose={onClose} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" icon="mail" busy={busy} disabled={!to} onClick={async () => { setBusy(true); try { await s.api.gmail('send', { type: 'statement', client_id: client.id, to, cc: client.cc_emails, subject, message }); s.toast('Statement sent'); onClose(); } catch (e) { s.toast(e.message, { error: true }); setBusy(false); } }}>Send</Button></>}>
       <div className="email-compose">

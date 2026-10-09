@@ -14,6 +14,9 @@ export const DEMO_UID = '00000000-0000-4000-8000-000000000001';
 const token = () => (uid() + uid()).replace(/-/g, '');
 
 let state = null;
+// Another tab (e.g. the client link opened in a new tab) changed the demo data: read it fresh next time,
+// so one tab never writes an old copy over the other's changes.
+window.addEventListener('storage', (e) => { if (e.key === KEY) state = null; });
 function load() {
   if (state) return state;
   try {

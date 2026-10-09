@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api } from './api/index.js';
 import { TABLES } from './api/tables.js';
 import { paidFor } from './lib/calc.js';
+import { DEMO } from './config.js';
 
 const Ctx = createContext(null);
 export const useStore = () => useContext(Ctx);
@@ -82,6 +83,32 @@ export function StoreProvider({ user, children }) {
       reload('invoice_events').catch(() => {});
     });
     return off;
+  }, [loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Demo: now and then a "client" opens one of the sent invoices, so you can see live notifications.
+  // Soon after you arrive, then further apart; at most 5 in any hour.
+  useEffect(() => {
+    if (!loaded || !DEMO) return undefined;
+    const gaps = [20, 150, 480, 1080, 1800].map((x) => x * 1000);
+    let n = 0;
+    let timer;
+    const tick = async () => {
+      let log = [];
+      try { log = (JSON.parse(localStorage.getItem('wrap_demo_views')) || []).filter((t) => Date.now() - t < 3600_000); } catch { /* none */ }
+      const pool = (dbRef.current?.invoices || []).filter((i) => i.status === 'sent' && i.share_token);
+      if (log.length < 5 && pool.length) {
+        const inv = pool[Math.floor(Math.random() * pool.length)];
+        await api.publicCall('view', { token: inv.share_token }).catch(() => {});
+        await reload('invoices').catch(() => {});
+        const who = dbRef.current.clients.find((c) => c.id === inv.client_id)?.name || 'Your client';
+        toast(`${who} just opened invoice #${inv.number}`, { action: { label: 'View', run: () => { window.location.hash = `#/invoices/${inv.id}`; } }, ms: 8000 });
+        try { localStorage.setItem('wrap_demo_views', JSON.stringify([...log, Date.now()])); } catch { /* not saved */ }
+      }
+      n += 1;
+      if (n < gaps.length) timer = setTimeout(tick, gaps[n]);
+    };
+    timer = setTimeout(tick, gaps[0]);
+    return () => clearTimeout(timer);
   }, [loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ops = useMemo(() => ({

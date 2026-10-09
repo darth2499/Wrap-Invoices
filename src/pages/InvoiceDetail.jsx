@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.jsx';
+import { DEMO } from '../config.js';
 import { Button, Field, Menu, Modal, MoneyInput, Switch, Empty, StatusPill, DateInput } from '../components/ui.jsx';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import EmailPreview from '../components/EmailPreview.jsx';
@@ -188,8 +189,12 @@ export default function InvoiceDetail({ id }) {
               <div className="col" style={{ gap: 6, borderTop: '1px solid var(--line-2)', paddingTop: 10 }}>
                 <span className="small muted">Earlier versions (what the client saw before each change)</span>
                 {revisions.slice(0, showAll ? 10 : 2).map((r) => (
-                  <button key={r.id} className="btn sm" style={{ justifyContent: 'space-between' }} onClick={() => setModal({ type: 'rev', rev: r })}>
-                    <span>Version {r.version}{r.summary ? ` — ${r.summary}` : ''}</span><span className="muted small">{fmtTsDate(r.created_at)}</span>
+                  <button key={r.id} type="button" className="rev-row" onClick={() => setModal({ type: 'rev', rev: r })}>
+                    <span className="col" style={{ gap: 1, minWidth: 0 }}>
+                      <b className="ellip">Version {r.version}</b>
+                      {r.summary && <span className="small muted ellip">{r.summary}</span>}
+                    </span>
+                    <span className="muted small" style={{ whiteSpace: 'nowrap' }}>{fmtTsDate(r.created_at)}</span>
                   </button>
                 ))}
               </div>
@@ -281,7 +286,7 @@ function EmailModal({ inv, client, reminder, due, onClose }) {
     accent: p.accent, paymentInstructions: p.payment_instructions, link: inv.share_token ? shareUrl(inv.share_token) : shareUrl('(private link made when you send)'), message, isReminder: reminder,
     business: { name: p.business_name || p.gmail_email, email: p.business_email, phone: p.phone, website: p.website },
   }).html;
-  if (!p.gmail_email) {
+  if (!p.gmail_email && !DEMO) { // the demo pretends Gmail is connected
     return (
       <Modal title="Connect Gmail first" onClose={onClose} footer={<><Button onClick={onClose}>Close</Button><Button variant="primary" onClick={() => s.api.auth.connectGmail()}>Connect Gmail</Button></>}>
         <p style={{ lineHeight: 1.6 }}>Emails go out from your own Gmail so replies land in your inbox. Google will ask you to allow “Send email on your behalf” — Wrap can only send, never read your mail.</p>
@@ -294,7 +299,7 @@ function EmailModal({ inv, client, reminder, due, onClose }) {
     try {
       await s.api.gmail('send', { invoice_id: inv.id, type: reminder ? 'reminder' : 'invoice', to, cc, subject, message });
       await s.reload('invoices', 'invoice_events');
-      s.toast(reminder ? 'Reminder sent' : 'Email sent');
+      s.toast(`${reminder ? 'Reminder sent' : 'Email sent'}${DEMO ? ' (demo: nothing was actually emailed)' : ''}`);
       onClose();
     } catch (e) {
       s.toast(e.message, { error: true });

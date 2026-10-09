@@ -44,7 +44,8 @@ export function shootDays(invoices, linesFor) {
     const picked = lines.filter((l) => Array.isArray(l.dates) && l.dates.length && (!l.kind || l.kind === 'labor'));
     if (picked.length) {
       for (const l of picked) {
-        const label = String(l.description || '').replace(CODE, '').trim() || l.item || 'Shoot';
+        // The job title only: the first line, without dates or add-ons ("Test", not "Test Parking ($10)").
+        const label = String((l.extras ? l.extras.desc : l.description) || '').split('\n')[0].replace(CODE, '').trim() || l.item || 'Shoot';
         for (const d of l.dates) add(d, label, l.item || '');
       }
       continue;
@@ -53,7 +54,7 @@ export function shootDays(invoices, linesFor) {
     const work = lines.filter((l) => (!l.kind || l.kind === 'labor') && CODE.test(l.description || ''));
     for (const l of work.length ? work : lines.filter((x) => CODE.test(x.description || ''))) {
       const m = String(l.description).match(CODE);
-      const label = String(l.description).slice(0, m.index).trim() || l.item || 'Shoot';
+      const label = String(l.description).slice(0, m.index).split('\n').pop().trim() || l.item || 'Shoot';
       for (const d of datesFromCode(m[1], inv.issue_date)) add(d, label, l.item || '');
     }
   }
