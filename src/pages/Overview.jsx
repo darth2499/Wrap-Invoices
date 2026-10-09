@@ -61,14 +61,14 @@ export default function Overview() {
           <p className="muted" style={{ marginBottom: 2 }}>{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
           <h1>{name ? `Hi, ${name}` : 'Overview'}</h1>
         </div>
-        <div className="row wrap">
+        <div className="row wrap ov-actions">
           <Button icon="camera" onClick={() => go('/expenses?add=1')}>Add receipt</Button>
           <Button icon="quote" onClick={() => go('/invoices/new?kind=quote')}>New quote</Button>
           <Button variant="primary" icon="plus" onClick={() => go('/invoices/new')}>New invoice</Button>
         </div>
       </div>
 
-      <div className="grid">
+      <div className="grid kpi-grid">
         <Kpi label="Outstanding" value={money(outstanding, { cents: false })} sub={plural(data.open.length, 'unpaid invoice')} onClick={() => go('/invoices?f=unpaid')} />
         <Kpi label="Overdue" value={money(overdueSum, { cents: false })} sub={data.overdue.length ? `${plural(data.overdue.length, 'invoice')} · oldest ${oldest} days` : 'Nothing overdue'} bad={data.overdue.length > 0} onClick={() => go('/invoices?f=overdue')} />
         <Kpi label={`Paid in ${year}`} value={money(data.paidYtd, { cents: false })} sub="Payments received" onClick={() => go('/reports')} />
@@ -178,19 +178,28 @@ function WhatsNew() {
   const { db, derived } = useStore();
   const today = todayISO();
   const items = useMemo(() => buildFeed({ db, derived, statusOf, today }), [db, derived, today]);
-  const [lastSeen] = useState(() => { try { return localStorage.getItem('wrap_feed_seen') || ''; } catch { return ''; } });
-  useEffect(() => { try { localStorage.setItem('wrap_feed_seen', new Date().toISOString()); } catch { /* not saved */ } }, []);
+  // New = happened since you started using Heads up and not tapped yet. New ones sit on top until you tap them.
+  const [since] = useState(() => {
+    try { const v = localStorage.getItem('wrap_feed_since'); if (v) return v; const now = new Date().toISOString(); localStorage.setItem('wrap_feed_since', now); return now; } catch { return new Date().toISOString(); }
+  });
+  const [read, setRead] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem('wrap_feed_read')) || []); } catch { return new Set(); } });
+  const markRead = (keys) => {
+    const next = new Set([...read, ...keys]);
+    setRead(next);
+    try { localStorage.setItem('wrap_feed_read', JSON.stringify([...next].slice(-300))); } catch { /* not saved */ }
+  };
   const [all, setAll] = useState(false);
   if (!items.length) return null;
-  const isNew = (x) => x.at && lastSeen && x.at > lastSeen;
-  const fresh = items.filter(isNew).length;
-  const shown = all ? items : items.slice(0, 6);
+  const isNew = (x) => x.at && x.at > since && !read.has(x.key);
+  const fresh = items.filter(isNew);
+  const ordered = [...fresh.sort((a, b) => String(b.at).localeCompare(String(a.at))), ...items.filter((x) => !isNew(x))];
+  const shown = all ? ordered : ordered.slice(0, Math.max(6, fresh.length));
   return (
     <section className="card feed">
-      <div className="card-head"><h2>Heads up{fresh > 0 && <span className="count-badge on" style={{ marginLeft: 8 }}>{fresh}</span>}</h2></div>
+      <div className="card-head"><h2>Heads up{fresh.length > 0 && <button type="button" className="count-badge on" style={{ marginLeft: 8 }} onClick={() => markRead(fresh.map((x) => x.key))} title="Mark all as read" aria-label={`${fresh.length} new — mark all as read`}>{fresh.length}</button>}</h2></div>
       <div className="feed-list">
         {shown.map((x) => (
-          <button key={x.key} type="button" className="feed-row" onClick={() => go(x.go)}>
+          <button key={x.key} type="button" className={`feed-row ${isNew(x) ? 'is-new' : ''}`} onClick={() => { if (isNew(x)) markRead([x.key]); go(x.go); }}>
             <span className={`feed-icon tone-${x.tone}`}><Icon name={x.icon} size={16} /></span>
             <span className="col" style={{ gap: 1, minWidth: 0 }}>
               <b className="ellip">{x.title}</b>
@@ -200,12 +209,12 @@ function WhatsNew() {
           </button>
         ))}
       </div>
-      {items.length > 6 && (
+      {ordered.length > shown.length || all ? (
         <button type="button" className="feed-more" onClick={() => setAll((v) => !v)} aria-expanded={all}>
           <Icon name="chevD" size={16} style={{ transform: all ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
-          {all ? 'Less' : `${items.length - 6} more`}
+          {all ? 'Less' : `${ordered.length - shown.length} more`}
         </button>
-      )}
+      ) : null}
     </section>
   );
 }

@@ -77,6 +77,7 @@ export function StoreProvider({ user, children }) {
       const who = dbRef.current.clients.find((c) => c.id === row.client_id)?.name || 'Your client';
       const view = { label: 'View', run: () => { window.location.hash = `#/invoices/${row.id}`; } };
       if (Number(row.view_count) > Number(prev.view_count || 0)) toast(`${who} just opened ${row.kind === 'quote' ? 'quote' : 'invoice'} #${row.number}`, { action: view, ms: 8000 });
+      else if (Number(row.reminders_sent) > Number(prev.reminders_sent || 0)) toast(`Automatic reminder sent to ${who} for #${row.number}`, { action: view, ms: 8000 });
       else if (row.status === 'accepted' && prev.status !== 'accepted') toast(`${who} accepted quote #${row.number}`, { action: view, ms: 8000 });
       reload('invoice_events').catch(() => {});
     });

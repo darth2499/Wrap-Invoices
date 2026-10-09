@@ -40,15 +40,15 @@ export function MonthBars({ labels: allLabels, years: allYears, series: allSerie
         <div className="row wrap" style={{ gap: 18 }}>
           <span className="col" style={{ gap: 2 }}>
             <span className="small muted">{name}{sel == null && currentIndex != null ? ' (this month)' : ''}</span>
-            <span className="row wrap" style={{ gap: 14 }}>
+            <span className="mb-values">
               {series.map((x) => (
-                <span key={x.name} className="row" style={{ gap: 6 }}>
-                  <span style={{ width: 10, height: 10, borderRadius: 3, background: x.color }} />
-                  <span className="small" style={{ color: 'var(--ink-2)' }}>{x.name}</span>
+                <span key={x.name} className="row" style={{ gap: 6, flexWrap: 'nowrap' }} title={x.name}>
+                  <span style={{ width: 10, height: 10, borderRadius: 3, background: x.color, flex: 'none' }} />
+                  <span className="small mb-lbl" style={{ color: 'var(--ink-2)' }}>{x.name}</span>
                   <strong className="num">{money(x.values[active], { cents: false })}</strong>
                 </span>
               ))}
-              {net != null && <span className="row" style={{ gap: 6 }}><span className="small" style={{ color: 'var(--ink-2)' }}>Net</span><strong className="num" style={{ color: net < 0 ? 'var(--bad)' : 'var(--ink)' }}>{money(net, { cents: false })}</strong></span>}
+              {net != null && <span className="row" style={{ gap: 6, flexWrap: 'nowrap' }}><span className="small" style={{ color: 'var(--ink-2)' }}>Net</span><strong className="num" style={{ color: net < 0 ? 'var(--bad)' : 'var(--ink)' }}>{money(net, { cents: false })}</strong></span>}
             </span>
           </span>
         </div>

@@ -76,15 +76,18 @@ export default function AddressInput({ value, onChange, multiline = false, place
   const home = useStore()?.db?.profile?.address;
   const [list, setList] = useState([]);
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [i, setI] = useState(-1);
   const typed = useRef(false);
   const box = useRef(null);
 
   useEffect(() => {
     const q = String(value || '').replace(/\s*\n\s*/g, ', ').trim();
-    if (!typed.current || q.length < 4) { setList([]); return undefined; }
+    if (!typed.current || q.length < 3) { setList([]); setBusy(false); return undefined; }
+    // Earlier results stay up while the new ones load (the map service can take a moment).
     const ctl = new AbortController();
-    const t = setTimeout(() => lookup(q, ctl.signal).then((l) => { setList(l); setI(-1); setOpen(true); }).catch(() => {}), 280);
+    setBusy(true);
+    const t = setTimeout(() => lookup(q, ctl.signal).then((l) => { setList(l); setI(-1); setOpen(true); setBusy(false); }).catch(() => {}), cache.has(q.toLowerCase()) ? 0 : 150);
     return () => { clearTimeout(t); ctl.abort(); };
   }, [value]);
 
@@ -116,6 +119,7 @@ export default function AddressInput({ value, onChange, multiline = false, place
   return (
     <div className="addr" ref={box}>
       {multiline ? <textarea rows={3} {...props} /> : <input {...props} />}
+      {busy && <span className="addr-busy spinner" aria-label="Looking up addresses" />}
       {open && list.length > 0 && (
         <div className="addr-list" role="listbox">
           {list.map((x, k) => (

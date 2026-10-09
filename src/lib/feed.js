@@ -50,7 +50,7 @@ export function buildFeed({ db, derived, statusOf, today }) {
   for (const inv of db.invoices) {
     // Client opened the link
     if (inv.last_viewed_at && inv.last_viewed_at.slice(0, 10) >= cutoff && inv.status !== 'void') {
-      items.push({ key: `v${inv.id}`, icon: 'eye', tone: 'seen', title: `${who(inv)} opened #${inv.number}`, sub: num(inv.view_count) > 1 ? `Viewed ${inv.view_count} times` : 'First time they opened it', at: inv.last_viewed_at, when: ago(inv.last_viewed_at, today), go: `/invoices/${inv.id}` });
+      items.push({ key: `v${inv.id}${inv.last_viewed_at}`, icon: 'eye', tone: 'seen', title: `${who(inv)} opened #${inv.number}`, sub: num(inv.view_count) > 1 ? `Viewed ${inv.view_count} times` : 'First time they opened it', at: inv.last_viewed_at, when: ago(inv.last_viewed_at, today), go: `/invoices/${inv.id}` });
     }
     if (inv.kind === 'quote' && inv.status === 'accepted') {
       items.push({ key: `a${inv.id}`, icon: 'check', tone: 'good', title: `Quote #${inv.number} accepted`, sub: `${who(inv)} · turn it into an invoice`, at: inv.updated_at || today, when: ago(inv.updated_at || today, today), go: `/invoices/${inv.id}` });
@@ -81,9 +81,9 @@ export function buildFeed({ db, derived, statusOf, today }) {
   }
 
   // Automatic reminders that went out
-  for (const e of db.invoice_events.filter((x) => x.type === 'reminder' && x.created_at?.slice(0, 10) >= addDays(today, -7))) {
+  for (const e of db.invoice_events.filter((x) => x.type === 'reminder' && x.created_at?.slice(0, 10) >= cutoff)) {
     const inv = derived.invoices[e.invoice_id];
-    if (inv) items.push({ key: `r${e.id}`, icon: 'mail', tone: 'muted', title: `Reminder sent for #${inv.number}`, sub: who(inv), at: e.created_at, when: ago(e.created_at, today), go: `/invoices/${inv.id}` });
+    if (inv) items.push({ key: `r${e.id}`, icon: 'bell', tone: 'muted', title: `${/^automatic/i.test(e.detail || '') ? 'Automatic reminder' : 'Reminder'} sent for #${inv.number}`, sub: who(inv), at: e.created_at, when: ago(e.created_at, today), go: `/invoices/${inv.id}` });
   }
 
   // Things to do: work that's stuck somewhere

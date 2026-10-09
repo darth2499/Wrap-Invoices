@@ -4,6 +4,12 @@ import './styles.css';
 import { applyTheme, initialTheme } from './components/ThemeToggle.jsx';
 
 applyTheme(initialTheme());
+// Until you pick a theme yourself, Wrap follows the system (and switches when it does).
+window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', (e) => {
+  let saved = null;
+  try { saved = localStorage.getItem('wrap_theme'); } catch { /* none */ }
+  if (!saved) applyTheme(e.matches ? 'dark' : 'light');
+});
 
 // Anything cut off with "…" shows its full text when you hover it (calendar chips, long names, inputs).
 document.addEventListener('mouseover', (e) => {
