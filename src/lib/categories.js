@@ -26,7 +26,9 @@ export const categoryLabel = (name) => name || 'Uncategorized';
 /** The categories you use: the built-in ones you haven't removed, plus your own (Settings → Expense categories). */
 export function categoryList(profile = {}) {
   const hidden = new Set(profile.hidden_categories || []);
-  const own = (profile.custom_categories || []).filter(Boolean).map((name) => ({ name, line: '27a', custom: true }));
+  const own = ownCategories(profile);
   return [...CATEGORIES.filter((c) => !hidden.has(c.name)), ...own.filter((c) => !CATEGORIES.some((d) => d.name === c.name))];
 }
-export const lineFor = (name) => CATEGORIES.find((x) => x.name === name)?.line || '27a';
+/** Your own categories: saved as names, or { name, line } when you renamed a built-in one (keeps its tax line). */
+export const ownCategories = (profile = {}) => (profile.custom_categories || []).filter(Boolean).map((c) => (typeof c === 'string' ? { name: c, line: '27a', custom: true } : { line: '27a', ...c, custom: true }));
+export const lineFor = (name, profile) => ownCategories(profile).find((x) => x.name === name)?.line || CATEGORIES.find((x) => x.name === name)?.line || '27a';

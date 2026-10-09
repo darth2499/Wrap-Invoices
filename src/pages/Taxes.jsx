@@ -54,7 +54,12 @@ export default function Taxes() {
     for (const r of db.receipts) if (r.receipt_date) ys.add(Number(r.receipt_date.slice(0, 4)));
     return [...ys].sort((a, b) => b - a);
   }, [db.invoices, db.receipts]);
-  const [year, setYear] = useState(Number(todayISO().slice(0, 4)) - (Number(todayISO().slice(5, 7)) <= 10 ? 1 : 0));
+  // Remembers the year you picked (on this device).
+  const [year, setYearState] = useState(() => {
+    try { const v = Number(localStorage.getItem('wrap_tax_year')); if (v > 2000) return v; } catch { /* default */ }
+    return Number(todayISO().slice(0, 4)) - (Number(todayISO().slice(5, 7)) <= 10 ? 1 : 0);
+  });
+  const setYear = (v) => { setYearState(v); try { localStorage.setItem('wrap_tax_year', String(v)); } catch { /* not saved */ } };
   const [tab, setTab] = useState('income');
   const [open, setOpen] = useState(() => new Set());
   const prog = useProgress(year);
@@ -84,9 +89,9 @@ export default function Taxes() {
     const g = {};
     for (const r of rows) (g[r.cat] ||= []).push(r);
     return Object.entries(g)
-      .map(([cat, list]) => ({ cat, line: lineFor(cat), list: list.sort((a, b) => a.date.localeCompare(b.date)), total: list.reduce((t, r) => t + r.cost, 0) }))
+      .map(([cat, list]) => ({ cat, line: lineFor(cat, db.profile), list: list.sort((a, b) => a.date.localeCompare(b.date)), total: list.reduce((t, r) => t + r.cost, 0) }))
       .sort((a, b) => b.total - a.total);
-  }, [db.receipts, db.crew_payouts, derived, y]);
+  }, [db.receipts, db.crew_payouts, db.profile, derived, y]);
 
   const incomeTotal = income.reduce((t, r) => t + r.amount, 0);
   const expenseTotal = groups.reduce((t, g) => t + g.total, 0);
@@ -175,7 +180,7 @@ export default function Taxes() {
   );
 }
 
-/** Round tick at the end of a row: fills in when the row is done; tap to mark or unmark it. */
+/** Square tick at the end of a row: fills in when the row is done; tap to mark or unmark it. */
 function RowCheck({ done, onClick }) {
   return (
     <button type="button" className={`row-check ${done ? 'on' : ''}`} onClick={onClick} aria-pressed={done} aria-label={done ? 'Mark as not done' : 'Mark as done'}>

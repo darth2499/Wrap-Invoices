@@ -77,6 +77,39 @@ export default function Overview() {
         <Kpi label={`Expenses in ${year}`} value={money(data.expYtd, { cents: false })} sub={review.length ? `${review.length} receipts to review` : 'From your receipts'} onClick={() => go('/expenses')} />
       </div>
 
+      <div className="grid-2 attention-row">
+        <section className="card">
+          <div className="card-head"><h2>Needs attention</h2>{data.overdue.length > 0 && <a href="#/invoices?f=overdue" className="small">All overdue</a>}</div>
+          {attention.length === 0 && review.length === 0 && <Empty icon="check" title="All caught up" />}
+          {review.length > 0 && (
+            <button className="list-row" style={{ gridTemplateColumns: '1fr auto' }} onClick={() => go('/expenses?status=review')}>
+              <span className="col" style={{ gap: 2 }}><b style={{ fontWeight: 500 }}>{plural(review.length, 'receipt')} to check</b><span className="small muted">Confirm what was read automatically</span></span>
+              <Pill kind="review">Review</Pill>
+            </button>
+          )}
+          {attention.slice(0, review.length ? 4 : 5).map((a) => (
+            <button key={a.key} className="list-row" style={{ gridTemplateColumns: '1fr auto' }} onClick={() => go(a.go)}>
+              <span className="col" style={{ gap: 2 }}><b style={{ fontWeight: 500 }}>{a.title}</b><span className="small" style={{ color: a.bad ? 'var(--bad)' : 'var(--muted)' }}>{a.sub}</span></span>
+              <span className="num">{money(a.amount)}</span>
+            </button>
+          ))}
+        </section>
+
+        <section className="card">
+          <div className="card-head"><h2>Owed by client</h2>{data.owed.length > 5 && <a href="#/reports/unpaid" className="small">All {data.owed.length}</a>}</div>
+          {data.owed.length === 0 && <Empty icon="cash" title="Nobody owes you anything" />}
+          {data.owed.slice(0, 5).map((o) => (
+            <button key={o.id} className="list-row" style={{ gridTemplateColumns: '1fr auto' }} onClick={() => go(`/clients/${o.id}`)}>
+              <span className="col" style={{ gap: 6 }}>
+                <b style={{ fontWeight: 500 }}>{o.name}</b>
+                <span style={{ height: 6, borderRadius: 3, background: 'var(--line-2)', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', borderRadius: 3, background: 'var(--accent)', width: `${Math.max(3, (o.v / data.owed[0].v) * 100)}%` }} /></span>
+              </span>
+              <span className="num">{money(o.v)}</span>
+            </button>
+          ))}
+        </section>
+      </div>
+
       <section className="card card-pad col forecast" style={{ gap: 14 }}>
         <div className="row between" style={{ gap: 10, flexWrap: 'nowrap' }}>
           <div className="row" style={{ gap: 8 }} title={data.f.enough ? `Projected: ${moneyK(data.f.mid)} income − ${moneyK(data.fx.mid)} expenses by Dec 31. ${data.f.method === 'seasonal' ? `Follows ${year - 1}'s monthly pattern, scaled to ${year} so far.` : 'Based on your average month.'}` : undefined}><Icon name="reports" style={{ color: 'var(--accent)' }} /><h2>{year} year-end forecast</h2></div>
@@ -109,36 +142,6 @@ export default function Overview() {
           </div>
         </section>
 
-        <section className="card">
-          <div className="card-head"><h2>Needs attention</h2>{data.overdue.length > 0 && <a href="#/invoices?f=overdue" className="small">All overdue</a>}</div>
-          {attention.length === 0 && review.length === 0 && <Empty icon="check" title="All caught up" />}
-          {review.length > 0 && (
-            <button className="list-row" style={{ gridTemplateColumns: '1fr auto' }} onClick={() => go('/expenses?status=review')}>
-              <span className="col" style={{ gap: 2 }}><b style={{ fontWeight: 500 }}>{plural(review.length, 'receipt')} to check</b><span className="small muted">Confirm what was read automatically</span></span>
-              <Pill kind="review">Review</Pill>
-            </button>
-          )}
-          {attention.slice(0, 7).map((a) => (
-            <button key={a.key} className="list-row" style={{ gridTemplateColumns: '1fr auto' }} onClick={() => go(a.go)}>
-              <span className="col" style={{ gap: 2 }}><b style={{ fontWeight: 500 }}>{a.title}</b><span className="small" style={{ color: a.bad ? 'var(--bad)' : 'var(--muted)' }}>{a.sub}</span></span>
-              <span className="num">{money(a.amount)}</span>
-            </button>
-          ))}
-        </section>
-
-        <section className="card">
-          <div className="card-head"><h2>Owed by client</h2></div>
-          {data.owed.length === 0 && <Empty icon="cash" title="Nobody owes you anything" />}
-          {data.owed.map((o) => (
-            <button key={o.id} className="list-row" style={{ gridTemplateColumns: '1fr auto' }} onClick={() => go(`/clients/${o.id}`)}>
-              <span className="col" style={{ gap: 6 }}>
-                <b style={{ fontWeight: 500 }}>{o.name}</b>
-                <span style={{ height: 6, borderRadius: 3, background: 'var(--line-2)', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', borderRadius: 3, background: 'var(--accent)', width: `${Math.max(3, (o.v / data.owed[0].v) * 100)}%` }} /></span>
-              </span>
-              <span className="num">{money(o.v)}</span>
-            </button>
-          ))}
-        </section>
       </div>
     </div>
   );

@@ -8,7 +8,7 @@ import { CLIENT_FIELDS, INVOICE_FIELDS, autoMap, clientsFromCsv, invoicesFromCsv
 import { isWaveAccounting, parseWaveAccounting, readWaveFiles } from '../lib/wave.js';
 import { money, num, todayISO, addDays, plural } from '../lib/format.js';
 import { DEMO } from '../config.js';
-import { CATEGORIES } from '../lib/categories.js';
+import { CATEGORIES, ownCategories } from '../lib/categories.js';
 import { resetDemo } from '../api/demo.js';
 import { go } from '../router.js';
 
@@ -801,25 +801,44 @@ function WaveModal({ files, onClose }) {
   );
 }
 
-/** Expense categories: remove built-in ones you never use, add your own. */
+/** Expense categories: rename any (tap the name), remove ones you never use, add your own. */
 function Categories() {
   const s = useStore();
   const p = s.db.profile;
   const hidden = new Set(p.hidden_categories || []);
-  const own = p.custom_categories || [];
+  const own = ownCategories(p);
   const [name, setName] = useState('');
+  const [editing, setEditing] = useState(null);
   const save = (patch) => s.updateProfile(patch).catch((e) => s.toast(e.message, { error: true }));
+  const pack = (list) => list.map((c) => (c.line && c.line !== '27a' ? { name: c.name, line: c.line } : c.name));
+  const exists = (n) => [...CATEGORIES.filter((c) => !hidden.has(c.name)), ...own].some((c) => c.name.toLowerCase() === n.toLowerCase());
   const add = () => {
     const n = name.trim();
     if (!n) return;
-    if (CATEGORIES.some((c) => c.name.toLowerCase() === n.toLowerCase())) save({ hidden_categories: [...hidden].filter((h) => h.toLowerCase() !== n.toLowerCase()) });
-    else if (!own.some((o) => o.toLowerCase() === n.toLowerCase())) save({ custom_categories: [...own, n] });
+    const builtin = CATEGORIES.find((c) => c.name.toLowerCase() === n.toLowerCase());
+    if (builtin) save({ hidden_categories: [...hidden].filter((h) => h !== builtin.name) });
+    else if (!exists(n)) save({ custom_categories: pack([...own, { name: n, line: '27a' }]) });
     setName('');
   };
+  // Renaming also moves every receipt in the old category over to the new name.
+  const rename = async (from, to, isOwn) => {
+    to = to.trim();
+    setEditing(null);
+    if (!to || to === from) return;
+    if (exists(to)) { s.toast(`“${to}” already exists`, { error: true }); return; }
+    const line = (isOwn ? own.find((c) => c.name === from)?.line : CATEGORIES.find((c) => c.name === from)?.line) || '27a';
+    const nextOwn = isOwn ? own.map((c) => (c.name === from ? { ...c, name: to } : c)) : [...own, { name: to, line }];
+    await save({ custom_categories: pack(nextOwn), ...(isOwn ? {} : { hidden_categories: [...hidden, from] }) });
+    const moving = s.db.receipts.filter((r) => r.category === from);
+    for (let i = 0; i < moving.length; i += 20) await Promise.all(moving.slice(i, i + 20).map((r) => s.update('receipts', r.id, { category: to })));
+    s.toast(moving.length ? `Renamed · ${plural(moving.length, 'receipt')} moved` : 'Renamed');
+  };
   const used = (n) => s.db.receipts.filter((r) => r.category === n).length;
-  const Row = ({ n, off, onToggle }) => (
+  const Row = ({ n, off, isOwn, onToggle }) => (
     <div className={`cat-row ${off ? 'off' : ''}`}>
-      <span>{n}</span>
+      {editing === n
+        ? <input className="input" autoFocus defaultValue={n} aria-label={`Rename ${n}`} onBlur={(e) => rename(n, e.target.value, isOwn)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditing(null); }} />
+        : <button type="button" className="cat-name" disabled={off} onClick={() => setEditing(n)}>{n}<Icon name="edit" size={13} /></button>}
       <span className="small muted num">{used(n) || ''}</span>
       <Button size="sm" variant="ghost" icon={off ? 'plus' : 'x'} aria-label={off ? `Add ${n} back` : `Remove ${n}`} onClick={onToggle} />
     </div>
@@ -832,7 +851,7 @@ function Categories() {
         <Button type="submit" variant="primary" icon="plus" disabled={!name.trim()}>Add</Button>
       </form>
       <div className="col" style={{ gap: 0 }}>
-        {own.map((n) => <Row key={n} n={n} onToggle={() => save({ custom_categories: own.filter((o) => o !== n) })} />)}
+        {own.map((c) => <Row key={c.name} n={c.name} isOwn onToggle={() => save({ custom_categories: pack(own.filter((o) => o.name !== c.name)) })} />)}
         {CATEGORIES.map((c) => <Row key={c.name} n={c.name} off={hidden.has(c.name)} onToggle={() => save({ hidden_categories: hidden.has(c.name) ? [...hidden].filter((h) => h !== c.name) : [...hidden, c.name] })} />)}
       </div>
     </section>
