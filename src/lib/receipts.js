@@ -1,6 +1,6 @@
 // The full "add a receipt" pipeline: duplicate check → scan → upload → read with AI → duplicate check again → save.
 import { sha256, extFor } from './files.js';
-import { scanReceipt, shrinkOriginal } from './scan.js';
+import { scanReceipt, shrinkOriginal, compressPhoto, readingCopy } from './scan.js';
 import { round2 } from './format.js';
 import { pdfText, pdfFirstPageImage, blobToBase64 } from './pdftext.js';
 
@@ -75,9 +75,15 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
     if (!isPdf) {
       // Read first (from the sharp copy), then store the compressed copies.
       onStep('Uploading…');
-      const original = await shrinkOriginal(file);
+      let scanBlob = scanned.scan;
+      let original = await shrinkOriginal(file);
+      if (ai?.rotation) {
+        // The reader says the photo is sideways or upside down: store it upright.
+        const t = await compressPhoto(scanned.scan, { maxSide: 1600, quality: 0.72, turn: ai.rotation }).catch(() => null);
+        if (t?.turned) { scanBlob = t.blob; original = (await compressPhoto(file, { turn: t.turned })).blob; }
+      }
       [fileKey, originalKey] = await Promise.all([
-        api.files.upload(scanned.scan, { folder: 'receipts', ext: 'jpg' }),
+        api.files.upload(scanBlob, { folder: 'receipts', ext: 'jpg' }),
         api.files.upload(original, { folder: 'originals', ext: extFor(original.type, 'jpg') }),
       ]);
       uploaded.push(fileKey, originalKey);
@@ -131,8 +137,8 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
 }
 
 /**
- * Puts a file on an existing receipt (one imported without a file, or a swap). Photos are compressed the same way
- * as new receipts: a cleaned-up scan plus a shrunk original. Old files are deleted after the new ones are saved.
+ * Puts a file on an existing receipt (one imported without a file, or a swap). Photos are stored as taken
+ * (no cleanup), turned upright and compressed. Old files are deleted after the new ones are saved.
  */
 export async function attachToReceipt(s, r, file) {
   const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
@@ -144,13 +150,17 @@ export async function attachToReceipt(s, r, file) {
   if (isPdf) {
     patch = { file_key: await up(file, 'receipts', 'pdf'), original_key: null, mime: 'application/pdf' };
   } else {
-    let scan = null;
-    try { scan = await scanReceipt(file); } catch { /* format this browser can't open: store as is */ }
-    if (scan) {
-      const original = await shrinkOriginal(file);
-      const [fileKey, originalKey] = await Promise.all([up(scan.scan, 'receipts', 'jpg'), up(original, 'originals', extFor(original.type, 'jpg'))]);
-      patch = { file_key: fileKey, original_key: originalKey, mime: 'image/jpeg', ai: { ...(r.ai || {}), cropped: scan.cropped } };
-    } else {
+    // Kept as the photo (no cleanup), just upright and compressed. The reader is asked only which way is up.
+    let turn = 0;
+    try {
+      const copy = await readingCopy(file, 1000);
+      turn = (await s.api.readReceipt(null, 'image/jpeg', { image_b64: await blobToBase64(copy), image_mime: 'image/jpeg' }))?.rotation || 0;
+    } catch { /* keep it as taken */ }
+    try {
+      const { blob } = await compressPhoto(file, { turn });
+      patch = { file_key: await up(blob, 'receipts', 'jpg'), original_key: null, mime: 'image/jpeg' };
+    } catch {
+      // A format this browser can't open (e.g. HEIC outside Safari): store as is.
       patch = { file_key: await up(file, 'receipts', extFor(file.type, 'jpg')), original_key: null, mime: file.type || 'image/jpeg' };
     }
   }

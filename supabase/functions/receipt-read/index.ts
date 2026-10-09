@@ -29,7 +29,8 @@ Pick the best tax category for the expense from this list: ${CATEGORIES.join("; 
 const RECEIPT_JSON = `Reply with ONLY one JSON object, no other text, in exactly this shape (use null when unknown):
 {"is_receipt": true, "vendor": "Business name", "date": "YYYY-MM-DD", "total_paid": 0.00, "subtotal": null, "tax": null, "tip": null,
  "currency": "USD", "reasoning": "one short sentence: which line is the total and why",
- "amounts": [{"label": "Subtotal", "amount": 0.00}], "category": "one of the categories", "confidence": "high|medium|low"}
+ "amounts": [{"label": "Subtotal", "amount": 0.00}], "category": "one of the categories", "confidence": "high|medium|low", "rotation": 0}
+"rotation" is how many degrees the picture must be turned clockwise so its text reads upright: 0, 90, 180 or 270.
 "amounts" lists every OTHER money amount someone might confuse with the total (subtotal, tax, tip, items, tendered, change).`;
 
 const INVOICE_RULES = `This is an invoice the user sent to a client (for example exported from Wave). Read every line item across all pages, keeping each item's description lines.`;
@@ -85,6 +86,7 @@ function cleanReceipt(r: Record<string, any>) {
     category: cat,
     confidence: ["high", "medium", "low"].includes(r.confidence) ? r.confidence : "medium",
     check: "unknown" as "ok" | "mismatch" | "unknown",
+    rotation: [90, 180, 270].includes(Number(r.rotation)) ? Number(r.rotation) : 0,
   };
   // Sanity check: subtotal + tax + tip should equal the total. Flag it if not.
   if (out.total_paid != null && out.subtotal != null) {

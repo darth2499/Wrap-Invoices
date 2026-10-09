@@ -353,3 +353,70 @@ export async function shrinkLogo(file) {
     return file;
   }
 }
+
+/** Turns a canvas clockwise by 90, 180 or 270 degrees. */
+function turned(src, deg) {
+  if (!deg) return src;
+  const c = document.createElement('canvas');
+  const side = deg % 180 !== 0;
+  c.width = side ? src.height : src.width;
+  c.height = side ? src.width : src.height;
+  const ctx = c.getContext('2d');
+  ctx.translate(c.width / 2, c.height / 2);
+  ctx.rotate((deg * Math.PI) / 180);
+  ctx.drawImage(src, -src.width / 2, -src.height / 2);
+  return c;
+}
+
+/**
+ * True when the text in a photo runs up/down (the photo is sideways). Printed lines make the ink very uneven
+ * from row to row (line, gap, line…) and much smoother across; sideways, it's the other way round.
+ */
+function looksSideways(src) {
+  const c = toCanvas(src, 360);
+  const { width: w, height: h } = c;
+  const px = c.getContext('2d').getImageData(0, 0, w, h).data;
+  const g = new Float32Array(w * h);
+  let mean = 0;
+  for (let i = 0; i < w * h; i++) { g[i] = px[i * 4] * 0.3 + px[i * 4 + 1] * 0.59 + px[i * 4 + 2] * 0.11; mean += g[i]; }
+  mean /= w * h;
+  const rows = new Float32Array(h);
+  const cols = new Float32Array(w);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { if (g[y * w + x] < mean - 40) { rows[y]++; cols[x]++; } }
+  // Gaps between printed lines are rows with (almost) no ink running the whole width; sideways, they're columns.
+  const gaps = (a) => {
+    let lo = 0; let hi = a.length - 1;
+    while (lo < hi && a[lo] === 0) lo++;
+    while (hi > lo && a[hi] === 0) hi--;
+    let peak = 0; for (let i = lo; i <= hi; i++) peak = Math.max(peak, a[i]);
+    let n = 0; for (let i = lo; i <= hi; i++) if (a[i] <= peak * 0.04) n++;
+    return hi > lo ? n / (hi - lo + 1) : 0;
+  };
+  const r = gaps(rows);
+  const k = gaps(cols);
+  return k > r * 1.5 + 0.04;
+}
+
+/**
+ * The photo as it will be stored: upright (camera orientation, plus the reader's suggested turn when the text
+ * really is sideways or upside down), at most `maxSide` px, JPEG. `turn` = degrees clockwise.
+ */
+export async function compressPhoto(file, { maxSide = 2000, quality = 0.8, turn = 0 } = {}) {
+  const bmp = await decode(file);
+  let deg = [90, 180, 270].includes(turn) ? turn : 0;
+  if (deg % 180 !== 0 && !looksSideways(bmp)) deg = 0; // the reader can be wrong about sideways; check the picture
+  if (deg === 180 && looksSideways(bmp)) deg = 0;
+  const out = await blobOf(turned(toCanvas(bmp, maxSide), deg), 'image/jpeg', quality);
+  return { blob: out, turned: deg };
+}
+
+/** A stored photo turned by hand (the rotate button). */
+export async function rotatePhoto(blob, deg = 90) {
+  const bmp = await decode(blob);
+  return blobOf(turned(toCanvas(bmp, 2400), deg), 'image/jpeg', 0.82);
+}
+
+/** A small copy for the reader. */
+export async function readingCopy(file, maxSide = 1600) {
+  return blobOf(toCanvas(await decode(file), maxSide), 'image/jpeg', 0.82);
+}

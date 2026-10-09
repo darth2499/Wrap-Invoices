@@ -251,23 +251,30 @@ export function ReceiptModal({ id, onClose, onNext }) {
   const { db, derived } = s;
   const r = derived.receipts[id];
   const [f, setF] = useState(() => ({ vendor: r?.vendor || '', receipt_date: r?.receipt_date || todayISO(), total: r?.total ?? '', category: r?.category || '', notes: r?.notes || '', invoice_id: r?.invoice_id || null, billable: !!r?.billable }));
-  const [view, setView] = useState('scan');
   const [urls, setUrls] = useState({});
   const [busy, setBusy] = useState(false);
   const [fileBusy, setFileBusy] = useState(false); // (all hooks must sit above the early return below)
   const [over, setOver] = useState(false);
-  const [pdfUrl, setPdfUrl] = useState(null);
+  const [pdf, setPdf] = useState(null); // { pages: [img urls], total, url (the whole PDF, for opening) }
   useEffect(() => {
-    if (r) s.api.files.urls([r.file_key, r.original_key].filter(Boolean)).then(setUrls).catch(() => {});
+    if (r) s.api.files.urls([r.file_key].filter(Boolean)).then(setUrls).catch(() => {});
   }, [r?.file_key]); // eslint-disable-line react-hooks/exhaustive-deps
-  // PDFs preview from a local copy: the storage link itself can't be framed by the page.
+  // PDFs are drawn as pages inside the app (same look as a photo), not in the browser's PDF viewer.
   useEffect(() => {
     const u = r?.mime === 'application/pdf' && urls[r.file_key];
-    if (!u) { setPdfUrl(null); return undefined; }
-    let local = null;
+    setPdf(null);
+    if (!u) return undefined;
+    let made = [];
     let gone = false;
-    fetch(u).then((x) => x.blob()).then((b) => { if (!gone) { local = URL.createObjectURL(new Blob([b], { type: 'application/pdf' })); setPdfUrl(local); } }).catch(() => {});
-    return () => { gone = true; if (local) URL.revokeObjectURL(local); };
+    (async () => {
+      const blob = new Blob([await (await fetch(u)).blob()], { type: 'application/pdf' });
+      const { pdfPages } = await import('../lib/pdftext.js');
+      const { pages, total } = await pdfPages(blob, { max: 6 });
+      made = [...pages, URL.createObjectURL(blob)];
+      if (gone) made.forEach((x) => URL.revokeObjectURL(x));
+      else setPdf({ pages, total, url: made[made.length - 1] });
+    })().catch(() => !gone && setPdf({ pages: [], total: 0, url: u }));
+    return () => { gone = true; made.forEach((x) => URL.revokeObjectURL(x)); };
   }, [urls, r?.file_key, r?.mime]);
   if (!r) return null;
   const ai = r.ai || {};
@@ -282,7 +289,22 @@ export function ReceiptModal({ id, onClose, onNext }) {
   const likely = f.receipt_date ? invoices
     .map((i) => ({ i, sc: receiptScore({ ...f, invoice_id: null }, suggestContext({ lines: derived.linesFor(i.id), jobs: i.jobs, issueDate: i.issue_date, clientName: derived.clients[i.client_id]?.name })) }))
     .filter((x) => x.sc >= 7).sort((a, b) => b.sc - a.sc).slice(0, 4).map((x) => x.i) : [];
-  const url = view === 'scan' ? urls[r.file_key] : urls[r.original_key];
+  const url = urls[r.file_key];
+  const isPdf = r.mime === 'application/pdf';
+  // Turn a stored photo a quarter turn clockwise (for the odd one the automatic turn got wrong).
+  const rotate = async () => {
+    if (fileBusy || !url) return;
+    setFileBusy(true);
+    try {
+      const { rotatePhoto } = await import('../lib/scan.js');
+      const blob = await rotatePhoto(await (await fetch(url)).blob(), 90);
+      const key = await s.api.files.upload(blob, { folder: 'receipts', ext: 'jpg' });
+      const old = [r.file_key, r.original_key].filter(Boolean);
+      await s.update('receipts', r.id, { file_key: key, original_key: null, mime: 'image/jpeg' });
+      await s.api.files.remove(old).catch(() => {});
+    } catch (e) { s.toast(e.message, { error: true }); }
+    setFileBusy(false);
+  };
   // Add a file to a receipt that has none (e.g. imported from Wave), or swap in a new one. Pick or drop.
   const attachFile = async (dropped) => {
     const file = dropped || (await pickFiles({ accept: 'image/*,application/pdf' }))[0];
@@ -290,7 +312,6 @@ export function ReceiptModal({ id, onClose, onNext }) {
     setFileBusy(true);
     try {
       const how = await attachToReceipt(s, r, file);
-      setView('scan');
       s.toast(how === 'replaced' ? 'File replaced' : 'File added');
     } catch (e) {
       s.toast(e.message, { error: true });
@@ -343,14 +364,27 @@ export function ReceiptModal({ id, onClose, onNext }) {
     }>
       <div className="row wrap" style={{ alignItems: 'flex-start', gap: 20 }}>
         <div className="col" style={{ flex: '1 1 280px', minWidth: 0, gap: 8 }}>
-          {r.original_key && <Seg value={view} onChange={setView} label="Image" options={[{ value: 'scan', label: ai.cropped === false ? 'Cleaned up' : 'Cropped · sharpened' }, { value: 'orig', label: 'Original photo' }]} />}
-          <div className={`receipt-view ${over ? 'over' : ''}`} {...dropProps}>
+          <div className={`receipt-view ${over ? 'over' : ''} ${r.file_key ? 'has-file' : ''}`} {...dropProps}>
             {!r.file_key
               ? <button type="button" className="file-drop" onClick={() => attachFile()} disabled={fileBusy}>{fileBusy ? <span className="spinner" /> : <Icon name="upload" size={22} />}<span>Add or drop a receipt image or PDF</span></button>
-              : !url ? <span className="spinner" /> : r.mime === 'application/pdf' && view === 'scan' ? (pdfUrl ? <iframe title="Receipt PDF" src={pdfUrl} style={{ width: '100%', height: 500, border: 0 }} /> : <span className="spinner" />) : <a href={url} target="_blank" rel="noreferrer"><img src={url} alt="Receipt" style={{ maxWidth: '100%', display: 'block' }} /></a>}
+              : !url || (isPdf && !pdf) ? <span className="spinner" />
+              : isPdf ? (
+                <div className="rv-pages">
+                  {pdf.pages.map((src, i) => <a key={src} href={pdf.url} target="_blank" rel="noreferrer" className="rv-page"><img src={src} alt={`Page ${i + 1}`} /></a>)}
+                  {!pdf.pages.length && <a href={pdf.url} target="_blank" rel="noreferrer" className="file-drop" style={{ minHeight: 200 }}><Icon name="file" size={22} /><span>Open PDF</span></a>}
+                  {pdf.total > pdf.pages.length && <a href={pdf.url} target="_blank" rel="noreferrer" className="small muted">+{pdf.total - pdf.pages.length} more page{pdf.total - pdf.pages.length === 1 ? '' : 's'}</a>}
+                </div>
+              )
+              : <div className="rv-pages"><a href={url} target="_blank" rel="noreferrer" className="rv-page"><img src={url} alt="Receipt" /></a></div>}
             {fileBusy && r.file_key && <span className="receipt-busy"><span className="spinner" /></span>}
+            {r.file_key && url && (
+              <div className="rv-tools">
+                {!isPdf && <button type="button" className="icon-btn" onClick={rotate} disabled={fileBusy} title="Rotate" aria-label="Rotate"><Icon name="rotate" size={16} /></button>}
+                <a className="icon-btn" href={isPdf ? pdf?.url : url} target="_blank" rel="noreferrer" title="Open full size" aria-label="Open full size"><Icon name="expand" size={16} /></a>
+                <button type="button" className="icon-btn" onClick={() => attachFile()} disabled={fileBusy} title="Replace file" aria-label="Replace file"><Icon name="upload" size={16} /></button>
+              </div>
+            )}
           </div>
-          {r.file_key && <Button size="sm" variant="ghost" icon="upload" busy={fileBusy} onClick={() => attachFile()} style={{ alignSelf: 'flex-start' }}>Replace file</Button>}
         </div>
         <div className="col" style={{ flex: '1 1 300px', gap: 12 }}>
           {r.status === 'review' && ai.reasoning && (

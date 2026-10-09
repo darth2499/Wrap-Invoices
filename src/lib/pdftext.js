@@ -35,6 +35,26 @@ export async function pdfText(file, maxPages = 12) {
   return pages.join('\n\n--- page break ---\n\n').trim();
 }
 
+/** Every page (up to `max`) as a picture, for showing a PDF inside the app. Returns object URLs. */
+export async function pdfPages(file, { max = 10, width = 1100 } = {}) {
+  const doc = await open(file);
+  const out = [];
+  for (let n = 1; n <= Math.min(doc.numPages, max); n++) {
+    const page = await doc.getPage(n);
+    const base = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: Math.min(3, width / base.width) });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(vp.width);
+    canvas.height = Math.round(vp.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    out.push(URL.createObjectURL(await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.85))));
+  }
+  return { pages: out, total: doc.numPages };
+}
+
 /** Page 1 as a JPEG (for PDFs that are just a scanned picture). */
 export async function pdfFirstPageImage(file, maxSide = 1600) {
   const doc = await open(file);
