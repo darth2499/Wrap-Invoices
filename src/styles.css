@@ -129,8 +129,8 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
 .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
 .pill.draft, .pill.ready { background: #ededea; color: var(--ink-2); }
 .pill.sent { background: var(--accent-bg); color: var(--accent-ink); }
-.pill.seen, .st-seen { background: #e3f1f6; color: #145a73; }
-.pill .seen-eye { margin-left: 4px; vertical-align: -2px; opacity: .8; }
+.seen-eye { display: inline-grid; place-items: center; color: var(--accent); vertical-align: middle; }
+.m-card .st { display: inline-flex; align-items: center; gap: 6px; }
 .pill.partial { background: var(--warn-bg); color: var(--warn); }
 .pill.overdue { background: var(--bad-bg); color: #a8231a; }
 .pill.paid, .pill.accepted, .pill.good { background: var(--good-bg); color: var(--good); }
@@ -465,15 +465,17 @@ html.theme-blend *, html.theme-blend *::before, html.theme-blend *::after { tran
 /* Starts and ends below the page edge: rises in fast, hangs at the top, drops out fast. */
 @keyframes orb-arc { from { transform: rotate(-108deg); } to { transform: rotate(108deg); } }
 /* View Transitions: the new theme wipes in behind the orb (positions are animated from ThemeToggle.jsx). */
-.orb-vt { position: fixed; left: 0; top: 0; width: 180px; height: 180px; border-radius: 50%; pointer-events: none; z-index: 10000; transform: translate(-400px, 130vh); view-transition-name: wrap-orb; }
+.orb-vt { position: fixed; left: 0; top: 0; width: clamp(120px, 24vmin, 180px); height: clamp(120px, 24vmin, 180px); border-radius: 50%; pointer-events: none; z-index: 10000; transform: translate(-400px, 130vh); view-transition-name: wrap-orb; }
 html.vt-wipe::view-transition-old(root), html.vt-wipe::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 html.vt-wipe::view-transition-new(root) {
-  -webkit-mask-image: linear-gradient(to right, #000 calc(50% - 48px), transparent calc(50% + 48px)); mask-image: linear-gradient(to right, #000 calc(50% - 48px), transparent calc(50% + 48px));
+  -webkit-mask-image: linear-gradient(to right, #000 calc(50% - min(48px, 6vw)), transparent calc(50% + min(48px, 6vw))); mask-image: linear-gradient(to right, #000 calc(50% - min(48px, 6vw)), transparent calc(50% + min(48px, 6vw)));
   -webkit-mask-size: 200vw 100%; mask-size: 200vw 100%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: -200vw 0; mask-position: -200vw 0;
 }
 html.vt-wipe::view-transition-group(wrap-orb), html.vt-wipe::view-transition-new(wrap-orb) { animation: none; }
 html.vt-wipe::view-transition-old(wrap-orb) { display: none; }
 @media (prefers-reduced-motion: reduce) { .orb-arc { display: none; } .theme-toggle svg, body { transition: none; } }
+.sheet .theme-row { justify-content: space-between; padding-right: 8px; }
+.sheet .theme-row .theme-toggle { pointer-events: none; }
 .sheet-row { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 0 8px 0 14px; font-size: 15px; color: var(--ink); }
 /* ---------- Taxes: big, clear rows; every value copies on click ---------- */
 .tax-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -628,8 +630,6 @@ html.vt-wipe::view-transition-old(wrap-orb) { display: none; }
 :root[data-theme='dark'] .daychip.ot { background: #3a2f1a; border-color: #8a6a2e; }
 .addon-qty:has(.unit) .input { padding-right: 28px; }
 
-:root[data-theme='dark'] .pill.seen, :root[data-theme='dark'] .st-seen { background: #173845; color: #8fd0e6; }
-@media (max-width: 800px) { .cal-dots .st-seen { background: #3a9ec2; } }
 
 /* ---------- What's new (Overview) ---------- */
 .feed-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; padding: 0 12px 8px; }
@@ -654,3 +654,16 @@ html.vt-wipe::view-transition-old(wrap-orb) { display: none; }
 .addr-list { position: absolute; left: 0; right: 0; min-width: min(340px, 86vw); top: calc(100% + 4px); z-index: 40; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.16); padding: 6px; }
 .addr-list .item-opt { justify-content: flex-start; color: var(--ink); }
 .addr-list .item-opt > svg { color: var(--muted); flex: none; }
+.logo-box { width: 88px; height: 64px; border-radius: 12px; border: 1px dashed var(--field); display: grid; place-items: center; color: var(--muted); background: #fff; overflow: hidden; flex: none; }
+.logo-box img { max-width: 80px; max-height: 56px; object-fit: contain; }
+
+/* Calendar: tap the month to jump months/years */
+.cal-title { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; padding: 6px 10px; border-radius: 8px; color: var(--ink); }
+.cal-title:hover { background: var(--hover); }
+.cal-title:focus-visible { outline: 2px solid var(--accent); }
+.month-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px 0; }
+.month-btn { height: 40px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); font: inherit; font-weight: 500; cursor: pointer; }
+.month-btn:hover { background: var(--hover); }
+.month-btn.today { box-shadow: inset 0 0 0 1.5px var(--line); }
+.month-btn.on { background: var(--primary); color: var(--on-primary); }
+.date-input { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; cursor: pointer; text-align: left; color: var(--muted); }

@@ -156,9 +156,14 @@ function Quarterly({ year }) {
     { label: 'Q3', from: `${year}-06-01`, to: `${year}-08-31`, due: `${year}-09-15`, months: 'Jun – Aug' },
     { label: 'Q4', from: `${year}-09-01`, to: `${year}-12-31`, due: `${year + 1}-01-15`, months: 'Sep – Dec' },
   ];
+  // Income by what you billed (invoice date) — or by what came in, if you prefer.
+  const [basis, setBasisState] = useState(() => { try { return localStorage.getItem('wrap_q_basis') || 'billed'; } catch { return 'billed'; } });
+  const setBasis = (v) => { setBasisState(v); try { localStorage.setItem('wrap_q_basis', v); } catch { /* not saved */ } };
   const inRange = (dt, p) => dt && dt >= p.from && dt <= p.to;
   const rows = periods.map((p) => {
-    const income = d.payments.filter((x) => inRange(x.paid_on, p)).reduce((t, x) => t + num(x.amount), 0);
+    const income = basis === 'billed'
+      ? d.invoices.filter((x) => inRange(x.issue_date, p)).reduce((t, x) => t + num(x.total), 0)
+      : d.payments.filter((x) => inRange(x.paid_on, p)).reduce((t, x) => t + num(x.amount), 0);
     const exp = d.receipts.filter((x) => inRange(x.receipt_date, p)).reduce((t, x) => t + num(x.total), 0)
       + d.trips.filter((x) => inRange(x.trip_date, p)).reduce((t, x) => t + num(x.miles) * (x.round_trip ? 2 : 1) * num(x.rate), 0)
       + d.crew.filter((x) => inRange(x.paid_on, p)).reduce((t, x) => t + num(x.amount), 0);
@@ -173,11 +178,14 @@ function Quarterly({ year }) {
         <Field label="Set aside this % of profit" style={{ width: 200 }}>
           <MoneyInput value={pct} onChange={(v) => s.updateProfile({ tax_set_aside_pct: v })} />
         </Field>
+        <Field label="Count income by">
+          <Seg value={basis} onChange={setBasis} label="Count income by" options={[{ value: 'billed', label: 'Billed' }, { value: 'received', label: 'Received' }]} />
+        </Field>
         {next && <div className="card card-pad" style={{ padding: '12px 16px' }}><span className="muted small">Next federal due date</span><div style={{ fontWeight: 600 }}>{fmtLong(next.due)} · {next.label} ({next.months}) · set aside {money(next.setAside, { cents: false })}</div></div>}
       </div>
       <section className="card">
         <table className="table">
-          <thead><tr><th>Period</th><th>Federal due</th><th className="right">Income received</th><th className="right">Expenses</th><th className="right">Profit</th><th className="right">Set aside ({pct}%)</th></tr></thead>
+          <thead><tr><th>Period</th><th>Federal due</th><th className="right">{basis === 'billed' ? 'Billed' : 'Received'}</th><th className="right">Expenses</th><th className="right">Profit</th><th className="right">Set aside ({pct}%)</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.label} style={{ background: next?.label === r.label ? 'var(--accent-bg)' : undefined }}>

@@ -6,7 +6,7 @@ import { TABLES } from '../api/tables.js';
 import { todayISO } from './format.js';
 
 const PROFILE_FIELDS = [
-  'business_name', 'business_email', 'address', 'phone', 'website', 'logo_key', 'template', 'accent', 'payment_instructions',
+  'business_name', 'business_email', 'address', 'phone', 'website', 'logo_key', 'logo_mode', 'template', 'accent', 'payment_instructions',
   'footer_note', 'next_invoice_number', 'next_quote_number', 'default_terms_days', 'ot_base_hours', 'ot_mult1', 'ot_mult1_hours',
   'ot_mult2', 'reminder_days', 'auto_remind_default', 'mileage_rate', 'tax_set_aside_pct',
 ];

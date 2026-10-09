@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.jsx';
 import AddressInput from '../components/AddressInput.jsx';
-import { Button, Empty, Field, Icon, Modal, MoneyInput, Pill, Seg, Switch, Combobox } from '../components/ui.jsx';
+import { Button, Empty, Field, Icon, Modal, MoneyInput, Pill, Seg, Switch, Combobox, DateInput } from '../components/ui.jsx';
 import { categoryList, categoryLabel } from '../lib/categories.js';
 import { addReceiptFile } from '../lib/receipts.js';
 import { setBillable } from '../lib/actions.js';
@@ -315,7 +315,7 @@ export function ReceiptModal({ id, onClose, onNext }) {
           )}
           <div className="grid" style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
             <Field label="Vendor"><input className="input" value={f.vendor} onChange={(e) => setF({ ...f, vendor: e.target.value })} /></Field>
-            <Field label="Date"><input className="input" type="date" value={f.receipt_date || ''} onChange={(e) => setF({ ...f, receipt_date: e.target.value })} /></Field>
+            <Field label="Date"><DateInput value={f.receipt_date || ''} onChange={(v) => setF({ ...f, receipt_date: v })} /></Field>
           </div>
           <Field label="Category">
             <select className="input" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
@@ -415,7 +415,7 @@ function TripModal({ trip, onClose }) {
   return (
     <Modal title={isNew ? 'Log a trip' : 'Edit trip'} onClose={onClose} footer={<>{!isNew && <Button variant="ghost" className="danger" icon="trash" style={{ marginRight: 'auto' }} onClick={async () => { await s.remove('mileage_trips', trip.id); onClose(); }}>Delete</Button>}<Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={save} disabled={!num(f.miles)}>Save</Button></>}>
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
-        <Field label="Date"><input className="input" type="date" value={f.trip_date} onChange={(e) => setF({ ...f, trip_date: e.target.value })} /></Field>
+        <Field label="Date"><DateInput value={f.trip_date} onChange={(v) => setF({ ...f, trip_date: v })} /></Field>
         <Field label="Miles (one way)"><MoneyInput value={f.miles} onChange={(v) => setF({ ...f, miles: v })} /></Field>
         <Field label="From"><AddressInput value={f.start_place} onChange={(v) => setF({ ...f, start_place: v })} placeholder="Home" /></Field>
         <Field label="To"><AddressInput value={f.end_place} onChange={(v) => setF({ ...f, end_place: v })} placeholder="Shoot location" /></Field>
@@ -496,13 +496,13 @@ function PayoutModal({ p, onClose }) {
     <Modal title={isNew ? 'Add crew payout' : 'Edit payout'} onClose={onClose} footer={<>{!isNew && <Button variant="ghost" className="danger" icon="trash" style={{ marginRight: 'auto' }} onClick={async () => { await s.remove('crew_payouts', p.id); onClose(); }}>Delete</Button>}<Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={save} disabled={!num(f.amount) || !f.crew_id}>Save</Button></>}>
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
         <Field label="Crew member"><select className="input" value={f.crew_id} onChange={(e) => setF({ ...f, crew_id: e.target.value })}>{s.db.crew_members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field>
-        <Field label="Work date"><input className="input" type="date" value={f.work_date} onChange={(e) => setF({ ...f, work_date: e.target.value })} /></Field>
+        <Field label="Work date"><DateInput value={f.work_date} onChange={(v) => setF({ ...f, work_date: v })} /></Field>
         <Field label="Amount"><MoneyInput value={f.amount} onChange={(v) => setF({ ...f, amount: v })} /></Field>
         <Field label="What for"><input className="input" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="e.g. AC, 2 days" /></Field>
       </div>
       <Combobox label="Client / job (optional)" value={f.client_id} options={s.db.clients.map((c) => ({ value: c.id, label: c.name }))} onChange={(v) => setF({ ...f, client_id: v })} placeholder="Search clients" />
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
-        <Field label="Paid on" hint="(leave empty if unpaid)"><input className="input" type="date" value={f.paid_on} onChange={(e) => setF({ ...f, paid_on: e.target.value })} /></Field>
+        <Field label="Paid on" hint="(leave empty if unpaid)"><DateInput clearable value={f.paid_on} onChange={(v) => setF({ ...f, paid_on: v })} /></Field>
         <Field label="How"><select className="input" value={f.method} onChange={(e) => setF({ ...f, method: e.target.value })}><option value="">—</option>{['Zelle', 'Venmo', 'Bank transfer', 'Check', 'Cash', 'PayPal', 'Other'].map((m) => <option key={m}>{m}</option>)}</select></Field>
       </div>
       {!f.paid_on && <Button size="sm" onClick={() => setF({ ...f, paid_on: todayISO() })}>Paid today</Button>}
@@ -513,10 +513,12 @@ function PayoutModal({ p, onClose }) {
 function MemberModal({ m, onClose }) {
   const s = useStore();
   const isNew = !m.id;
-  const [f, setF] = useState({ name: m.name || '', email: m.email || '', phone: m.phone || '', role: m.role || '', notes: m.notes || '' });
+  const [f, setF] = useState({ name: m.name || '', email: m.email || '', phone: m.phone || '', role: m.role || '', address: m.address || '', notes: m.notes || '' });
   const save = async () => {
-    if (isNew) await s.insert('crew_members', f);
-    else await s.update('crew_members', m.id, f);
+    const row = { ...f };
+    if (!row.address && m.address === undefined) delete row.address; // works before 011 is run, too
+    if (isNew) await s.insert('crew_members', row);
+    else await s.update('crew_members', m.id, row);
     onClose();
   };
   return (
@@ -527,6 +529,7 @@ function MemberModal({ m, onClose }) {
         <Field label="Email"><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
         <Field label="Phone"><input className="input" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
       </div>
+      <Field label="Address" hint="(for their 1099)"><AddressInput multiline value={f.address} onChange={(v) => setF({ ...f, address: v })} /></Field>
       <Field label="Notes"><textarea className="input" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="e.g. W-9 on file" /></Field>
     </Modal>
   );

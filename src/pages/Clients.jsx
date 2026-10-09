@@ -173,7 +173,7 @@ function Detail({ label, value }) {
   );
 }
 
-export function ClientModal({ client, onClose, onSaved }) {
+export function ClientModal({ client, onClose, onSaved, stay = false }) {
   const s = useStore();
   const isNew = !client.id;
   const [f, setF] = useState({ name: client.name || '', email: client.email || '', cc_emails: client.cc_emails || '', phone: client.phone || '', address: client.address || '', notes: client.notes || '', ot_base_hours: client.ot_base_hours ?? '', expects_1099: !!client.expects_1099, archived: !!client.archived });
@@ -184,7 +184,7 @@ export function ClientModal({ client, onClose, onSaved }) {
     const saved = isNew ? await s.insert('clients', row) : await s.update('clients', client.id, row);
     onSaved?.(saved);
     onClose();
-    if (isNew) go(`/clients/${saved.id}`);
+    if (isNew && !stay) go(`/clients/${saved.id}`);
   };
   const del = async () => {
     if (!(await s.confirm({ title: `Delete ${client.name}?`, body: 'Only possible if they have no invoices. Otherwise archive them — they’ll be hidden but your records stay intact.', ok: 'Delete', danger: true }))) return;

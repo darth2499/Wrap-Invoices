@@ -78,13 +78,16 @@ export function Pill({ kind, children }) {
   return <span className={`pill ${kind}`}>{children}</span>;
 }
 
-/** An invoice's status; an eye means the client has opened it (Overdue 👁, Partially paid 👁). */
+/** An invoice's status pill. */
 export function StatusPill({ st, extra = '' }) {
-  return (
-    <span className={`pill ${st.key}`} title={st.seen ? 'Your client has opened it' : undefined}>
-      {st.label}{extra}{st.seen && st.key !== 'seen' && <span className="seen-eye"><Icon name="eye" size={12} /></span>}
-    </span>
-  );
+  return <span className={`pill ${st.key}`}>{st.label}{extra}</span>;
+}
+
+/** Eye shown when the client has opened the invoice link. */
+export function SeenEye({ inv }) {
+  const n = Number(inv.view_count) || 0;
+  if (!n) return null;
+  return <span className="seen-eye" title={`Your client opened it${n > 1 ? ` ${n} times` : ''}`} aria-label="Seen by client"><Icon name="eye" size={16} /></span>;
 }
 
 export function Seg({ value, options, onChange, label }) {
@@ -298,6 +301,7 @@ export function Calendar({ value, onChange, busy = {}, single = false }) {
   const [month, setMonth] = useState(new Date(first.getFullYear(), first.getMonth(), 1, 12));
   const [mode, setMode] = useState('days');
   const [start, setStart] = useState(null);
+  const [jump, setJump] = useState(false); // month/year grid instead of days
   const today = todayISO();
   const cells = [];
   const lead = month.getDay();
@@ -320,10 +324,16 @@ export function Calendar({ value, onChange, busy = {}, single = false }) {
   return (
     <div className="col" style={{ gap: 8 }}>
       <div className="row between">
-        <Button variant="ghost icon" icon="chevL" aria-label="Previous month" onClick={() => shift(-1)} />
-        <strong style={{ fontSize: 14 }}>{month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</strong>
-        <Button variant="ghost icon" icon="chevR" aria-label="Next month" onClick={() => shift(1)} />
+        <Button variant="ghost icon" icon="chevL" aria-label={jump ? 'Previous year' : 'Previous month'} onClick={() => shift(jump ? -12 : -1)} />
+        <button type="button" className="cal-title" onClick={() => setJump((j) => !j)} aria-expanded={jump} aria-label="Pick month and year">
+          {jump ? month.getFullYear() : month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+          <Icon name="chevD" size={14} style={{ transform: jump ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+        </button>
+        <Button variant="ghost icon" icon="chevR" aria-label={jump ? 'Next year' : 'Next month'} onClick={() => shift(jump ? 12 : 1)} />
       </div>
+      {jump ? (
+        <MonthGrid year={month.getFullYear()} month={month.getMonth()} onPick={(m) => { setMonth(new Date(month.getFullYear(), m, 1, 12)); setJump(false); }} />
+      ) : (<>
       {!single && (
         <div className="row between">
           <Seg value={mode} onChange={(m) => { setMode(m); setStart(null); }} options={[{ value: 'days', label: 'Pick days' }, { value: 'range', label: 'Range' }]} label="Selection mode" />
@@ -345,7 +355,46 @@ export function Calendar({ value, onChange, busy = {}, single = false }) {
           ) : <span key={`b${i}`} />,
         )}
       </div>
+      </>)}
     </div>
+  );
+}
+
+/** Twelve months to jump to (the current one marked). */
+export function MonthGrid({ year, month, onPick }) {
+  const now = new Date();
+  return (
+    <div className="month-grid">
+      {Array.from({ length: 12 }, (_, m) => (
+        <button key={m} type="button" className={`month-btn ${m === month ? 'on' : ''} ${year === now.getFullYear() && m === now.getMonth() ? 'today' : ''}`} onClick={() => onPick(m)}>
+          {new Date(2000, m, 1).toLocaleDateString('en-US', { month: 'short' })}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A date field that opens the same calendar used everywhere else (tap the month to jump months/years). */
+export function DateInput({ value, onChange, placeholder = 'Pick a date', clearable = false, align = 'left', 'aria-label': aria }) {
+  const [open, setOpen] = useState(false);
+  const label = value ? parseISO(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  return (
+    <Popover open={open} setOpen={setOpen} align={align} width={310}
+      trigger={
+        <button type="button" className="input date-input" onClick={() => setOpen((o) => !o)} aria-label={aria || 'Date'} aria-expanded={open}>
+          <span style={{ color: value ? 'var(--ink)' : 'var(--muted)' }}>{label || placeholder}</span>
+          <Icon name="calendar" size={16} />
+        </button>
+      }>
+      {/* Inside a <label>, a click on empty space would re-click the field and close this. */}
+      <div onClick={(e) => e.preventDefault()}>
+        <Calendar key={value || 'none'} single value={value ? [value] : []} onChange={([d]) => { onChange(d); setOpen(false); }} />
+        <div className="row between" style={{ paddingTop: 8 }}>
+          <button type="button" className="btn link small" onClick={() => { onChange(todayISO()); setOpen(false); }}>Today</button>
+          {clearable && value && <button type="button" className="btn link small" onClick={() => { onChange(''); setOpen(false); }}>Clear</button>}
+        </div>
+      </div>
+    </Popover>
   );
 }
 

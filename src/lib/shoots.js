@@ -29,14 +29,14 @@ export function shootDays(invoices, linesFor) {
   for (const inv of invoices) {
     if (inv.status === 'void') continue;
     const seen = new Set();
-    const add = (date, label) => {
-      const k = `${date}|${label}`;
+    const add = (date, label, item = '') => {
+      const k = `${date}|${label}|${item}`;
       if (seen.has(k)) return;
       seen.add(k);
-      out.push({ date, invoiceId: inv.id, label });
+      out.push({ date, invoiceId: inv.id, label, item });
     };
     if (inv.mode === 'advanced' && inv.jobs?.jobs?.length) {
-      for (const job of inv.jobs.jobs) for (const d of job.days || []) if (d.date) add(d.date, job.company || 'Shoot');
+      for (const job of inv.jobs.jobs) for (const d of job.days || []) if (d.date) add(d.date, job.company || 'Shoot', job.role || '');
       continue;
     }
     const lines = linesFor(inv.id);
@@ -45,7 +45,7 @@ export function shootDays(invoices, linesFor) {
     if (picked.length) {
       for (const l of picked) {
         const label = String(l.description || '').replace(CODE, '').trim() || l.item || 'Shoot';
-        for (const d of l.dates) add(d, label);
+        for (const d of l.dates) add(d, label, l.item || '');
       }
       continue;
     }
@@ -54,7 +54,7 @@ export function shootDays(invoices, linesFor) {
     for (const l of work.length ? work : lines.filter((x) => CODE.test(x.description || ''))) {
       const m = String(l.description).match(CODE);
       const label = String(l.description).slice(0, m.index).trim() || l.item || 'Shoot';
-      for (const d of datesFromCode(m[1], inv.issue_date)) add(d, label);
+      for (const d of datesFromCode(m[1], inv.issue_date)) add(d, label, l.item || '');
     }
   }
   return out;

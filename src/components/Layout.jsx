@@ -85,7 +85,7 @@ function MobileNav({ current, review, onSearch }) {
       {open && (
         <div className="sheet" role="menu">
           <button onClick={() => { setOpen(false); onSearch(); }}><Icon name="search" />Search</button>
-          <div className="sheet-row"><span>Dark mode</span><ThemeToggle /></div>
+          <ThemeToggle label="Dark mode" />
           <a href="#/invoices/new" onClick={() => setOpen(false)}><Icon name="plus" />New invoice</a>
           <a href="#/invoices/new?kind=quote" onClick={() => setOpen(false)}><Icon name="quote" />New quote</a>
           <a href="#/quotes" onClick={() => setOpen(false)}><Icon name="quote" />Quotes</a>

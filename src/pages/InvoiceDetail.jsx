@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.jsx';
-import { Button, Field, Menu, Modal, MoneyInput, Switch, Empty, StatusPill } from '../components/ui.jsx';
+import { Button, Field, Menu, Modal, MoneyInput, Switch, Empty, StatusPill, DateInput } from '../components/ui.jsx';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import EmailPreview from '../components/EmailPreview.jsx';
 import { buildInvoiceEmail } from '../lib/emailTemplate.js';
@@ -70,6 +70,7 @@ export default function InvoiceDetail({ id }) {
     isQuote && ['sent', 'draft', 'accepted'].includes(inv.status) && { label: 'Mark declined', icon: 'x', onClick: () => run('dec', () => s.update('invoices', inv.id, { status: 'declined' }), 'Marked declined') },
     inv.share_token && { label: 'Open client link', icon: 'eye', onClick: () => window.open(shareUrl(inv.share_token) + '?preview=1', '_blank') },
     inv.share_token && { label: 'Turn off client link', icon: 'x', onClick: async () => (await s.confirm({ title: 'Turn off the client link?', body: 'The link you sent stops working right away. Sending again makes a new link.', ok: 'Turn off' })) && run('unshare', () => s.update('invoices', inv.id, { share_token: null }), 'Client link turned off') },
+    !isQuote && inv.status === 'draft' && { label: 'Save (ready to send)', icon: 'check', onClick: () => A.finalizeDraft(s, inv) },
     life.canUndraft && { label: 'Move back to draft', icon: 'history', onClick: () => A.moveToDraft(s, inv) },
     inv.status === 'void' && { label: 'Undo void', icon: 'history', onClick: () => run('unvoid', () => A.unvoidInvoice(s, inv), 'Restored') },
     life.canDelete && {
@@ -248,7 +249,7 @@ function PaymentModal({ inv, due, payment, onClose }) {
     <Modal title={payment ? 'Edit payment' : `Record payment · #${inv.number}`} onClose={onClose} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" busy={busy} onClick={save}>Save payment</Button></>}>
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
         <Field label="Amount"><MoneyInput value={amount} onChange={setAmount} autoFocus /></Field>
-        <Field label="Date received"><input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Date received"><DateInput value={date} onChange={(v) => setDate(v)} /></Field>
         <Field label="Method"><select className="input" value={method} onChange={(e) => setMethod(e.target.value)}>{METHODS.map((m) => <option key={m}>{m}</option>)}</select></Field>
         <Field label="Note (optional)"><input className="input" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
       </div>

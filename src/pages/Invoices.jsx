@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../store.jsx';
-import { Button, Empty, Seg, Icon, Menu, StatusPill } from '../components/ui.jsx';
+import { Button, Empty, Seg, Icon, Menu, StatusPill, SeenEye } from '../components/ui.jsx';
 import * as A from '../lib/actions.js';
 import { statusOf, dueText } from '../lib/calc.js';
 import { money, fmtDate, num, todayISO, inPeriod, periodOptions } from '../lib/format.js';
@@ -72,7 +72,15 @@ export default function Invoices({ kind }) {
 
   // Columns can be dragged into any order (remembered on this device).
   const [cols, setCols] = useState(() => {
-    try { const saved = JSON.parse(localStorage.getItem('wrap_inv_cols')); if (Array.isArray(saved) && saved.length === DEFAULT_COLS.length && saved.every((k) => COLS[k])) return saved; } catch { /* default */ }
+    try {
+      // Your column order, plus any column added since (placed where it is by default).
+      const saved = JSON.parse(localStorage.getItem('wrap_inv_cols'));
+      if (Array.isArray(saved) && saved.every((k) => COLS[k])) {
+        const out = [...saved];
+        DEFAULT_COLS.forEach((k, i) => { if (!out.includes(k)) out.splice(Math.min(i, out.length), 0, k); });
+        return out;
+      }
+    } catch { /* default */ }
     return DEFAULT_COLS;
   });
   const [drag, setDrag] = useState(null);
@@ -91,6 +99,7 @@ export default function Invoices({ kind }) {
     const life = A.lifecycle(store, r);
     return [
       { label: 'Edit', icon: 'edit', onClick: () => go(`/invoices/${r.id}/edit`) },
+      !isQuote && r.status === 'draft' && { label: 'Save', icon: 'check', onClick: () => A.finalizeDraft(store, r) },
       open && { label: r.share_token ? 'Send again' : `Send ${isQuote ? 'quote' : 'invoice'}`, icon: 'mail', onClick: () => go(`/invoices/${r.id}?do=send`) },
       !isQuote && r.status === 'sent' && r.sent_at && { label: 'Send reminder', icon: 'bell', onClick: () => go(`/invoices/${r.id}?do=remind`) },
       !isQuote && open && { label: 'Record payment', icon: 'cash', onClick: () => go(`/invoices/${r.id}?do=pay`) },
@@ -134,7 +143,7 @@ export default function Invoices({ kind }) {
                 <span className="who">{r.client?.name || 'No client'}</span>
                 <span className="amt num">{money(isQuote || r.status === 'paid' || r.status === 'void' || r.status === 'draft' ? r.total : r.due)}</span>
                 <span className="meta">#{r.number} · {['sent'].includes(r.status) && !isQuote ? dueText(r, today) : fmtDate(r.issue_date)}{r.project?.name || r.notes ? ` · ${r.project?.name || r.notes}` : ''}</span>
-                <span className="st"><StatusPill st={r.st} /></span>
+                <span className="st"><SeenEye inv={r} /><StatusPill st={r.st} /></span>
               </button>
             ))}
             <div className="row between small" style={{ padding: '10px 16px', borderTop: '1px solid var(--line)' }}><span className="muted">{shown.length} shown</span><strong className="num">{money(sum)}</strong></div>
@@ -182,6 +191,7 @@ export default function Invoices({ kind }) {
 const amountOf = (r, isQuote) => money(isQuote || r.status === 'paid' || r.status === 'void' || r.status === 'draft' ? r.total : r.due);
 const COLS = {
   status: { sort: (r) => r.st.label, label: () => 'Status', cell: (r) => <StatusPill st={r.st} /> },
+  seen: { sort: (r) => Number(r.view_count) || 0, label: () => <span title="Opened by your client"><Icon name="eye" size={15} /></span>, cell: (r) => <SeenEye inv={r} /> },
   number: { sort: (r) => Number(r.number) || 0, label: () => 'No.', cell: (r) => <span className="num muted">{r.number}</span> },
   client: {
     sort: (r) => (r.client?.name || '').toLowerCase(),
@@ -204,4 +214,4 @@ const COLS = {
   },
   amount: { sort: (r, isQuote) => num(isQuote || ['paid', 'void', 'draft'].includes(r.status) ? r.total : r.due), right: true, label: (isQuote, filter) => (isQuote || filter === 'paid' ? 'Total' : 'Amount due'), cell: (r, { isQuote }) => amountOf(r, isQuote) },
 };
-const DEFAULT_COLS = ['status', 'number', 'client', 'date', 'due', 'amount'];
+const DEFAULT_COLS = ['status', 'seen', 'number', 'client', 'date', 'due', 'amount'];

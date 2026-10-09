@@ -113,7 +113,6 @@ export function statusOf(inv, paid = 0, today = todayISO()) {
     return { key: 'overdue', label: paid > 0 ? 'Partial · overdue' : 'Overdue', days: d, seen };
   }
   if (paid > 0) return { key: 'partial', label: 'Partially paid', seen };
-  if (seen) return { key: 'seen', label: 'Seen', seen };
   return { key: 'sent', label: 'Sent', seen };
 }
 

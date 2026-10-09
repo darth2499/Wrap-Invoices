@@ -181,6 +181,7 @@ export const api = {
     save();
     return clone(row);
   },
+  live() { return () => {}; }, // the demo has no clients opening links
   async updateProfile(patch) {
     load();
     const { is_admin, ...rest } = patch;

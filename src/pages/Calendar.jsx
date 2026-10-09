@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import { useStore } from '../store.jsx';
-import { Button, Modal, Seg, StatusPill } from '../components/ui.jsx';
+import { Button, Icon, Modal, MonthGrid, Popover, Seg, StatusPill } from '../components/ui.jsx';
 import { shootDays } from '../lib/shoots.js';
 import { statusOf } from '../lib/calc.js';
 import { money, todayISO } from '../lib/format.js';
@@ -15,6 +15,8 @@ export default function Calendar() {
   const { db, derived } = useStore();
   const today = todayISO();
   const [ym, setYm] = useState(today.slice(0, 7));
+  const [jump, setJump] = useState(false); // month/year picker
+  const [jumpYear, setJumpYear] = useState(() => Number(today.slice(0, 4)));
   const [day, setDay] = useState(null); // the day you tapped: { date, items, i }
   const [view, setView] = useState(() => { try { return localStorage.getItem('wrap_cal_view') || 'shoots'; } catch { return 'shoots'; } });
   const pickView = (v) => { setView(v); try { localStorage.setItem('wrap_cal_view', v); } catch { /* not saved */ } };
@@ -27,9 +29,18 @@ export default function Calendar() {
     for (const s of entries) {
       const inv = derived.invoices[s.invoiceId];
       if (!inv) continue;
+      // Several lines of one invoice on the same day (e.g. Sound Mixer + Sound Gear) show as one entry.
+      const day = (map[s.date] ||= []);
+      const same = day.find((x) => x.inv.id === inv.id);
+      if (same) {
+        if (s.item && !same.items.includes(s.item)) same.items.push(s.item);
+        if (!same.labels.includes(s.label)) same.labels.push(s.label);
+        continue;
+      }
       const st = inv.kind === 'quote' ? { key: 'draft', label: 'Quote' } : statusOf(inv, derived.paidFor(inv.id), today);
-      (map[s.date] ||= []).push({ ...s, inv, st, client: derived.clients[inv.client_id]?.name || '' });
+      day.push({ ...s, inv, st, items: s.item ? [s.item] : [], labels: [s.label], client: derived.clients[inv.client_id]?.name || '' });
     }
+    for (const list of Object.values(map)) for (const x of list) { x.label = x.labels.join(' · '); x.what = x.items.join('/'); }
     return map;
   }, [db.invoices, derived, today, view]);
 
@@ -52,7 +63,15 @@ export default function Calendar() {
           {/* Today keeps its spot even when hidden, so the arrows never move. */}
           <Button size="sm" style={{ visibility: ym === today.slice(0, 7) ? 'hidden' : 'visible' }} onClick={() => setYm(today.slice(0, 7))}>Today</Button>
           <Button variant="icon" icon="chevL" aria-label="Previous month" onClick={() => shift(-1)} />
-          <strong style={{ width: 150, textAlign: 'center' }}>{first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</strong>
+          <Popover open={jump} setOpen={setJump} align="right" width={280}
+            trigger={<button type="button" className="cal-title" style={{ width: 170, justifyContent: 'center' }} onClick={() => { setJumpYear(y); setJump((o) => !o); }} aria-expanded={jump} aria-label="Pick month and year">{first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}<Icon name="chevD" size={14} /></button>}>
+            <div className="row between" style={{ marginBottom: 6 }}>
+              <Button variant="ghost icon" icon="chevL" aria-label="Previous year" onClick={() => setJumpYear((v) => v - 1)} />
+              <strong>{jumpYear}</strong>
+              <Button variant="ghost icon" icon="chevR" aria-label="Next year" onClick={() => setJumpYear((v) => v + 1)} />
+            </div>
+            <MonthGrid year={jumpYear} month={jumpYear === y ? m - 1 : -1} onPick={(mm) => { setYm(`${jumpYear}-${pad(mm + 1)}`); setJump(false); }} />
+          </Popover>
           <Button variant="icon" icon="chevR" aria-label="Next month" onClick={() => shift(1)} />
         </div>
       </div>
@@ -104,12 +123,12 @@ function DayPreview({ day, setDay }) {
       {day.items.length > 1 && (
         <div className="row wrap" style={{ gap: 6 }}>
           {day.items.map((it, k) => (
-            <button key={k} type="button" className={`ed-opt ${k === day.i ? 'on' : ''}`} onClick={() => setDay({ ...day, i: k })}>#{it.inv.number} · {it.label}</button>
+            <button key={k} type="button" className={`ed-opt ${k === day.i ? 'on' : ''}`} onClick={() => setDay({ ...day, i: k })}>#{it.inv.number} {it.what || it.label}</button>
           ))}
         </div>
       )}
       <div className="row between" style={{ gap: 10 }}>
-        <span className="row" style={{ gap: 8 }}><b>#{inv.number}</b><StatusPill st={x.st} /></span>
+        <span className="row" style={{ gap: 8, minWidth: 0 }}><b>#{inv.number}{x.what ? ` ${x.what}` : ''}</b><StatusPill st={x.st} /></span>
         <span className="num muted">{money(inv.total)}</span>
       </div>
       <InvoiceDoc business={db.profile} invoice={inv} client={derived.clients[inv.client_id]} lines={derived.linesFor(inv.id)} payments={db.payments.filter((p) => p.invoice_id === inv.id)} logoUrl={logoUrl} />

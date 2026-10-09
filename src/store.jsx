@@ -66,6 +66,23 @@ export function StoreProvider({ user, children }) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A client opens an invoice (or accepts a quote) while you're in Wrap: show it right away.
+  const loaded = !!db;
+  useEffect(() => {
+    if (!loaded || !api.live) return undefined;
+    const off = api.live((row) => {
+      const prev = dbRef.current?.invoices.find((i) => i.id === row.id);
+      if (!prev) return;
+      setDb((d) => ({ ...d, invoices: d.invoices.map((i) => (i.id === row.id ? { ...i, ...row } : i)) }));
+      const who = dbRef.current.clients.find((c) => c.id === row.client_id)?.name || 'Your client';
+      const view = { label: 'View', run: () => { window.location.hash = `#/invoices/${row.id}`; } };
+      if (Number(row.view_count) > Number(prev.view_count || 0)) toast(`${who} just opened ${row.kind === 'quote' ? 'quote' : 'invoice'} #${row.number}`, { action: view, ms: 8000 });
+      else if (row.status === 'accepted' && prev.status !== 'accepted') toast(`${who} accepted quote #${row.number}`, { action: view, ms: 8000 });
+      reload('invoice_events').catch(() => {});
+    });
+    return off;
+  }, [loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const ops = useMemo(() => ({
     async insert(table, row) {
       const out = await api.insert(table, row);

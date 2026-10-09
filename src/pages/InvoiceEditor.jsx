@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.jsx';
-import { Button, Combobox, Field, Icon, Menu, Modal, MoneyInput, Seg, Switch, Calendar, Popover, Empty } from '../components/ui.jsx';
+import { Button, Combobox, Field, Icon, Menu, Modal, MoneyInput, Seg, Switch, Calendar, Popover, Empty, DateInput } from '../components/ui.jsx';
 import { totals, compileJobs, otRule, jobLabor, lineAmount } from '../lib/calc.js';
 import { money, num, round2, todayISO, addDays, uid, datesLabel, datesCode, mmdd, fmtShort } from '../lib/format.js';
 import { saveInvoice } from '../lib/actions.js';
@@ -8,6 +8,7 @@ import { datesFromCode } from '../lib/shoots.js';
 import { suggestContext, rankReceipts } from '../lib/suggest.js';
 import { go } from '../router.js';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
+import { ClientModal } from './Clients.jsx';
 import { rateFor } from '../lib/mileage.js';
 
 const TERMS = [
@@ -138,11 +139,9 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
   const clientOptions = db.clients.filter((c) => !c.archived || c.id === form.client_id).map((c) => ({ value: c.id, label: c.name, meta: c.email || '' }));
   const projectOptions = db.projects.filter((pr) => !pr.archived && (!form.client_id || !pr.client_id || pr.client_id === form.client_id)).map((pr) => ({ value: pr.id, label: pr.name, meta: derived.clients[pr.client_id]?.name || '' }));
 
-  async function createClient(name) {
-    const c = await s.insert('clients', { name });
-    set({ client_id: c.id, project_id: null });
-    s.toast(`Added client “${name}” — add their email in Clients`);
-  }
+  // New client from the invoice: a quick form (email, address with suggestions) without leaving the invoice.
+  const [newClient, setNewClient] = useState(null);
+  const createClient = (name) => setNewClient({ name });
   async function createProject(name) {
     const pr = await s.insert('projects', { name, client_id: form.client_id });
     set({ project_id: pr.id });
@@ -292,7 +291,7 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
               <div className="ed-wide"><Combobox label="Client" value={form.client_id} options={clientOptions} placeholder="Search or add a client" onChange={(v) => set({ client_id: v, project_id: null })} onCreate={createClient} createLabel={(q) => `+ Add “${q}” as a new client`} /></div>
               <div className="ed-wide"><Combobox label="Project" value={form.project_id} options={projectOptions} placeholder={client ? `${client.name}’s projects` : 'Optional'} onChange={(v) => set({ project_id: v })} onCreate={createProject} createLabel={(q) => `+ Create project “${q}”`} /></div>
               <Field label={`${isQuote ? 'Quote' : 'Invoice'} no.`}><input className="input num" value={form.number} onChange={(e) => set({ number: e.target.value })} /></Field>
-              <Field label="Date"><input className="input" type="date" value={form.issue_date} onChange={(e) => { const v = e.target.value; const tt = TERMS.find((x) => x.label === form.terms); set({ issue_date: v, due_date: tt ? addDays(v, tt.days) : form.due_date }); }} /></Field>
+              <Field label="Date"><DateInput value={form.issue_date} onChange={(v) => { const tt = TERMS.find((x) => x.label === form.terms); set({ issue_date: v, due_date: tt ? addDays(v, tt.days) : form.due_date }); }} /></Field>
               {!isQuote && (
                 <Field label="Terms">
                   <select className="input" value={TERMS.some((x) => x.label === form.terms) ? form.terms : 'custom'} onChange={(e) => (e.target.value === 'custom' ? set({ terms: 'Custom' }) : setTerms(e.target.value))}>
@@ -301,7 +300,7 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
                   </select>
                 </Field>
               )}
-              <Field label={isQuote ? 'Valid until' : 'Due'}><input className="input" type="date" value={form.due_date || ''} onChange={(e) => set({ due_date: e.target.value, terms: isQuote ? form.terms : TERMS.find((x) => addDays(form.issue_date, x.days) === e.target.value)?.label || 'Custom' })} /></Field>
+              <Field label={isQuote ? 'Valid until' : 'Due'}><DateInput value={form.due_date || ''} onChange={(v) => set({ due_date: v, terms: isQuote ? form.terms : TERMS.find((x) => addDays(form.issue_date, x.days) === v)?.label || 'Custom' })} /></Field>
             </section>
           ) : (
             <button type="button" className="card ed-summary" onClick={() => setDetailsOpen(true)} aria-label="Change client, number and dates">
@@ -395,6 +394,7 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
           <InvoiceDoc business={p} invoice={previewInv} client={client} lines={previewLines} logoUrl={logoUrl} />
         </Modal>
       )}
+      {newClient && <ClientModal client={newClient} stay onClose={() => setNewClient(null)} onSaved={(c) => set({ client_id: c.id, project_id: null })} />}
       {picker?.type === 'receipts' && <ReceiptPicker ctx={picker.ctx || suggestContext({ lines: finalLines, jobs, issueDate: form.issue_date, clientName: derived.clients[form.client_id]?.name })} db={db} exclude={picker.exclude} title={picker.title} onClose={() => setPicker(null)} onPick={(rs) => { picker.onPick(rs); setPicker(null); }} />}
       {picker?.type === 'mileage' && <MileagePicker db={db} derived={derived} selected={mileageIds} onClose={() => setPicker(null)} onPick={(trips) => { picker.onPick(trips); setPicker(null); }} />}
     </div>

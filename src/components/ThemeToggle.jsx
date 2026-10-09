@@ -31,19 +31,22 @@ function bezier(p1x, p1y, p2x, p2y) {
 const ease = bezier(0.12, 0.72, 0.88, 0.28);
 
 /** The orb's path: centre points across the screen, sampled over the animation. */
+// An ellipse sized to the window, so on a tall phone the orb still climbs to the upper third
+// (a circle would only peek over the bottom edge). It starts and ends below the screen.
 function arc(n = 48) {
   const W = window.innerWidth;
   const H = window.innerHeight;
-  const r = Math.min(0.6 * W, H);
-  const pivotY = H * 1.22;
+  const rx = 0.6 * W;
+  const ry = 0.78 * H;
+  const pivotY = H * 1.04;
   return Array.from({ length: n + 1 }, (_, i) => {
     const deg = -108 + 216 * ease(i / n);
     const a = (deg * Math.PI) / 180;
-    return { x: W / 2 + r * Math.sin(a), y: pivotY - r * Math.cos(a) };
+    return { x: W / 2 + rx * Math.sin(a), y: pivotY - ry * Math.cos(a) };
   });
 }
 
-export default function ThemeToggle({ className = '' }) {
+export default function ThemeToggle({ className = '', label }) {
   const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || 'light');
   const [orb, setOrb] = useState(null);
   const flip = () => {
@@ -63,7 +66,8 @@ export default function ThemeToggle({ className = '' }) {
       vt.ready.then(() => {
         const opts = { duration: MS, easing: 'linear', fill: 'both' };
         html.animate(pts.map((p) => ({ maskPosition: `${Math.round(p.x - W)}px 0`, WebkitMaskPosition: `${Math.round(p.x - W)}px 0` })), { ...opts, pseudoElement: '::view-transition-new(root)' });
-        html.animate(pts.map((p) => ({ transform: `translate(${Math.round(p.x - 90)}px, ${Math.round(p.y - 90)}px)` })), { ...opts, pseudoElement: '::view-transition-group(wrap-orb)' });
+        const half = (document.querySelector('.orb-vt')?.offsetWidth || 180) / 2;
+        html.animate(pts.map((p) => ({ transform: `translate(${Math.round(p.x - half)}px, ${Math.round(p.y - half)}px)` })), { ...opts, pseudoElement: '::view-transition-group(wrap-orb)' });
       }).catch(() => {});
       vt.finished.finally(() => { html.classList.remove('vt-wipe'); setOrb(null); });
       return;
@@ -75,11 +79,17 @@ export default function ThemeToggle({ className = '' }) {
     setTimeout(() => { applyTheme(next); setTheme(next); }, 380);
     setTimeout(() => { html.classList.remove('theme-blend'); setOrb(null); }, MS + 50);
   };
+  const icons = (
+    <>
+      <svg className="sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor" /><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" /></svg>
+      <svg className="moon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 14.6A8.5 8.5 0 0 1 9.4 4a8.5 8.5 0 1 0 10.6 10.6Z" /></svg>
+    </>
+  );
   return (
     <>
-      <button type="button" className={`theme-toggle ${className}`} onClick={flip} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>
-        <svg className="sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor" /><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" /></svg>
-        <svg className="moon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 14.6A8.5 8.5 0 0 1 9.4 4a8.5 8.5 0 1 0 10.6 10.6Z" /></svg>
+      <button type="button" className={`${label ? 'theme-row' : 'theme-toggle'} ${className}`} onClick={flip} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>
+        {label && <span>{label}</span>}
+        {label ? <span className="theme-toggle" aria-hidden="true">{icons}</span> : icons}
       </button>
       {/* Drawn at the top of the page (not inside the sidebar), so nothing can cover it. */}
       {orb && createPortal(

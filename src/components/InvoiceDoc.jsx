@@ -23,11 +23,11 @@ export default function InvoiceDoc({ business = {}, invoice, client, lines, paym
       <header className="doc-head" style={{ display: 'flex', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
         <div className="col" style={{ gap: 8, minWidth: 0 }}>
           {logoUrl ? <img src={logoUrl} alt="" style={{ maxWidth: 180, maxHeight: 80, objectFit: 'contain', objectPosition: 'left' }} /> : null}
-          {!logoUrl && <strong style={{ fontSize: 20, letterSpacing: '.03em' }}>{(business.business_name || '').toUpperCase()}</strong>}
+          {(!logoUrl || business.logo_mode === 'both') && <strong style={{ fontSize: logoUrl ? 16 : 20, letterSpacing: '.03em' }}>{(business.business_name || '').toUpperCase()}</strong>}
         </div>
         <div className="doc-from" style={{ textAlign: 'right', fontSize: 13, color: '#45464d', lineHeight: 1.55 }}>
           <div style={{ fontSize: 26, fontWeight: 600, color: template === 'bold' ? accent : '#16161a', letterSpacing: '.02em' }}>{isQuote ? 'QUOTE' : 'INVOICE'}</div>
-          {logoUrl && <div style={{ fontWeight: 600, color: '#16161a' }}>{business.business_name}</div>}
+          {logoUrl && business.logo_mode !== 'both' && <div style={{ fontWeight: 600, color: '#16161a' }}>{business.business_name}</div>}
           <div style={{ whiteSpace: 'pre-line' }}>{business.address}</div>
           {business.phone && <div>{business.phone}</div>}
           {business.business_email && <div>{business.business_email}</div>}

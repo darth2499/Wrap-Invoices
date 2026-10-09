@@ -133,25 +133,41 @@ export function invoicesFromCsv(rows, map, { assume = 'unpaid' } = {}) {
 }
 
 /**
- * What a PDF import would do with an invoice whose number is already in Wrap:
- *  'fill' — it came from the Wave CSV (lines without descriptions) and the totals match, so the PDF's lines replace them.
- *  'skip' — it already has details, or the totals differ (the PDF might be an older version).
+ * What a PDF import does with an invoice whose number is already in Wrap:
+ *  'fill'   — it came from the Wave CSV (lines without descriptions) and the totals match: the PDF's lines go in.
+ *  'skip'   — nothing is different.
+ *  'update' — something's different (amounts, lines, notes, dates): the PDF version replaces it.
+ *             If the PDF is missing lines that are in Wrap, you choose: add the new lines ('append')
+ *             or replace everything ('overwrite'). `removed` says how many lines that affects.
+ * Payments always stay.
  */
-export function pdfMatch(inv, db) {
+const lineKey = (l) => [String(l.item || '').trim().toLowerCase(), String(l.description || '').trim(), String(l.note || '').trim(), num(l.qty), round2(num(l.rate))].join('|');
+export function pdfMatch(inv, db, choice) {
   const ex = db.invoices.find((i) => i.kind === 'invoice' && String(i.number) === String(inv.number));
   if (!ex) return { action: 'new' };
-  const exLines = db.invoice_lines.filter((l) => l.invoice_id === ex.id);
-  if (ex.mode === 'advanced' || exLines.some((l) => l.description || l.note || l.receipt_id)) return { action: 'skip', ex, reason: 'Already has details' };
+  const exLines = db.invoice_lines.filter((l) => l.invoice_id === ex.id).sort((a, b) => a.position - b.position);
   if (!inv.lines?.length) return { action: 'skip', ex, reason: 'No line items found in the PDF' };
-  const sum = round2(inv.lines.reduce((t, l) => t + num(l.amount), 0));
-  const withDiscount = totals(inv.lines, 'amount', ex.discount_total || 0);
-  if (Math.abs(withDiscount.total - num(ex.total)) < 0.01) return { action: 'fill', ex, t: withDiscount, discount: num(ex.discount_total) };
-  if (Math.abs(sum - num(ex.total)) < 0.01) return { action: 'fill', ex, t: totals(inv.lines, 'amount', 0), discount: 0 };
-  return { action: 'skip', ex, reason: `Totals differ (Wrap ${num(ex.total).toFixed(2)}, PDF ${sum.toFixed(2)})` };
+  const csvOnly = ex.mode !== 'advanced' && !exLines.some((l) => l.description || l.note || l.receipt_id);
+  if (csvOnly) {
+    const sum = round2(inv.lines.reduce((t, l) => t + num(l.amount), 0));
+    const withDiscount = totals(inv.lines, 'amount', ex.discount_total || 0);
+    if (Math.abs(withDiscount.total - num(ex.total)) < 0.01) return { action: 'fill', ex, t: withDiscount, discount: num(ex.discount_total) };
+    if (Math.abs(sum - num(ex.total)) < 0.01) return { action: 'fill', ex, t: totals(inv.lines, 'amount', 0), discount: 0 };
+  }
+  const pdfKeys = inv.lines.map(lineKey);
+  const exKeys = exLines.map(lineKey);
+  const pdfTotal = totals(inv.lines, 'amount', inv.discount || 0).total;
+  const same = pdfKeys.length === exKeys.length && pdfKeys.every((k, i) => k === exKeys[i])
+    && Math.abs(pdfTotal - num(ex.total)) < 0.01
+    && String(inv.notes || '').trim() === String(ex.notes || '').trim()
+    && inv.date === ex.issue_date;
+  if (same) return { action: 'skip', ex, reason: 'Already up to date' };
+  const removed = exKeys.filter((k) => !pdfKeys.includes(k)).length;
+  return { action: 'update', ex, exLines, removed, mode: removed ? choice || 'append' : 'overwrite' };
 }
 
 /** Creates clients and invoices. store: the app store (insert/rpc/reload). */
-export async function importInvoices(list, { db, api, onStep = () => {}, fill = false }) {
+export async function importInvoices(list, { db, api, onStep = () => {}, fill = false, choices = {} }) {
   if (DEMO) throw new Error('Not available in the demo');
   const clientsByName = new Map(db.clients.map((c) => [norm(c.name), c]));
   const existingNumbers = new Set(db.invoices.filter((i) => i.kind === 'invoice').map((i) => String(i.number)));
@@ -162,8 +178,10 @@ export async function importInvoices(list, { db, api, onStep = () => {}, fill = 
   for (const [i, inv] of list.entries()) {
     onStep(`Importing ${i + 1} / ${list.length}`);
     if (existingNumbers.has(String(inv.number))) {
-      const m = fill ? pdfMatch(inv, db) : { action: 'skip', reason: 'number already used' };
-      if (m.action === 'fill') { await fillInvoice(m, inv, { db, api }); filled++; ids.push(m.ex.id); } else skipped.push(`#${inv.number} (${m.reason})`);
+      const m = fill ? pdfMatch(inv, db, choices[inv.number]) : { action: 'skip', reason: 'number already used' };
+      if (m.action === 'fill') { await fillInvoice(m, inv, { db, api }); filled++; ids.push(m.ex.id); }
+      else if (m.action === 'update') { await updateInvoice(m, inv, { db, api }); filled++; ids.push(m.ex.id); }
+      else skipped.push(`#${inv.number} (${m.reason})`);
       continue;
     }
     let client = clientsByName.get(norm(inv.client));
@@ -200,6 +218,35 @@ export async function importInvoices(list, { db, api, onStep = () => {}, fill = 
   const maxNum = Math.max(0, ...[...existingNumbers].filter((n) => /^\d+$/.test(String(n))).map(Number));
   if (maxNum >= (db.profile.next_invoice_number || 1)) await api.updateProfile({ next_invoice_number: maxNum + 1 });
   return { created, filled, skipped, ids };
+}
+
+/** Brings an invoice in Wrap up to date with its PDF: replace everything, or keep what's there and add the new lines. */
+async function updateInvoice({ ex, exLines, mode }, inv, { db, api }) {
+  const strip = ({ id, owner_id, invoice_id, position, ...l }) => l;
+  const lines = mode === 'append'
+    ? [...exLines.map(strip), ...inv.lines.filter((l) => !exLines.some((x) => lineKey(x) === lineKey(l)))]
+    : inv.lines;
+  const discount = round2(inv.discount || 0);
+  const t = totals(lines, 'amount', discount);
+  const keep = ['number', 'client_id', 'project_id', 'terms', 'deposit_percent', 'auto_remind'];
+  await api.rpc('save_invoice', {
+    inv: {
+      id: ex.id, ...Object.fromEntries(keep.map((k) => [k, ex[k]])), mode: 'basic', jobs: null,
+      issue_date: mode === 'append' ? ex.issue_date : inv.date || ex.issue_date,
+      due_date: mode === 'append' ? ex.due_date : inv.due || ex.due_date,
+      notes: mode === 'append' ? ex.notes || inv.notes || null : inv.notes ?? ex.notes ?? null,
+      discount_type: 'amount', discount_value: discount, ...t,
+    },
+    lines,
+    summary: mode === 'append' ? 'New lines added from the PDF' : 'Updated from the PDF',
+  });
+  const client = db.clients.find((c) => c.id === ex.client_id);
+  if (client) {
+    const patch = {};
+    if (!client.email && inv.clientEmail) patch.email = inv.clientEmail;
+    if (!client.address && inv.clientAddress) patch.address = inv.clientAddress;
+    if (Object.keys(patch).length) Object.assign(client, await api.update('clients', client.id, patch));
+  }
 }
 
 /** Puts a PDF's line details onto an invoice that came in from the Wave CSV. Payments and status stay as they are. */

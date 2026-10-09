@@ -9,3 +9,4 @@ Run these in the Supabase SQL Editor, in this order:
   8. 008_dates_history.sql  (only if you set up before Oct 8, 2026 — already included in 001)
   9. 009_categories.sql     (only if you set up before Oct 8, 2026 — already included in 001)
  10. 010_line_extras.sql    (only if you set up before Oct 9, 2026 — already included in 001)
+ 11. 011_logo_live.sql      (only if you set up before Oct 9, 2026 — already included in 001)

@@ -63,7 +63,9 @@ function useProfileForm(fields) {
   const save = async (extra = {}) => {
     setBusy(true);
     try {
-      await s.updateProfile({ ...f, ...extra });
+      // Skip fields this database doesn't have yet (a migration not run) unless you actually set them.
+      const patch = Object.fromEntries(Object.entries({ ...f, ...extra }).filter(([k, v]) => !(s.db.profile[k] === undefined && v === '')));
+      await s.updateProfile(patch);
       s.toast('Saved');
     } catch (e) {
       s.toast(e.message, { error: true });
@@ -74,13 +76,34 @@ function useProfileForm(fields) {
 }
 
 function Business() {
-  const s = useStore();
   const { f, setF, save, busy, dirty } = useProfileForm(['business_name', 'business_email', 'phone', 'website', 'address']);
+  return (
+    <div className="grid-2">
+      <section className="card card-pad col" style={{ gap: 14 }}>
+        <h2>Your business</h2>
+        <p className="small muted">Shown at the top of every invoice. Your logo is under <a href="#/settings?section=look">Invoice look</a>.</p>
+        <Field label="Business or your name"><input className="input" value={f.business_name} onChange={(e) => setF({ ...f, business_name: e.target.value })} /></Field>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+          <Field label="Email on invoices"><input className="input" type="email" value={f.business_email} onChange={(e) => setF({ ...f, business_email: e.target.value })} /></Field>
+          <Field label="Phone"><input className="input" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
+        </div>
+        <Field label="Website" hint="(optional)"><input className="input" value={f.website} onChange={(e) => setF({ ...f, website: e.target.value })} placeholder="yourwebsite.com" /></Field>
+        <Field label="Address"><AddressInput multiline value={f.address} onChange={(v) => setF({ ...f, address: v })} /></Field>
+        <Button variant="primary" busy={busy} disabled={!dirty} onClick={() => save()} style={{ alignSelf: 'flex-start' }}>Save</Button>
+      </section>
+    </div>
+  );
+}
+
+/** Your logo for invoices: upload/replace/remove, and whether your name shows under it. */
+function LogoPicker({ mode, setMode, onLogo }) {
+  const s = useStore();
   const [logo, setLogo] = useState(null);
   useEffect(() => {
     if (s.db.profile.logo_key) s.api.files.urls([s.db.profile.logo_key]).then((u) => setLogo(u[s.db.profile.logo_key]));
     else setLogo(null);
   }, [s.db.profile.logo_key]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onLogo?.(logo); }, [logo]); // eslint-disable-line react-hooks/exhaustive-deps
   const upload = async () => {
     const [file] = await pickFiles({ accept: 'image/png,image/jpeg,image/webp' });
     if (!file) return;
@@ -92,30 +115,18 @@ function Business() {
     s.toast('Logo updated');
   };
   return (
-    <div className="grid-2">
-      <section className="card card-pad col" style={{ gap: 14 }}>
-        <h2>Your business</h2>
-        <p className="small muted">Shown at the top of every invoice.</p>
-        <Field label="Business or your name"><input className="input" value={f.business_name} onChange={(e) => setF({ ...f, business_name: e.target.value })} /></Field>
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-          <Field label="Email on invoices"><input className="input" type="email" value={f.business_email} onChange={(e) => setF({ ...f, business_email: e.target.value })} /></Field>
-          <Field label="Phone"><input className="input" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
+    <div className="col" style={{ gap: 10 }}>
+      <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+        <div className="logo-box">{logo ? <img src={logo} alt="Your logo" /> : <Icon name="upload" size={20} />}</div>
+        <div className="col" style={{ gap: 6 }}>
+          <div className="row wrap" style={{ gap: 6 }}>
+            <Button size="sm" icon="upload" onClick={upload}>{logo ? 'Replace logo' : 'Add your logo'}</Button>
+            {logo && <Button size="sm" variant="ghost" onClick={async () => { const k = s.db.profile.logo_key; await s.updateProfile({ logo_key: null }); s.api.files.remove([k]).catch(() => {}); }}>Remove</Button>}
+          </div>
+          <span className="small muted">PNG with a transparent background looks best.</span>
         </div>
-        <Field label="Website" hint="(optional)"><input className="input" value={f.website} onChange={(e) => setF({ ...f, website: e.target.value })} placeholder="yourwebsite.com" /></Field>
-        <Field label="Address"><AddressInput multiline value={f.address} onChange={(v) => setF({ ...f, address: v })} /></Field>
-        <Button variant="primary" busy={busy} disabled={!dirty} onClick={() => save()} style={{ alignSelf: 'flex-start' }}>Save</Button>
-      </section>
-      <section className="card card-pad col" style={{ gap: 14 }}>
-        <h2>Logo</h2>
-        <div style={{ height: 120, borderRadius: 12, background: 'var(--bg)', display: 'grid', placeItems: 'center', border: '1px dashed var(--field)' }}>
-          {logo ? <img src={logo} alt="Your logo" style={{ maxHeight: 100, maxWidth: '90%' }} /> : <span className="muted small">No logo — your name is shown instead</span>}
-        </div>
-        <div className="row wrap">
-          <Button icon="upload" onClick={upload}>{logo ? 'Replace logo' : 'Upload logo'}</Button>
-          {logo && <Button variant="ghost" onClick={async () => { const k = s.db.profile.logo_key; await s.updateProfile({ logo_key: null }); s.api.files.remove([k]).catch(() => {}); }}>Remove</Button>}
-        </div>
-        <p className="small muted">PNG with a transparent background looks best. Wide logos work better than tall ones.</p>
-      </section>
+      </div>
+      {logo && <Seg value={mode || 'logo'} onChange={setMode} label="Top left of the invoice" options={[{ value: 'logo', label: 'Logo only' }, { value: 'both', label: 'Logo + name' }]} />}
     </div>
   );
 }
@@ -132,13 +143,14 @@ const SAMPLE = {
 
 function Look() {
   const s = useStore();
-  const { f, setF, save, busy, dirty } = useProfileForm(['template', 'accent', 'payment_instructions', 'footer_note', 'default_terms_days', 'next_invoice_number', 'next_quote_number']);
+  const { f, setF, save, busy, dirty } = useProfileForm(['template', 'logo_mode', 'accent', 'payment_instructions', 'footer_note', 'default_terms_days', 'next_invoice_number', 'next_quote_number']);
   const [logo, setLogo] = useState(null);
-  useEffect(() => { if (s.db.profile.logo_key) s.api.files.urls([s.db.profile.logo_key]).then((u) => setLogo(u[s.db.profile.logo_key])); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="row wrap" style={{ alignItems: 'flex-start', gap: 16 }}>
       <section className="card card-pad col" style={{ gap: 14, flex: '1 1 320px' }}>
-        <h2>Template</h2>
+        <h2>Logo</h2>
+        <LogoPicker mode={f.logo_mode} setMode={(v) => setF({ ...f, logo_mode: v })} onLogo={setLogo} />
+        <h2 style={{ marginTop: 6 }}>Template</h2>
         <Seg value={f.template} onChange={(v) => setF({ ...f, template: v })} label="Template" options={[{ value: 'minimal', label: 'Minimal' }, { value: 'classic', label: 'Classic' }, { value: 'bold', label: 'Bold' }]} />
         <Field label="Accent color" hint="(used by Bold and on emails)">
           <div className="row">
@@ -431,6 +443,8 @@ function Data() {
   );
 }
 
+let usageCache = null;
+
 /** How much of Cloudflare's free 10 GB is used. Uploads stop at the limit, so it never costs anything. */
 function StorageCard() {
   const s = useStore();
@@ -441,7 +455,11 @@ function StorageCard() {
     setBusy(true);
     try {
       if (typeof s.api.files.usage !== 'function') throw new Error('Storage info needs the latest src/api/supabase.js — re-upload it.');
-      setU(await s.api.files.usage(recount)); setErr('');
+      // Checked at most every 15 minutes while you browse Settings (the server itself recounts R2 once a day).
+      if (!recount && usageCache && Date.now() - usageCache.at < 15 * 60_000) { setU(usageCache.data); setErr(''); setBusy(false); return; }
+      const data = await s.api.files.usage(recount);
+      usageCache = { at: Date.now(), data };
+      setU(data); setErr('');
     } catch (e) { setErr(e.message); }
     setBusy(false);
   };
@@ -607,6 +625,7 @@ function ImportModal({ imp, onClose }) {
   const [step, setStep] = useState('');
   const [pdfList, setPdfList] = useState(null);
   const [errors, setErrors] = useState([]);
+  const [choices, setChoices] = useState({}); // invoice # → 'append' | 'overwrite' when a PDF is missing lines that are in Wrap
   useEffect(() => {
     if (imp.type !== 'pdfs') return;
     (async () => {
@@ -628,7 +647,7 @@ function ImportModal({ imp, onClose }) {
     ? [...w.invoices].sort((a, b) => (b.amountDue > 0) - (a.amountDue > 0) || (Number(b.number) || 0) - (Number(a.number) || 0))
     : imp.type === 'clients' ? clientsFromCsv(imp.csv.rows, map)
       : imp.type === 'invoices' ? invoicesFromCsv(imp.csv.rows, map, { assume }) : pdfList || [];
-  const count = wave ? (withInvoices ? w.invoices.length : 0) + (withExpenses ? w.expenses.length : 0) : imp.type === 'pdfs' ? preview.filter((r) => pdfMatch(r, s.db).action !== 'skip').length : preview.length;
+  const count = wave ? (withInvoices ? w.invoices.length : 0) + (withExpenses ? w.expenses.length : 0) : imp.type === 'pdfs' ? preview.filter((r) => pdfMatch(r, s.db, choices[r.number]).action !== 'skip').length : preview.length;
 
   const run = async () => { if (DEMO) return;
     setStep('Importing…');
@@ -640,10 +659,10 @@ function ImportModal({ imp, onClose }) {
         const parts = [];
         let action = null;
         if (!wave || withInvoices) {
-          const { created, filled, skipped, ids } = await importInvoices(wave ? w.invoices : preview, { db: s.db, api: s.api, onStep: setStep, fill: imp.type === 'pdfs' });
+          const { created, filled, skipped, ids } = await importInvoices(wave ? w.invoices : preview, { db: s.db, api: s.api, onStep: setStep, fill: imp.type === 'pdfs', choices });
           parts.push(`${created} invoice${created === 1 ? '' : 's'} imported`);
           if (ids.length) action = ids.length === 1 ? { label: 'View invoice', run: () => go(`/invoices/${ids[0]}`) } : { label: 'View invoices', run: () => go('/invoices') };
-          if (filled) parts.push(`${filled} existing invoices filled in with line details`);
+          if (filled) parts.push(`${filled} existing invoice${filled === 1 ? '' : 's'} updated`);
           if (skipped.length) parts.push(`${skipped.length} skipped: ${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? '…' : ''}`);
         }
         if (wave && withExpenses && w.expenses.length) {
@@ -702,7 +721,30 @@ function ImportModal({ imp, onClose }) {
             <tbody>
               {preview.slice(0, 100).map((r, i) => imp.type === 'clients'
                 ? <tr key={i}><td>{r.name}</td><td className="muted">{r.email}</td><td className="small muted" style={{ whiteSpace: 'pre-line' }}>{r.address}</td></tr>
-                : (() => { const m = imp.type === 'pdfs' ? pdfMatch(r, s.db) : { action: existingNums.has(String(r.number)) ? 'skip' : 'new', reason: 'Already in Wrap' }; return <tr key={i} style={{ opacity: m.action === 'skip' ? 0.45 : 1 }}><td>#{r.number}</td><td>{r.client}</td><td className="muted">{r.date}</td><td className="small muted">{plural(r.lines.length, 'line')}{r.notes ? ` · ${r.notes}` : ''}</td><td className="right num">{money(r.total)}</td><td className="right num" style={{ color: m.action === 'fill' ? 'var(--good)' : r.amountDue > 0 && m.action === 'new' ? 'var(--bad)' : 'var(--muted)' }}>{m.action === 'fill' ? 'Adds details to the one in Wrap' : m.action === 'skip' ? m.reason : r.amountDue > 0 ? `${money(r.amountDue)} due` : 'Paid'}</td></tr>; })())}
+                : (() => {
+                  const m = imp.type === 'pdfs' ? pdfMatch(r, s.db, choices[r.number]) : { action: existingNums.has(String(r.number)) ? 'skip' : 'new', reason: 'Already in Wrap' };
+                  const what = m.action === 'fill' ? 'Adds details to the one in Wrap'
+                    : m.action === 'update' && !m.removed ? `Updates the one in Wrap${Math.abs(num(m.ex.total) - num(r.total)) >= 0.01 ? ` (${money(m.ex.total)} → ${money(r.total)})` : ''}`
+                      : m.action === 'skip' ? m.reason : r.amountDue > 0 ? `${money(r.amountDue)} due` : 'Paid';
+                  return (
+                    <tr key={i} style={{ opacity: m.action === 'skip' ? 0.45 : 1 }}>
+                      <td>#{r.number}</td><td>{r.client}</td><td className="muted">{r.date}</td>
+                      <td className="small muted">{plural(r.lines.length, 'line')}{r.notes ? ` · ${r.notes}` : ''}</td>
+                      <td className="right num">{money(r.total)}</td>
+                      <td className="right" style={{ color: m.action === 'fill' || m.action === 'update' ? 'var(--good)' : r.amountDue > 0 && m.action === 'new' ? 'var(--bad)' : 'var(--muted)' }}>
+                        {m.action === 'update' && m.removed ? (
+                          <span className="col" style={{ gap: 4, alignItems: 'flex-end' }}>
+                            <span className="small" style={{ color: 'var(--warn)' }}>{plural(m.removed, 'line')} in Wrap {m.removed === 1 ? 'isn’t' : 'aren’t'} in the PDF</span>
+                            <select className="input" style={{ minHeight: 32, width: 190 }} value={m.mode} onChange={(e) => setChoices({ ...choices, [r.number]: e.target.value })} aria-label={`What to do with #${r.number}`}>
+                              <option value="append">Keep them, add new lines</option>
+                              <option value="overwrite">Replace with the PDF</option>
+                            </select>
+                          </span>
+                        ) : <span className="num small">{what}</span>}
+                      </td>
+                    </tr>
+                  );
+                })())}
             </tbody>
           </table>
         </div>

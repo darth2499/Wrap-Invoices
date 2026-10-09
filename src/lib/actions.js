@@ -85,6 +85,14 @@ export function lifecycle(s, inv) {
   };
 }
 
+/** "Save" a draft from a list: it's finished and ready to send (it only says Sent once it's actually sent). */
+export async function finalizeDraft(s, inv) {
+  await s.update('invoices', inv.id, { status: 'sent', sent_at: null });
+  await logEvent(s, inv.id, 'edited', 'Saved — ready to send');
+  await s.reload('invoices', 'invoice_events');
+  s.toast(`#${inv.number} saved — ready to send`, { action: { label: 'Send', run: () => { window.location.hash = `#/invoices/${inv.id}?do=send`; } } });
+}
+
 export async function moveToDraft(s, inv) {
   await s.update('invoices', inv.id, { status: 'draft', sent_at: null });
   await logEvent(s, inv.id, 'edited', 'Moved back to draft');

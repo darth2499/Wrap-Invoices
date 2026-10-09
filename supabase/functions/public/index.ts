@@ -16,8 +16,10 @@ async function business(db: ReturnType<typeof admin>, ownerId: string) {
     .select("business_name, business_email, address, phone, website, logo_key, template, accent, payment_instructions, footer_note")
     .eq("id", ownerId).single();
   if (!p) return null;
+  // "Logo only" or "Logo + name" (added in 011; ignored if that hasn't been run yet).
+  const { data: lm } = await db.from("profiles").select("logo_mode").eq("id", ownerId).maybeSingle();
   const logo_url = p.logo_key ? await presign(p.logo_key, "GET", 3600) : null;
-  return { ...p, logo_key: undefined, logo_url };
+  return { ...p, logo_mode: (lm as { logo_mode?: string } | null)?.logo_mode ?? "logo", logo_key: undefined, logo_url };
 }
 
 /**

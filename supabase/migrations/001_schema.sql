@@ -48,6 +48,7 @@ create table if not exists public.profiles (
   auto_remind_default  boolean not null default false,
   mileage_rate         numeric(6,3) not null default 0.70,
   tax_set_aside_pct    numeric(5,2) not null default 25,
+  logo_mode            text not null default 'logo',
   gmail_email          text,
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now()
@@ -270,6 +271,7 @@ create table if not exists public.crew_members (
   email      text,
   phone      text,
   role       text,
+  address    text,
   notes      text,
   created_at timestamptz not null default now(),
   unique (id, owner_id)
@@ -737,3 +739,11 @@ end $$;
 -- ---------- your own expense categories ----------
 alter table public.profiles add column if not exists custom_categories jsonb not null default '[]'::jsonb;
 alter table public.profiles add column if not exists hidden_categories jsonb not null default '[]'::jsonb;
+
+-- Live updates for invoices (see 011_logo_live.sql).
+do $$ begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'invoices') then
+    alter publication supabase_realtime add table public.invoices;
+  end if;
+exception when undefined_object then null;
+end $$;

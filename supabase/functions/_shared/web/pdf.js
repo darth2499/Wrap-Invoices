@@ -151,6 +151,8 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
     const h = logoImg.height * s;
     page.drawImage(logoImg, { x: M, y: y - h, width: w, height: h });
     leftBottom = y - h;
+    // "Logo + name": your name sits under the logo.
+    if (business.logo_mode === 'both' && business.business_name) { text(business.business_name.toUpperCase(), M, leftBottom - 16, { size: 12, f: bold }); leftBottom -= 22; }
   } else {
     text((business.business_name || '').toUpperCase(), M, y - 18, { size: 16, f: bold });
     leftBottom = y - 24;
@@ -159,7 +161,7 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
   let ry = y - 22;
   text(isQuote ? 'QUOTE' : 'INVOICE', W - M, ry, { size: 24, f: font, color: template === 'bold' ? accent : INK, align: 'right' });
   ry -= 18;
-  if (logoImg && business.business_name) { text(business.business_name, W - M, ry, { size: 10, f: bold, align: 'right' }); ry -= 13; }
+  if (logoImg && business.logo_mode !== 'both' && business.business_name) { text(business.business_name, W - M, ry, { size: 10, f: bold, align: 'right' }); ry -= 13; }
   for (const l of String(business.address || '').split('\n').filter(Boolean)) { text(l, W - M, ry, { size: 9.5, color: GRAY, align: 'right' }); ry -= 12.5; }
   for (const l of [business.phone, business.business_email, business.website].filter(Boolean)) { text(l, W - M, ry, { size: 9.5, color: GRAY, align: 'right' }); ry -= 12.5; }
   y = Math.min(leftBottom, ry) - 16;

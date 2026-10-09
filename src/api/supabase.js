@@ -46,6 +46,13 @@ async function listAll(table) {
 }
 
 export const api = {
+  /** Live updates while the app is open: calls onInvoice(row) when one of your invoices changes (e.g. a client opens it). */
+  live(onInvoice) {
+    const ch = sb().channel('wrap-invoices')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'invoices' }, (p) => p.new && onInvoice(p.new))
+      .subscribe();
+    return () => { sb().removeChannel(ch); };
+  },
   mode: 'live',
 
   auth: {
