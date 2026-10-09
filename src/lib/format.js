@@ -147,3 +147,14 @@ export function pdfFileName(invoice) {
   const label = invoice.kind === 'quote' ? 'Quote' : 'Invoice';
   return `${label}_${String(invoice.number).replace(/[^\w-]/g, '')}_${invoice.issue_date || ''}.pdf`;
 }
+
+/**
+ * Who an email greets: the contact's first name ("Hi Sam,"). In Japanese it's the family name + 様.
+ * Falls back to the first word of the client name (older clients without a contact name), then "there".
+ */
+export function greetName(client, lang = 'en') {
+  const first = String(client?.contact_first || '').trim();
+  const last = String(client?.contact_last || '').trim();
+  if (lang === 'ja') return last ? `${last}様` : first ? `${first}様` : 'ご担当者様';
+  return first || String(client?.name || '').trim().split(/\s+/)[0] || 'there';
+}

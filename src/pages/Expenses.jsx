@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.jsx';
 import AddressInput from '../components/AddressInput.jsx';
-import { Button, Empty, Field, Icon, Modal, MoneyInput, Pill, Seg, Switch, Combobox, DateInput } from '../components/ui.jsx';
+import { Button, Empty, Field, Icon, Modal, MoneyInput, Pill, Seg, Switch, Combobox, DateInput, useTableColumns } from '../components/ui.jsx';
 import { categoryList, categoryLabel } from '../lib/categories.js';
 import { addReceiptFile } from '../lib/receipts.js';
 import { setBillable } from '../lib/actions.js';
@@ -10,6 +10,16 @@ import { pickFiles, sha256 } from '../lib/files.js';
 import { go } from '../router.js';
 import { takeFiles, onFiles } from '../lib/scanQueue.js';
 import { rateFor, followsIrs } from '../lib/mileage.js';
+import { suggestContext, receiptScore } from '../lib/suggest.js';
+
+// Receipt table columns (drag a header to reorder, click to sort).
+const RCOLS = {
+  vendor: { label: 'Vendor', sort: (r) => String(r.vendor || '').toLowerCase(), cell: (r) => <><div style={{ fontWeight: 500 }}>{r.vendor || <span className="muted">Unknown vendor</span>}</div>{r.status === 'review' && <Pill kind="review">Check</Pill>}</> },
+  date: { label: 'Date', sort: (r) => r.receipt_date || '', cell: (r) => <span className="muted">{fmtDate(r.receipt_date) || '—'}</span> },
+  category: { label: 'Category', sort: (r) => categoryLabel(r.category), cell: (r) => <span className="muted small">{categoryLabel(r.category)}</span> },
+  invoice: { label: 'Invoice', sort: (r) => r.invoice_id || '', cell: (r, derived) => (r.invoice_id ? <a href={`#/invoices/${r.invoice_id}`} onClick={(e) => e.stopPropagation()} className="pill sent" style={{ textDecoration: 'none' }}>#{derived.invoices[r.invoice_id]?.number}{r.billable ? ' · billed' : ''}</a> : <span className="small muted">—</span>) },
+  amount: { label: 'Amount', right: true, sort: (r) => num(r.total), cell: (r) => (r.total != null ? money(r.total) : '—') },
+};
 
 export default function Expenses({ tab, query }) {
   return (
@@ -31,6 +41,7 @@ function Receipts({ query }) {
   const { db, derived } = s;
   // The filter and period you picked are remembered on this device.
   const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem('wrap_exp_view')) || {}; } catch { return {}; } });
+  const table = useTableColumns('wrap_exp_cols', RCOLS, ['vendor', 'date', 'category', 'invoice', 'amount']);
   const [filter, setFilterState] = useState(query.status === 'review' ? 'review' : saved.filter || 'all');
   const [year, setYearState] = useState(saved.year || 'all');
   const remember = (patch) => { try { localStorage.setItem('wrap_exp_view', JSON.stringify({ filter, year, ...patch })); } catch { /* not saved */ } };
@@ -177,20 +188,16 @@ function Receipts({ query }) {
           </div>
           <div className="table-wrap d-only">
             <table className="table" style={{ minWidth: 720 }}>
-              <thead><tr><th style={{ width: 56 }} /><th>Vendor</th><th>Date</th><th>Category</th><th>Invoice</th><th className="right">Amount</th></tr></thead>
+              <thead><tr><th style={{ width: 56 }} />{table.headers}</tr></thead>
               <tbody>
-                {list.slice(0, 400).map((r) => (
+                {table.sorted(list).slice(0, 400).map((r) => (
                   <tr key={r.id} className="click" onClick={() => setOpen(r.id)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setOpen(r.id)}>
                     <td><span className="thumb">{urls[r.file_key] && r.mime !== 'application/pdf' ? <img src={urls[r.file_key]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : r.mime === 'application/pdf' ? 'PDF' : <Icon name="receipt" size={16} />}</span></td>
-                    <td><div style={{ fontWeight: 500 }}>{r.vendor || <span className="muted">Unknown vendor</span>}</div>{r.status === 'review' && <Pill kind="review">Check</Pill>}</td>
-                    <td className="muted">{fmtDate(r.receipt_date) || '—'}</td>
-                    <td className="muted small">{categoryLabel(r.category)}</td>
-                    <td>{r.invoice_id ? <a href={`#/invoices/${r.invoice_id}`} onClick={(e) => e.stopPropagation()} className="pill sent" style={{ textDecoration: 'none' }}>#{derived.invoices[r.invoice_id]?.number}{r.billable ? ' · billed' : ''}</a> : <span className="small muted">—</span>}</td>
-                    <td className="right num">{r.total != null ? money(r.total) : '—'}</td>
+                    {table.order.map((k) => <td key={k} className={RCOLS[k].right ? 'right num' : undefined}>{RCOLS[k].cell(r, derived)}</td>)}
                   </tr>
                 ))}
               </tbody>
-              <tfoot><tr><td colSpan={5} className="small muted" style={{ borderTop: '1px solid var(--line)' }}>{plural(list.length, 'receipt')}</td><td className="right num" style={{ borderTop: '1px solid var(--line)', fontWeight: 600 }}>{money(total)}</td></tr></tfoot>
+              <tfoot><tr><td colSpan={table.order.length} className="small muted" style={{ borderTop: '1px solid var(--line)' }}>{plural(list.length, 'receipt')}</td><td className="right num" style={{ borderTop: '1px solid var(--line)', fontWeight: 600 }}>{money(total)}</td></tr></tfoot>
             </table>
           </div>
           </>
@@ -222,6 +229,11 @@ export function ReceiptModal({ id, onClose, onNext }) {
   if (ai.subtotal != null && !chips.some((c) => Math.abs(c.amount - ai.subtotal) < 0.005)) chips.push({ label: 'Subtotal', amount: ai.subtotal });
   const reviewQueue = db.receipts.filter((x) => x.status === 'review' && x.id !== id);
   const invoices = db.invoices.filter((i) => i.kind === 'invoice' && i.status !== 'void').sort((a, b) => String(b.issue_date).localeCompare(String(a.issue_date)));
+  const invLabel = (i) => `#${i.number} · ${derived.clients[i.client_id]?.name || 'No client'} · ${fmtShort(i.issue_date)}${i.status === 'draft' ? ' (draft)' : ''}`;
+  // Invoices this receipt most likely belongs to: same shoot day (or the day before/after), an amount on the invoice, etc.
+  const likely = f.receipt_date ? invoices
+    .map((i) => ({ i, sc: receiptScore({ ...f, invoice_id: null }, suggestContext({ lines: derived.linesFor(i.id), jobs: i.jobs, issueDate: i.issue_date, clientName: derived.clients[i.client_id]?.name })) }))
+    .filter((x) => x.sc >= 7).sort((a, b) => b.sc - a.sc).slice(0, 4).map((x) => x.i) : [];
   const url = view === 'scan' ? urls[r.file_key] : urls[r.original_key];
   // Add a file to a receipt that has none (e.g. imported from Wave), or swap in a new one.
   const attachFile = async () => {
@@ -323,10 +335,11 @@ export function ReceiptModal({ id, onClose, onNext }) {
               {[...categoryList(db.profile), ...(f.category && !categoryList(db.profile).some((c) => c.name === f.category) ? [{ name: f.category }] : [])].map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
             </select>
           </Field>
-          <Field label="Attach to invoice" hint="(optional)">
+          <Field label="Attach to invoice" hint={likely.length ? '(best matches first)' : '(optional)'}>
             <select className="input" value={f.invoice_id || ''} onChange={(e) => setF({ ...f, invoice_id: e.target.value || null, billable: e.target.value ? f.billable : false })}>
               <option value="">Not attached</option>
-              {invoices.map((i) => <option key={i.id} value={i.id}>#{i.number} · {derived.clients[i.client_id]?.name || 'No client'} · {fmtShort(i.issue_date)}{i.status === 'draft' ? ' (draft)' : ''}</option>)}
+              {likely.length > 0 && <optgroup label="Suggested">{likely.map((i) => <option key={`s${i.id}`} value={i.id}>{invLabel(i)}</option>)}</optgroup>}
+              <optgroup label={likely.length ? 'All invoices' : 'Invoices'}>{invoices.filter((i) => !likely.includes(i)).map((i) => <option key={i.id} value={i.id}>{invLabel(i)}</option>)}</optgroup>
             </select>
           </Field>
           {f.invoice_id && (

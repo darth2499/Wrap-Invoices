@@ -3,7 +3,7 @@ import { useStore } from '../store.jsx';
 import AddressInput from '../components/AddressInput.jsx';
 import { Button, Empty, Field, Menu, Modal, Pill } from '../components/ui.jsx';
 import { statusOf } from '../lib/calc.js';
-import { money, fmtDate, num, todayISO, plural } from '../lib/format.js';
+import { money, fmtDate, num, todayISO, plural, greetName } from '../lib/format.js';
 import { go, shareUrl } from '../router.js';
 import EmailPreview from '../components/EmailPreview.jsx';
 import { buildStatementEmail } from '../lib/emailTemplate.js';
@@ -151,6 +151,7 @@ function ClientDetail({ id }) {
         </section>
         <section className="card card-pad col" style={{ gap: 8 }}>
           <h2>Details</h2>
+          {(c.contact_first || c.contact_last) && <Detail label="Contact" value={[c.contact_first, c.contact_last].filter(Boolean).join(' ')} />}
           <Detail label="Address" value={c.address} />
           <Detail label="CC on emails" value={c.cc_emails} />
           <Detail label="Overtime" value={c.ot_base_hours ? `After ${c.ot_base_hours} hours (instead of your default ${db.profile.ot_base_hours})` : `Your default (after ${db.profile.ot_base_hours} hours)`} />
@@ -176,11 +177,12 @@ function Detail({ label, value }) {
 export function ClientModal({ client, onClose, onSaved, stay = false }) {
   const s = useStore();
   const isNew = !client.id;
-  const [f, setF] = useState({ name: client.name || '', email: client.email || '', cc_emails: client.cc_emails || '', phone: client.phone || '', address: client.address || '', notes: client.notes || '', ot_base_hours: client.ot_base_hours ?? '', expects_1099: !!client.expects_1099, archived: !!client.archived });
+  const [f, setF] = useState({ name: client.name || '', contact_first: client.contact_first || '', contact_last: client.contact_last || '', email: client.email || '', cc_emails: client.cc_emails || '', phone: client.phone || '', address: client.address || '', notes: client.notes || '', ot_base_hours: client.ot_base_hours ?? '', expects_1099: !!client.expects_1099, archived: !!client.archived });
   const [err, setErr] = useState('');
   const save = async () => {
     if (!f.name.trim()) return setErr('Add a name');
-    const row = { ...f, name: f.name.trim(), ot_base_hours: f.ot_base_hours === '' ? null : num(f.ot_base_hours), email: f.email || null, cc_emails: f.cc_emails || null };
+    const row = { ...f, name: f.name.trim(), contact_first: f.contact_first.trim() || null, contact_last: f.contact_last.trim() || null, ot_base_hours: f.ot_base_hours === '' ? null : num(f.ot_base_hours), email: f.email || null, cc_emails: f.cc_emails || null };
+    for (const k of ['contact_first', 'contact_last']) if (!row[k] && client[k] === undefined) delete row[k]; // before 012 is run
     const saved = isNew ? await s.insert('clients', row) : await s.update('clients', client.id, row);
     onSaved?.(saved);
     onClose();
@@ -200,7 +202,9 @@ export function ClientModal({ client, onClose, onSaved, stay = false }) {
     <Modal title={isNew ? 'New client' : `Edit ${client.name}`} onClose={onClose} footer={<>{!isNew && <Button variant="ghost" className="danger" icon="trash" style={{ marginRight: 'auto' }} onClick={del}>Delete</Button>}<Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={save}>Save</Button></>}>
       {err && <div className="banner bad">{err}</div>}
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-        <Field label="Name or company"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus /></Field>
+        <Field label="Company" hint="(or their name, if it's a person)"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus /></Field>
+        <Field label="Contact first name" hint="(emails say “Hi …”)"><input className="input" value={f.contact_first} onChange={(e) => setF({ ...f, contact_first: e.target.value })} autoComplete="off" /></Field>
+        <Field label="Contact last name"><input className="input" value={f.contact_last} onChange={(e) => setF({ ...f, contact_last: e.target.value })} autoComplete="off" /></Field>
         <Field label="Billing email"><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
         <Field label="CC emails" hint="(comma-separated)"><input className="input" value={f.cc_emails} onChange={(e) => setF({ ...f, cc_emails: e.target.value })} /></Field>
         <Field label="Phone"><input className="input" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
@@ -219,7 +223,7 @@ export function ClientModal({ client, onClose, onSaved, stay = false }) {
 function StatementEmail({ client, owed, onClose }) {
   const s = useStore();
   const p = s.db.profile;
-  const first = client.name.split(' ')[0];
+  const first = greetName(client);
   const [to, setTo] = useState(client.email || '');
   const [subject, setSubject] = useState(`Statement from ${p.business_name || 'me'}`);
   const [message, setMessage] = useState(`Hi ${first},\n\nHere’s a statement of the open invoices — ${money(owed)} in total. Each invoice and its receipts can be opened from the link.\n\nThank you!\n${p.business_name || ''}`);

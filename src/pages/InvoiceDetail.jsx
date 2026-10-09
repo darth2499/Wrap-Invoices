@@ -5,7 +5,7 @@ import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import EmailPreview from '../components/EmailPreview.jsx';
 import { buildInvoiceEmail } from '../lib/emailTemplate.js';
 import { statusOf, dueText } from '../lib/calc.js';
-import { money, fmtDate, fmtDateTime, fmtShort, fmtTsDate, num, todayISO, round2, payMethod } from '../lib/format.js';
+import { money, fmtDate, fmtDateTime, fmtShort, fmtTsDate, num, todayISO, round2, payMethod, greetName } from '../lib/format.js';
 import * as A from '../lib/actions.js';
 import { go, shareUrl, useRoute } from '../router.js';
 import { suggestContext, rankReceipts } from '../lib/suggest.js';
@@ -262,7 +262,7 @@ function EmailModal({ inv, client, reminder, due, onClose }) {
   const s = useStore();
   const p = s.db.profile;
   const isQuote = inv.kind === 'quote';
-  const first = (client?.name || '').split(' ')[0] || 'there';
+  const first = greetName(client);
   const biz = p.business_name || 'me';
   const [to, setTo] = useState(client?.email || '');
   const [cc, setCc] = useState(client?.cc_emails || '');

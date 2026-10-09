@@ -129,7 +129,7 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
 .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
 .pill.draft, .pill.ready { background: #ededea; color: var(--ink-2); }
 .pill.sent { background: var(--accent-bg); color: var(--accent-ink); }
-.seen-eye { display: inline-grid; place-items: center; color: var(--accent); vertical-align: middle; }
+.pill .seen-eye { display: inline-grid; margin-left: 5px; vertical-align: -2px; opacity: .85; cursor: help; }
 .m-card .st { display: inline-flex; align-items: center; gap: 6px; }
 .pill.partial { background: var(--warn-bg); color: var(--warn); }
 .pill.overdue { background: var(--bad-bg); color: #a8231a; }
@@ -469,9 +469,9 @@ html.theme-blend *, html.theme-blend *::before, html.theme-blend *::after { tran
 html.vt-wipe::view-transition-old(root), html.vt-wipe::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 html.vt-wipe::view-transition-new(root) {
   -webkit-mask-image: linear-gradient(to right, #000 calc(50% - min(48px, 6vw)), transparent calc(50% + min(48px, 6vw))); mask-image: linear-gradient(to right, #000 calc(50% - min(48px, 6vw)), transparent calc(50% + min(48px, 6vw)));
-  -webkit-mask-size: 200vw 100%; mask-size: 200vw 100%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: -200vw 0; mask-position: -200vw 0;
+  -webkit-mask-size: 400vw 100%; mask-size: 400vw 100%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: -400vw 0; mask-position: -400vw 0;
 }
-html.vt-wipe::view-transition-group(wrap-orb), html.vt-wipe::view-transition-new(wrap-orb) { animation: none; }
+html.vt-wipe::view-transition-new(wrap-orb) { animation: none; }
 html.vt-wipe::view-transition-old(wrap-orb) { display: none; }
 @media (prefers-reduced-motion: reduce) { .orb-arc { display: none; } .theme-toggle svg, body { transition: none; } }
 .sheet .theme-row { justify-content: space-between; padding-right: 8px; }
@@ -667,3 +667,9 @@ html.vt-wipe::view-transition-old(wrap-orb) { display: none; }
 .month-btn.today { box-shadow: inset 0 0 0 1.5px var(--line); }
 .month-btn.on { background: var(--primary); color: var(--on-primary); }
 .date-input { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; cursor: pointer; text-align: left; color: var(--muted); }
+.install-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; line-height: 1.5; }
+.install-steps svg { vertical-align: -3px; }
+.logo-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.logo-preset { height: 56px; border: 1px solid var(--line); border-radius: 10px; background: #fff; display: grid; place-items: center; cursor: pointer; padding: 6px; overflow: hidden; }
+.logo-preset img { max-width: 100%; max-height: 40px; }
+.logo-preset.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-bg); }

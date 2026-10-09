@@ -52,7 +52,6 @@ export default function Overview() {
   const review = db.receipts.filter((r) => r.status === 'review');
   const attention = [
     ...data.overdue.sort((a, b) => b.st.days - a.st.days).map((i) => ({ key: i.id, title: `${derived.clients[i.client_id]?.name || 'No client'} · #${i.number}`, sub: dueText(i, today), amount: i.due, bad: true, go: `/invoices/${i.id}` })),
-    ...data.drafts.map((i) => ({ key: i.id, title: `Draft #${i.number} · ${derived.clients[i.client_id]?.name || 'No client'}`, sub: 'Not sent yet', amount: num(i.total), go: `/invoices/${i.id}` })),
   ];
 
   return (
@@ -80,8 +79,8 @@ export default function Overview() {
 
       <div className="grid-2 attention-row">
         <section className="card">
-          <div className="card-head"><h2>Needs attention</h2>{data.overdue.length > 0 && <a href="#/invoices?f=overdue" className="small">All overdue</a>}</div>
-          {attention.length === 0 && <Empty icon="check" title="All caught up" />}
+          <div className="card-head"><h2>Overdue</h2>{data.overdue.length > 0 && <a href="#/invoices?f=overdue" className="small">All overdue</a>}</div>
+          {attention.length === 0 && <Empty icon="check" title="Nothing overdue" />}
           {attention.slice(0, 5).map((a) => (
             <button key={a.key} className="list-row" style={{ gridTemplateColumns: '1fr auto' }} onClick={() => go(a.go)}>
               <span className="col" style={{ gap: 2 }}><b style={{ fontWeight: 500 }}>{a.title}</b><span className="small" style={{ color: a.bad ? 'var(--bad)' : 'var(--muted)' }}>{a.sub}</span></span>
@@ -174,7 +173,7 @@ function ForecastHeadline({ net, growth }) {
   );
 }
 
-/** What happened lately and what's coming up. A dot marks anything new since your last visit. */
+/** "Heads up": what to do next, what happened lately and what's coming up. A dot marks anything new since your last visit. */
 function WhatsNew() {
   const { db, derived } = useStore();
   const today = todayISO();
@@ -188,7 +187,7 @@ function WhatsNew() {
   const shown = all ? items : items.slice(0, 6);
   return (
     <section className="card feed">
-      <div className="card-head"><h2>What’s new{fresh > 0 && <span className="count-badge on" style={{ marginLeft: 8 }}>{fresh}</span>}</h2></div>
+      <div className="card-head"><h2>Heads up{fresh > 0 && <span className="count-badge on" style={{ marginLeft: 8 }}>{fresh}</span>}</h2></div>
       <div className="feed-list">
         {shown.map((x) => (
           <button key={x.key} type="button" className="feed-row" onClick={() => go(x.go)}>

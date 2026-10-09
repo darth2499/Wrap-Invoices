@@ -321,19 +321,34 @@ export async function scanReceipt(file, { mode = 'clean', crop = true } = {}) {
   }
   const sized = toCanvas(page, 2000);
   const cleaned = enhance(sized, mode);
-  const scan = await blobOf(cleaned, 'image/jpeg', 0.85);
-  // A smaller copy for automatic reading: plenty of detail for text, quicker to send.
-  const read = await blobOf(toCanvas(cleaned, 1400), 'image/jpeg', 0.82);
+  // Read from the sharp version first; what's stored is a lighter copy (still easy to read, a fraction of the size).
+  const read = await blobOf(cleaned, 'image/jpeg', 0.85);
+  const scan = await blobOf(toCanvas(cleaned, 1600), 'image/jpeg', 0.72);
   return { scan, read, cropped, width: cleaned.width, height: cleaned.height };
 }
 
 /** Shrinks a big original photo before storing it (keeps it readable, saves space). */
-export async function shrinkOriginal(file, maxSide = 2600) {
-  if (!file.type.startsWith('image/') || file.size < 1.5 * 1024 * 1024) return file;
+export async function shrinkOriginal(file, maxSide = 2000) {
+  if (!file.type.startsWith('image/') || file.size < 600 * 1024) return file;
   try {
     const bmp = await decode(file);
-    if (Math.max(bmp.width, bmp.height) <= maxSide && file.size < 4 * 1024 * 1024) return file;
-    return await blobOf(toCanvas(bmp, maxSide), 'image/jpeg', 0.88);
+    const out = await blobOf(toCanvas(bmp, maxSide), 'image/jpeg', 0.78);
+    return out && out.size < file.size ? out : file;
+  } catch {
+    return file;
+  }
+}
+
+/**
+ * Logo before upload: at most 800 px wide/tall, saved as PNG (keeps a transparent background, and the
+ * server-made PDF can use it). Small PNG/JPEG logos (under 150 KB) go up as they are.
+ */
+export async function shrinkLogo(file) {
+  const keep = /image\/(png|jpeg)/.test(file.type);
+  if (keep && file.size < 150 * 1024) return file;
+  try {
+    const png = await blobOf(toCanvas(await decode(file), 800), 'image/png');
+    return png && (!keep || png.size < file.size) ? png : file;
   } catch {
     return file;
   }

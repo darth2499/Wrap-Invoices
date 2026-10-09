@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.jsx';
 import AddressInput from '../components/AddressInput.jsx';
+import { shrinkLogo } from '../lib/scan.js';
+import { LOGO_PRESETS, presetLogoUrl } from '../lib/logos.js';
 import { Button, Empty, Field, Icon, Modal, MoneyInput, Seg, Switch } from '../components/ui.jsx';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import { exportBackup, readBackup, restoreBackup } from '../lib/backup.js';
@@ -81,7 +83,7 @@ function Business() {
     <div className="grid-2">
       <section className="card card-pad col" style={{ gap: 14 }}>
         <h2>Your business</h2>
-        <p className="small muted">Shown at the top of every invoice. Your logo is under <a href="#/settings?section=look">Invoice look</a>.</p>
+        <p className="small muted">Shown at the top of every invoice.</p>
         <Field label="Business or your name"><input className="input" value={f.business_name} onChange={(e) => setF({ ...f, business_name: e.target.value })} /></Field>
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
           <Field label="Email on invoices"><input className="input" type="email" value={f.business_email} onChange={(e) => setF({ ...f, business_email: e.target.value })} /></Field>
@@ -96,7 +98,7 @@ function Business() {
 }
 
 /** Your logo for invoices: upload/replace/remove, and whether your name shows under it. */
-function LogoPicker({ mode, setMode, onLogo }) {
+function LogoPicker({ mode, setMode, onLogo, preset, setPreset, name, accent }) {
   const s = useStore();
   const [logo, setLogo] = useState(null);
   useEffect(() => {
@@ -107,8 +109,9 @@ function LogoPicker({ mode, setMode, onLogo }) {
   const upload = async () => {
     const [file] = await pickFiles({ accept: 'image/png,image/jpeg,image/webp' });
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) return s.toast('Logo must be under 3 MB', { error: true });
-    const key = await s.api.files.upload(file, { folder: 'logo', ext: file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg' });
+    if (file.size > 15 * 1024 * 1024) return s.toast('That image is over 15 MB', { error: true });
+    const img = await shrinkLogo(file);
+    const key = await s.api.files.upload(img, { folder: 'logo', ext: img.type === 'image/png' ? 'png' : img.type === 'image/webp' ? 'webp' : 'jpg' });
     const old = s.db.profile.logo_key;
     await s.updateProfile({ logo_key: key });
     if (old) s.api.files.remove([old]).catch(() => {});
@@ -126,7 +129,16 @@ function LogoPicker({ mode, setMode, onLogo }) {
           <span className="small muted">PNG with a transparent background looks best.</span>
         </div>
       </div>
-      {logo && <Seg value={mode || 'logo'} onChange={setMode} label="Top left of the invoice" options={[{ value: 'logo', label: 'Logo only' }, { value: 'both', label: 'Logo + name' }]} />}
+      <span className="small muted">Or use a ready-made one (no upload needed):</span>
+      <div className="logo-presets" role="radiogroup" aria-label="Ready-made logos">
+        <button type="button" role="radio" aria-checked={!preset} className={`logo-preset ${!preset ? 'on' : ''}`} onClick={() => setPreset('')}>{logo ? <img src={logo} alt="Your logo" /> : <span className="small muted">Name only</span>}</button>
+        {LOGO_PRESETS.map((p) => (
+          <button key={p.id} type="button" role="radio" aria-checked={preset === p.id} title={p.label} className={`logo-preset ${preset === p.id ? 'on' : ''}`} onClick={() => setPreset(p.id)}>
+            <img src={presetLogoUrl(p.id, name, accent)} alt={p.label} />
+          </button>
+        ))}
+      </div>
+      {(logo || preset) && !['bar', 'stack'].includes(preset) && <Seg value={mode || 'logo'} onChange={setMode} label="Top left of the invoice" options={[{ value: 'logo', label: 'Logo only' }, { value: 'both', label: 'Logo + name' }]} />}
     </div>
   );
 }
@@ -143,13 +155,13 @@ const SAMPLE = {
 
 function Look() {
   const s = useStore();
-  const { f, setF, save, busy, dirty } = useProfileForm(['template', 'logo_mode', 'accent', 'payment_instructions', 'footer_note', 'default_terms_days', 'next_invoice_number', 'next_quote_number']);
+  const { f, setF, save, busy, dirty } = useProfileForm(['template', 'logo_mode', 'logo_preset', 'accent', 'payment_instructions', 'footer_note', 'default_terms_days', 'next_invoice_number', 'next_quote_number']);
   const [logo, setLogo] = useState(null);
   return (
     <div className="row wrap" style={{ alignItems: 'flex-start', gap: 16 }}>
       <section className="card card-pad col" style={{ gap: 14, flex: '1 1 320px' }}>
         <h2>Logo</h2>
-        <LogoPicker mode={f.logo_mode} setMode={(v) => setF({ ...f, logo_mode: v })} onLogo={setLogo} />
+        <LogoPicker mode={f.logo_mode} setMode={(v) => setF({ ...f, logo_mode: v })} onLogo={setLogo} preset={f.logo_preset} setPreset={(v) => setF({ ...f, logo_preset: v })} name={s.db.profile.business_name} accent={f.accent} />
         <h2 style={{ marginTop: 6 }}>Template</h2>
         <Seg value={f.template} onChange={(v) => setF({ ...f, template: v })} label="Template" options={[{ value: 'minimal', label: 'Minimal' }, { value: 'classic', label: 'Classic' }, { value: 'bold', label: 'Bold' }]} />
         <Field label="Accent color" hint="(used by Bold and on emails)">
@@ -445,6 +457,43 @@ function Data() {
 
 let usageCache = null;
 
+/**
+ * Deletes receipt photos/PDFs from past tax years (the receipts themselves stay: vendor, date, amount, category).
+ * A year only counts once its return deadline has passed: 2025 files after April 15, 2026.
+ */
+function FreeUpSpace({ onDone }) {
+  const s = useStore();
+  const [busy, setBusy] = useState('');
+  const today = todayISO();
+  const years = [...new Set(s.db.receipts.map((r) => Number(String(r.receipt_date || '').slice(0, 4))).filter(Boolean))]
+    .filter((y) => today > `${y + 1}-04-15`).sort();
+  const list = s.db.receipts.filter((r) => (r.file_key || r.original_key) && years.includes(Number(String(r.receipt_date || '').slice(0, 4))));
+  if (!list.length) return null;
+  const label = years.length > 1 ? `${years[0]}–${years[years.length - 1]}` : String(years[0]);
+  const run = async () => {
+    const ok = await s.confirm({
+      title: `Delete ${list.length} receipt image${list.length === 1 ? '' : 's'} from ${label}?`,
+      body: `Only the photos and PDFs are deleted; the receipts stay in your records and reports. This can’t be undone, so download a backup first if you want copies (the IRS can ask about a return for 3 years).`,
+      ok: 'Delete images', danger: true,
+    });
+    if (!ok) return;
+    try {
+      const keys = list.flatMap((r) => [r.file_key, r.original_key]).filter(Boolean);
+      for (let i = 0; i < keys.length; i += 200) { setBusy(`Deleting files ${Math.min(i + 200, keys.length)} / ${keys.length}`); await s.api.files.remove(keys.slice(i, i + 200)); }
+      for (const [i, r] of list.entries()) { if (i % 10 === 0) setBusy(`Updating receipts ${i + 1} / ${list.length}`); await s.update('receipts', r.id, { file_key: null, original_key: null }); }
+      s.toast(`${list.length} receipt images from ${label} deleted`);
+      onDone();
+    } catch (e) { s.toast(e.message, { error: true }); }
+    setBusy('');
+  };
+  return (
+    <div className="banner warn" style={{ flexWrap: 'wrap' }}>
+      <span className="grow" style={{ minWidth: 220 }}>Free up space: {list.length} receipt image{list.length === 1 ? '' : 's'} from {label} (that tax year is filed).</span>
+      <Button size="sm" busy={!!busy} onClick={run}>{busy || 'Delete those images'}</Button>
+    </div>
+  );
+}
+
 /** How much of Cloudflare's free 10 GB is used. Uploads stop at the limit, so it never costs anything. */
 function StorageCard() {
   const s = useStore();
@@ -487,6 +536,7 @@ function StorageCard() {
             <span className="muted">{fmt(Math.max(0, u.limit - u.used))} left</span>
           </span>
           <p className="small muted" style={{ lineHeight: 1.6 }}>Cloudflare is free up to 10 GB. Wrap stops uploads at {fmt(u.limit)}, so you’re never charged: when it’s full, new receipts can’t be added until you delete old receipt images. Shared by everyone you’ve invited.</p>
+          {pct >= 75 && <FreeUpSpace onDone={() => { usageCache = null; load(); }} />}
         </>
       )}
     </section>

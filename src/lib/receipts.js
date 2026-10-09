@@ -37,6 +37,7 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
     let mime;
     let cropped = false;
     let readWith = {};
+    let scanned = null;
     if (isPdf) {
       onStep('Reading the PDF…');
       try {
@@ -59,15 +60,9 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
         return { status: 'error', message: `${file.name}: this photo format can't be opened here. Try a JPEG or PNG. (${e.message})` };
       }
       cropped = scan.cropped;
+      scanned = scan;
       mime = 'image/jpeg';
       readWith = { image_b64: await blobToBase64(scan.read), image_mime: 'image/jpeg' };
-      onStep('Uploading…');
-      const original = await shrinkOriginal(file);
-      [fileKey, originalKey] = await Promise.all([
-        api.files.upload(scan.scan, { folder: 'receipts', ext: 'jpg' }),
-        api.files.upload(original, { folder: 'originals', ext: extFor(original.type, 'jpg') }),
-      ]);
-      uploaded.push(fileKey, originalKey);
     }
 
     onStep('Reading the receipt…');
@@ -76,6 +71,16 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
       ai = await api.readReceipt(fileKey, mime, readWith);
     } catch (e) {
       ai = { error: e.message };
+    }
+    if (!isPdf) {
+      // Read first (from the sharp copy), then store the compressed copies.
+      onStep('Uploading…');
+      const original = await shrinkOriginal(file);
+      [fileKey, originalKey] = await Promise.all([
+        api.files.upload(scanned.scan, { folder: 'receipts', ext: 'jpg' }),
+        api.files.upload(original, { folder: 'originals', ext: extFor(original.type, 'jpg') }),
+      ]);
+      uploaded.push(fileKey, originalKey);
     }
     const row = {
       vendor: ai?.vendor || null,

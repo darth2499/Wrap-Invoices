@@ -48,7 +48,7 @@ export default function Search({ onClose }) {
       type: inv.kind === 'quote' ? 'Quotes' : 'Invoices', label: `#${inv.number} · ${derived.clients[inv.client_id]?.name || 'No client'}`,
       sub: `${fmtDate(inv.issue_date)} · ${money(inv.total)}${inv.notes ? ` · ${inv.notes}` : ''}`, path: `/invoices/${inv.id}`, icon: inv.kind === 'quote' ? 'quote' : 'invoice',
     })), 8);
-    take(db.clients.filter((c) => hit(c.name, c.email, c.phone, c.address, c.notes)).map((c) => ({ type: 'Clients', label: c.name, sub: c.email || '', path: `/clients/${c.id}`, icon: 'clients' })), 5);
+    take(db.clients.filter((c) => hit(c.name, c.contact_first, c.contact_last, c.email, c.phone, c.address, c.notes)).map((c) => ({ type: 'Clients', label: c.name, sub: c.email || '', path: `/clients/${c.id}`, icon: 'clients' })), 5);
     take(db.receipts.filter((r) => hit(r.vendor, r.category, r.notes, r.total, money(r.total), r.receipt_date)).sort((a, b) => String(b.receipt_date).localeCompare(String(a.receipt_date))).map((r) => ({
       type: 'Receipts', label: r.vendor || 'Receipt', sub: `${fmtDate(r.receipt_date)} · ${money(r.total)} · ${r.category || ''}`, path: `/expenses?open=${r.id}`, icon: 'receipt',
     })), 6);

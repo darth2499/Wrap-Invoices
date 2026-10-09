@@ -78,16 +78,14 @@ export function Pill({ kind, children }) {
   return <span className={`pill ${kind}`}>{children}</span>;
 }
 
-/** An invoice's status pill. */
+/** An invoice's status pill; an eye (hover: "Seen by client") once the client has opened it. */
 export function StatusPill({ st, extra = '' }) {
-  return <span className={`pill ${st.key}`}>{st.label}{extra}</span>;
-}
-
-/** Eye shown when the client has opened the invoice link. */
-export function SeenEye({ inv }) {
-  const n = Number(inv.view_count) || 0;
-  if (!n) return null;
-  return <span className="seen-eye" title={`Your client opened it${n > 1 ? ` ${n} times` : ''}`} aria-label="Seen by client"><Icon name="eye" size={16} /></span>;
+  return (
+    <span className={`pill ${st.key}`}>
+      {st.label}{extra}
+      {st.seen && <span className="seen-eye" title="Seen by client" aria-label="Seen by client"><Icon name="eye" size={12} /></span>}
+    </span>
+  );
 }
 
 export function Seg({ value, options, onChange, label }) {
@@ -460,4 +458,51 @@ export function MoneyInput({ value, onChange, className = '', ...rest }) {
       {...rest}
     />
   );
+}
+
+/**
+ * Table columns you can drag to reorder and click to sort (order and sort remembered on this device).
+ * cols: { key: { label, sort?: (row) => value, right? } }; returns { order, headers, sorted(rows) }.
+ */
+export function useTableColumns(storageKey, cols, defaults) {
+  const [order, setOrder] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey));
+      if (Array.isArray(saved)) {
+        const out = saved.filter((k) => cols[k]);
+        defaults.forEach((k, i) => { if (!out.includes(k)) out.splice(Math.min(i, out.length), 0, k); });
+        return out;
+      }
+    } catch { /* default */ }
+    return defaults;
+  });
+  const [sort, setSort] = useState(null);
+  const [drag, setDrag] = useState(null);
+  const [over, setOver] = useState(null);
+  const move = (from, to) => {
+    if (!from || from === to) return;
+    const next = order.filter((k) => k !== from);
+    next.splice(next.indexOf(to), 0, from);
+    setOrder(next);
+    try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* not saved */ }
+  };
+  const headers = order.map((k) => (
+    <th key={k} className={`drag-th ${cols[k].right ? 'right' : ''} ${over === k ? 'drop' : ''}`} draggable
+      onDragStart={(e) => { setDrag(k); e.dataTransfer.effectAllowed = 'move'; }}
+      onDragOver={(e) => { e.preventDefault(); setOver(k); }}
+      onDragLeave={() => setOver(null)}
+      onDrop={(e) => { e.preventDefault(); move(drag, k); setDrag(null); setOver(null); }}
+      onDragEnd={() => { setDrag(null); setOver(null); }}
+      onClick={() => cols[k].sort && setSort((o) => (o?.key === k ? { key: k, dir: -o.dir } : { key: k, dir: 1 }))}
+      aria-sort={sort?.key === k ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none'}>
+      {cols[k].label}
+      {cols[k].sort && <span className={`sort-arrow ${sort?.key === k ? 'on' : ''}`} aria-hidden="true">{sort?.key === k && sort.dir < 0 ? '↓' : '↑'}</span>}
+    </th>
+  ));
+  const sorted = (rows) => {
+    if (!sort) return rows;
+    const get = cols[sort.key].sort;
+    return [...rows].sort((a, b) => { const x = get(a); const y = get(b); return (x > y ? 1 : x < y ? -1 : 0) * sort.dir; });
+  };
+  return { order, headers, sorted };
 }

@@ -2,10 +2,14 @@
 import { useState } from 'react';
 import { money, fmtLong, num, payMethod } from '../lib/format.js';
 import { depositAmount } from '../lib/calc.js';
+import { presetLogoUrl } from '../lib/logos.js';
 
-export default function InvoiceDoc({ business = {}, invoice, client, lines, payments = [], logoUrl }) {
+export default function InvoiceDoc({ business = {}, invoice, client, lines, payments = [], logoUrl: uploaded }) {
   const template = business.template || 'minimal';
   const accent = business.accent || '#16161A';
+  // A ready-made logo (if picked) wins over an uploaded one; "bar" and "stacked" already spell out your name.
+  const logoUrl = business.logo_preset ? presetLogoUrl(business.logo_preset, business.business_name, accent) : uploaded;
+  const nameInLogo = ['bar', 'stack'].includes(business.logo_preset);
   const isQuote = invoice.kind === 'quote';
   const paid = payments.reduce((s, p) => s + num(p.amount), 0);
   const due = num(invoice.total) - paid;
@@ -23,11 +27,11 @@ export default function InvoiceDoc({ business = {}, invoice, client, lines, paym
       <header className="doc-head" style={{ display: 'flex', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
         <div className="col" style={{ gap: 8, minWidth: 0 }}>
           {logoUrl ? <img src={logoUrl} alt="" style={{ maxWidth: 180, maxHeight: 80, objectFit: 'contain', objectPosition: 'left' }} /> : null}
-          {(!logoUrl || business.logo_mode === 'both') && <strong style={{ fontSize: logoUrl ? 16 : 20, letterSpacing: '.03em' }}>{(business.business_name || '').toUpperCase()}</strong>}
+          {(!logoUrl || (business.logo_mode === 'both' && !nameInLogo)) && <strong style={{ fontSize: logoUrl ? 16 : 20, letterSpacing: '.03em' }}>{(business.business_name || '').toUpperCase()}</strong>}
         </div>
         <div className="doc-from" style={{ textAlign: 'right', fontSize: 13, color: '#45464d', lineHeight: 1.55 }}>
           <div style={{ fontSize: 26, fontWeight: 600, color: template === 'bold' ? accent : '#16161a', letterSpacing: '.02em' }}>{isQuote ? 'QUOTE' : 'INVOICE'}</div>
-          {logoUrl && business.logo_mode !== 'both' && <div style={{ fontWeight: 600, color: '#16161a' }}>{business.business_name}</div>}
+          {logoUrl && business.logo_mode !== 'both' && !nameInLogo && <div style={{ fontWeight: 600, color: '#16161a' }}>{business.business_name}</div>}
           <div style={{ whiteSpace: 'pre-line' }}>{business.address}</div>
           {business.phone && <div>{business.phone}</div>}
           {business.business_email && <div>{business.business_email}</div>}

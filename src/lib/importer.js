@@ -3,6 +3,7 @@ import { DEMO } from '../config.js';
 import { num, round2, todayISO, addDays } from './format.js';
 import { totals } from './calc.js';
 import { looksSame } from './receipts.js';
+import { datesFromCode } from './shoots.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -322,6 +323,28 @@ export function withAddons(l) {
   };
 }
 
+/**
+ * A line covering several days, e.g. "Google (10/05-10/07)" at $2,250 × 1, comes in as 3 × $750
+ * (only when it divides evenly to the cent). With add-ons, the base price is split instead.
+ */
+export function withDays(l, issueDate) {
+  const first = String(l.extras ? l.extras.desc : l.description || '').split('\n')[0];
+  const m = first.match(/\((\d{2}\/\d{2}(?:-\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:-\d{2}\/\d{2})?)*)\)/);
+  if (!m) return l;
+  const dates = datesFromCode(m[1], issueDate);
+  const n = dates.length;
+  const out = { ...l, dates };
+  if (n < 2 || num(l.qty) !== 1) return out;
+  const split = (total) => { const per = round2(total / n); return Math.abs(per * n - total) < 0.005 ? per : null; };
+  if (l.extras) {
+    const per = num(l.extras.qty) === 1 && split(num(l.extras.rate));
+    if (per) out.extras = { ...l.extras, qty: n, rate: per, base_rate: per };
+    return out;
+  }
+  const per = split(num(l.amount));
+  return per ? { ...out, qty: n, rate: per } : out;
+}
+
 /** Reads a Wave invoice PDF (its text, pulled out in the browser) and returns an import-ready invoice. */
 export async function invoiceFromPdf(file, api) {
   const { pdfText, pdfFirstPageImage, blobToBase64 } = await import('./pdftext.js');
@@ -347,7 +370,7 @@ export async function invoiceFromPdf(file, api) {
     discount: num(r.discount),
     notes: r.notes || null,
     payments: (r.payments || []).map((p) => ({ date: p.date, amount: num(p.amount), method: p.method })),
-    lines: (r.lines || []).map((l) => withAddons({ kind: 'labor', item: l.item, description: l.description || '', note: l.note || '', qty: num(l.qty) || 1, rate: num(l.rate), amount: num(l.amount) })),
+    lines: (r.lines || []).map((l) => withDays(withAddons({ kind: 'labor', item: l.item, description: l.description || '', note: l.note || '', qty: num(l.qty) || 1, rate: num(l.rate), amount: num(l.amount) }), toDate(r.issue_date) || todayISO())),
     fileName: file.name,
   };
 }

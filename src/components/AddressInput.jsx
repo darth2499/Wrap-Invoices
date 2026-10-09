@@ -2,6 +2,7 @@
 // Only the text you type in this box is sent to look it up — nothing else from Wrap.
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './ui.jsx';
+import { useStore } from '../store.jsx';
 
 const STATES = { Alabama: 'AL', Alaska: 'AK', Arizona: 'AZ', Arkansas: 'AR', California: 'CA', Colorado: 'CO', Connecticut: 'CT', Delaware: 'DE', 'District of Columbia': 'DC', Florida: 'FL', Georgia: 'GA', Hawaii: 'HI', Idaho: 'ID', Illinois: 'IL', Indiana: 'IN', Iowa: 'IA', Kansas: 'KS', Kentucky: 'KY', Louisiana: 'LA', Maine: 'ME', Maryland: 'MD', Massachusetts: 'MA', Michigan: 'MI', Minnesota: 'MN', Mississippi: 'MS', Missouri: 'MO', Montana: 'MT', Nebraska: 'NE', Nevada: 'NV', 'New Hampshire': 'NH', 'New Jersey': 'NJ', 'New Mexico': 'NM', 'New York': 'NY', 'North Carolina': 'NC', 'North Dakota': 'ND', Ohio: 'OH', Oklahoma: 'OK', Oregon: 'OR', Pennsylvania: 'PA', 'Rhode Island': 'RI', 'South Carolina': 'SC', 'South Dakota': 'SD', Tennessee: 'TN', Texas: 'TX', Utah: 'UT', Vermont: 'VT', Virginia: 'VA', Washington: 'WA', 'West Virginia': 'WV', Wisconsin: 'WI', Wyoming: 'WY' };
 const cache = new Map();
@@ -17,15 +18,50 @@ function shape(f) {
   return { name, street, place, us };
 }
 
+// Results lean toward where you work: the area of your business address (looked up once, kept on this device).
+let bias = null;
+try { bias = JSON.parse(localStorage.getItem('wrap_geo_bias')); } catch { /* none yet */ }
+export async function setBiasFrom(address) {
+  const q = String(address || '').replace(/\s*\n\s*/g, ', ').trim();
+  if (!q || bias?.q === q) return;
+  try {
+    const j = await (await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1&lang=en`)).json();
+    const c = j.features?.[0]?.geometry?.coordinates;
+    if (c) { bias = { q, lon: c[0], lat: c[1] }; localStorage.setItem('wrap_geo_bias', JSON.stringify(bias)); }
+  } catch { /* no bias */ }
+}
+
+const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\b(street|st|avenue|ave|road|rd|way|drive|dr|boulevard|blvd|lane|ln|court|ct|place|pl)\b/g, '').replace(/\s+/g, ' ').trim();
+
 async function lookup(q, signal) {
   const key = q.toLowerCase();
   if (cache.has(key)) return cache.get(key);
-  const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8&lang=en`, { signal });
+  // "1392 grove way": the map data often lacks that exact house number, so we also look up the street
+  // and put your number on it, and rank real number matches first.
+  const m = q.match(/^(\d+[a-z]?)\s+(.+)$/i);
+  const num = m?.[1];
+  const near = bias ? `&lat=${bias.lat}&lon=${bias.lon}&zoom=9&location_bias_scale=0.5` : '';
+  const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=12&lang=en${near}`, { signal });
   if (!r.ok) return [];
   const j = await r.json();
+  const want = norm(m?.[2] || q).split(' ').filter(Boolean);
   const seen = new Set();
-  const list = (j.features || []).map(shape).filter((x) => (x.street || x.name) && x.place)
-    .sort((a, b) => b.us - a.us)
+  const list = (j.features || []).map((f) => {
+    const x = shape(f);
+    const p = f.properties || {};
+    const streetHit = want.length && want.every((w) => norm(`${p.street || ''} ${p.name || ''} ${p.city || ''}`).includes(w));
+    let score = x.us ? 1 : 0;
+    if (num && p.housenumber === num) score += 6;
+    else if (num && streetHit && (p.osm_value === 'residential' || p.osm_key === 'highway' || !p.housenumber)) {
+      // A street match: use the number you typed.
+      const street = p.street || p.name;
+      Object.assign(x, { name: '', street: x.us ? `${num} ${street}` : `${street} ${num}` });
+      score += 4;
+    } else if (streetHit) score += 2;
+    return { ...x, score };
+  })
+    .filter((x) => (x.street || x.name) && x.place)
+    .sort((a, b) => b.score - a.score)
     .filter((x) => { const k = `${x.name}|${x.street}|${x.place}`; if (seen.has(k)) return false; seen.add(k); return true; })
     .slice(0, 5);
   cache.set(key, list);
@@ -37,6 +73,7 @@ async function lookup(q, signal) {
  * Otherwise one line, e.g. "Paramount Studios, 5555 Melrose Ave, Los Angeles, CA 90038" (for trips).
  */
 export default function AddressInput({ value, onChange, multiline = false, placeholder, ...rest }) {
+  const home = useStore()?.db?.profile?.address;
   const [list, setList] = useState([]);
   const [open, setOpen] = useState(false);
   const [i, setI] = useState(-1);
@@ -66,6 +103,7 @@ export default function AddressInput({ value, onChange, multiline = false, place
   };
   const props = {
     ...rest, className: 'input', value: value || '', placeholder, autoComplete: 'off',
+    onFocus: () => { if (home) setBiasFrom(home); },
     onChange: (e) => { typed.current = true; onChange(e.target.value); },
     onKeyDown: (e) => {
       if (!open || !list.length) return;

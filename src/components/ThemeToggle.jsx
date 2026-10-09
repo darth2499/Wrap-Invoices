@@ -51,24 +51,27 @@ export default function ThemeToggle({ className = '', label }) {
   const [orb, setOrb] = useState(null);
   const flip = () => {
     if (orb) return;
-    const next = theme === 'dark' ? 'light' : 'dark';
+    // Read the live theme (there's a toggle in the sidebar and one in the phone menu).
+    const next = (document.documentElement.dataset.theme || theme) === 'dark' ? 'light' : 'dark';
     const kind = next === 'dark' ? 'moon' : 'sun';
     try { localStorage.setItem(KEY, next); } catch { /* not saved */ }
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { applyTheme(next); setTheme(next); return; }
 
     if (document.startViewTransition) {
-      // The new theme is revealed by a soft-edged mask whose edge rides with the orb.
+      // The new theme is revealed by a soft-edged mask whose edge rides with the orb. Both paths are CSS keyframes
+      // (written just before the transition), so they run from the very first frame to the very last with no gap.
       const pts = arc();
       const W = window.innerWidth;
+      const half = Math.min(180, Math.max(120, Math.min(W, window.innerHeight) * 0.24)) / 2;
+      const kf = (fn) => pts.map((p, i) => `${((i / (pts.length - 1)) * 100).toFixed(2)}%{${fn(p)}}`).join('');
+      const css = document.getElementById('wrap-wipe-css') || document.head.appendChild(Object.assign(document.createElement('style'), { id: 'wrap-wipe-css' }));
+      css.textContent = `@keyframes wrap-wipe{${kf((p) => `-webkit-mask-position:${Math.round(p.x - 2 * W)}px 0;mask-position:${Math.round(p.x - 2 * W)}px 0`)}}`
+        + `@keyframes wrap-orb{${kf((p) => `transform:translate(${Math.round(p.x - half)}px,${Math.round(p.y - half)}px)`)}}`
+        + `html.vt-wipe::view-transition-new(root){animation:wrap-wipe ${MS}ms linear both}`
+        + `html.vt-wipe::view-transition-group(wrap-orb){animation:wrap-orb ${MS}ms linear both}`;
       const html = document.documentElement;
       html.classList.add('vt-wipe');
       const vt = document.startViewTransition(() => flushSync(() => { applyTheme(next); setTheme(next); setOrb(`${kind} vt`); }));
-      vt.ready.then(() => {
-        const opts = { duration: MS, easing: 'linear', fill: 'both' };
-        html.animate(pts.map((p) => ({ maskPosition: `${Math.round(p.x - W)}px 0`, WebkitMaskPosition: `${Math.round(p.x - W)}px 0` })), { ...opts, pseudoElement: '::view-transition-new(root)' });
-        const half = (document.querySelector('.orb-vt')?.offsetWidth || 180) / 2;
-        html.animate(pts.map((p) => ({ transform: `translate(${Math.round(p.x - half)}px, ${Math.round(p.y - half)}px)` })), { ...opts, pseudoElement: '::view-transition-group(wrap-orb)' });
-      }).catch(() => {});
       vt.finished.finally(() => { html.classList.remove('vt-wipe'); setOrb(null); });
       return;
     }

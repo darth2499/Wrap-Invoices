@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Icon } from './ui.jsx';
+import { Button, Icon, Modal } from './ui.jsx';
 import Search, { useSearchShortcut } from './Search.jsx';
 import ThemeToggle from './ThemeToggle.jsx';
 import { queueFiles } from '../lib/scanQueue.js';
@@ -8,6 +8,15 @@ import { useStore } from '../store.jsx';
 import { APP_NAME, DEMO, LIVE_CONFIGURED } from '../config.js';
 import { api } from '../api/index.js';
 import { irsRate, followsIrs } from '../lib/mileage.js';
+
+// Install as an app: Android/Chrome can do it with one tap; on iPhone it's Safari's Share → Add to Home Screen.
+let deferredInstall = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; });
+const installed = () => window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
+function install() {
+  if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; return; }
+  window.dispatchEvent(new Event('wrap-install-help'));
+}
 
 const NAV = [
   { id: '', label: 'Overview', icon: 'overview' },
@@ -24,6 +33,8 @@ const NAV = [
 export default function Layout({ route, children }) {
   const [searching, setSearching] = useState(false);
   useSearchShortcut(setSearching);
+  const [installHelp, setInstallHelp] = useState(false);
+  useEffect(() => { const on = () => setInstallHelp(true); window.addEventListener('wrap-install-help', on); return () => window.removeEventListener('wrap-install-help', on); }, []);
   const store = useStore();
   const { db, user } = store;
   // Mileage follows the IRS rate: when a new year's rate applies, update it (unless you set your own).
@@ -36,6 +47,16 @@ export default function Layout({ route, children }) {
   const current = section === 'invoices' && route.query.kind === 'quote' ? 'quotes' : section;
   return (
     <div className="shell">
+      {installHelp && (
+        <Modal title="Install Wrap on your iPhone" onClose={() => setInstallHelp(false)} footer={<Button variant="primary" onClick={() => setInstallHelp(false)}>Got it</Button>}>
+          <ol className="install-steps">
+            <li>Open this page in <b>Safari</b>.</li>
+            <li>Tap the <b>Share</b> button <Icon name="upload" size={16} /> at the bottom.</li>
+            <li>Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.</li>
+          </ol>
+          <p className="small muted">Wrap then opens full screen from its own icon, like any other app, and stays signed in.</p>
+        </Modal>
+      )}
       <nav className="side" aria-label="Main">
         <a className="brand" href="#/" style={{ textDecoration: 'none', color: 'inherit' }}>
           <span className="brand-mark">{APP_NAME[0]}</span>
@@ -86,6 +107,7 @@ function MobileNav({ current, review, onSearch }) {
         <div className="sheet" role="menu">
           <button onClick={() => { setOpen(false); onSearch(); }}><Icon name="search" />Search</button>
           <ThemeToggle label="Dark mode" />
+          {!installed() && <button onClick={() => { setOpen(false); install(); }}><Icon name="download" />Install the app</button>}
           <a href="#/invoices/new" onClick={() => setOpen(false)}><Icon name="plus" />New invoice</a>
           <a href="#/invoices/new?kind=quote" onClick={() => setOpen(false)}><Icon name="quote" />New quote</a>
           <a href="#/quotes" onClick={() => setOpen(false)}><Icon name="quote" />Quotes</a>

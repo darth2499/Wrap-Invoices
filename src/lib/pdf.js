@@ -2,6 +2,7 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { money, fmtLong, num, payMethod } from './format.js';
 import { depositAmount } from './calc.js';
+import { drawPresetLogo } from './logos.js';
 
 const W = 612;
 const H = 792;
@@ -123,7 +124,9 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
     page.drawRectangle({ x: 0, y: H - 8, width: W, height: 8, color: accent });
     text(isQuote ? 'Quote' : 'Invoice', W - M, y - 22, { size: 26, f: bold, color: INK, align: 'right' });
     let by = y - 8;
-    if (logoImg) {
+    if (business.logo_preset) {
+      by -= drawPresetLogo(page, { id: business.logo_preset, name: business.business_name, color: accent, white: rgb(1, 1, 1), ink: INK, bold, x: M, top: by }) + 16;
+    } else if (logoImg) {
       const sc = Math.min(160 / logoImg.width, 60 / logoImg.height, 1);
       page.drawImage(logoImg, { x: M, y: by - logoImg.height * sc, width: logoImg.width * sc, height: logoImg.height * sc });
       by -= logoImg.height * sc + 16;
@@ -144,7 +147,11 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
   // Left: logo or name
   if (!isBold) {
   let leftBottom = y;
-  if (logoImg) {
+  const preset = business.logo_preset;
+  if (preset) {
+    leftBottom = y - drawPresetLogo(page, { id: preset, name: business.business_name, color: accent, white: rgb(1, 1, 1), ink: INK, bold, x: M, top: y });
+    if (business.logo_mode === 'both' && business.business_name && !['bar', 'stack'].includes(preset)) { text(business.business_name.toUpperCase(), M, leftBottom - 16, { size: 12, f: bold }); leftBottom -= 22; }
+  } else if (logoImg) {
     const s = Math.min(170 / logoImg.width, 72 / logoImg.height, 1);
     const w = logoImg.width * s;
     const h = logoImg.height * s;
@@ -160,7 +167,7 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
   let ry = y - 22;
   text(isQuote ? 'QUOTE' : 'INVOICE', W - M, ry, { size: 24, f: font, color: template === 'bold' ? accent : INK, align: 'right' });
   ry -= 18;
-  if (logoImg && business.logo_mode !== 'both' && business.business_name) { text(business.business_name, W - M, ry, { size: 10, f: bold, align: 'right' }); ry -= 13; }
+  if ((logoImg || preset) && business.logo_mode !== 'both' && !['bar', 'stack'].includes(preset) && business.business_name) { text(business.business_name, W - M, ry, { size: 10, f: bold, align: 'right' }); ry -= 13; }
   for (const l of String(business.address || '').split('\n').filter(Boolean)) { text(l, W - M, ry, { size: 9.5, color: GRAY, align: 'right' }); ry -= 12.5; }
   for (const l of [business.phone, business.business_email, business.website].filter(Boolean)) { text(l, W - M, ry, { size: 9.5, color: GRAY, align: 'right' }); ry -= 12.5; }
   y = Math.min(leftBottom, ry) - 16;

@@ -86,6 +86,34 @@ export function buildFeed({ db, derived, statusOf, today }) {
     if (inv) items.push({ key: `r${e.id}`, icon: 'mail', tone: 'muted', title: `Reminder sent for #${inv.number}`, sub: who(inv), at: e.created_at, when: ago(e.created_at, today), go: `/invoices/${inv.id}` });
   }
 
+  // Things to do: work that's stuck somewhere
+  const age = (iso) => (iso ? daysBetween(iso.slice(0, 10), today) : 0);
+  for (const inv of invoices) {
+    const paid = derived.paidFor(inv.id);
+    const c = derived.clients[inv.client_id];
+    if (inv.status === 'draft' && age(inv.issue_date) >= 3) {
+      items.push({ key: `td${inv.id}`, icon: 'edit', tone: 'warn', title: `Draft #${inv.number} has been waiting ${age(inv.issue_date)} days`, sub: `${who(inv)} · finish and send it`, todo: true, when: '', go: `/invoices/${inv.id}` });
+    } else if (inv.status === 'sent' && !inv.sent_at && paid <= 0 && age(inv.issue_date) >= 2) {
+      items.push({ key: `tr${inv.id}`, icon: 'mail', tone: 'warn', title: `#${inv.number} was saved but never sent`, sub: `${who(inv)} · ${age(inv.issue_date)} days since the invoice date`, todo: true, when: '', go: `/invoices/${inv.id}?do=send` });
+    } else if (inv.status === 'sent' && inv.sent_at && !num(inv.view_count) && paid <= 0 && age(inv.sent_at) >= 5) {
+      items.push({ key: `tn${inv.id}`, icon: 'eye', tone: 'muted', title: `${who(inv)} hasn’t opened #${inv.number}`, sub: `Sent ${age(inv.sent_at)} days ago · check the address or send it again`, todo: true, when: '', go: `/invoices/${inv.id}` });
+    }
+    if ((inv.status === 'draft' || (inv.status === 'sent' && !inv.sent_at)) && c && !c.email) {
+      items.push({ key: `te${inv.id}`, icon: 'user', tone: 'warn', title: `Add an email for ${c.name}`, sub: `Needed to send #${inv.number}`, todo: true, when: '', go: `/clients/${c.id}` });
+    }
+    if (inv.status === 'sent' && inv.sent_at && inv.due_date && age(inv.due_date) >= 14 && !inv.auto_remind) {
+      const lastNudge = db.invoice_events.filter((e) => e.invoice_id === inv.id && (e.type === 'reminder' || e.type === 'sent')).map((e) => e.created_at).sort().pop();
+      if (!lastNudge || age(lastNudge) >= 14) items.push({ key: `tm${inv.id}`, icon: 'bell', tone: 'bad', title: `Nudge ${who(inv)} about #${inv.number}`, sub: `${age(inv.due_date)} days overdue · no reminder in 2 weeks`, todo: true, when: '', go: `/invoices/${inv.id}?do=remind` });
+    }
+  }
+  for (const q of db.invoices.filter((i) => i.kind === 'quote' && i.status === 'accepted' && age(i.updated_at) >= 3)) {
+    items.push({ key: `tq${q.id}`, icon: 'convert', tone: 'warn', title: `Turn quote #${q.number} into an invoice`, sub: `${who(q)} accepted it ${age(q.updated_at)} days ago`, todo: true, when: '', go: `/invoices/${q.id}` });
+  }
+  const trips = db.mileage_trips.filter((t) => t.billable && !t.invoice_id && age(t.trip_date) >= 3);
+  if (trips.length) items.push({ key: 'ttrips', icon: 'car', tone: 'warn', title: `${trips.length} trip${trips.length === 1 ? '' : 's'} marked to bill`, sub: 'Add them to an invoice (Mileage)', todo: true, when: '', go: '/expenses/mileage' });
+  const nocat = db.receipts.filter((r) => r.status !== 'review' && !r.category);
+  if (nocat.length) items.push({ key: 'tcat', icon: 'receipt', tone: 'muted', title: `${nocat.length} receipt${nocat.length === 1 ? '' : 's'} without a category`, sub: 'Categories put them on the right tax line', todo: true, when: '', go: '/expenses' });
+
   // Receipts waiting to be checked
   const review = db.receipts.filter((r) => r.status === 'review');
   if (review.length) {
@@ -100,8 +128,8 @@ export function buildFeed({ db, derived, statusOf, today }) {
     items.push({ key: `t${t.kind}${t.date}${t.title}`, icon: 'file', tone: t.date === today ? 'bad' : 'warn', title: t.title, sub: t.sub, at: null, when: ahead(t.date, today), go: t.go, upcoming: t.date, urgent: t.date === today });
   }
 
-  // Urgent first, then what happened (newest first), then what's coming (soonest first).
-  const rank = (x) => (x.urgent ? 0 : x.upcoming ? 2 : 1);
+  // Urgent first, then things to do, then what happened (newest first), then what's coming (soonest first).
+  const rank = (x) => (x.urgent ? 0 : x.todo ? 1 : x.upcoming ? 3 : 2);
   return items.sort((a, b) => rank(a) - rank(b)
     || (a.upcoming && b.upcoming ? a.upcoming.localeCompare(b.upcoming) : String(b.at || '').localeCompare(String(a.at || ''))));
 }

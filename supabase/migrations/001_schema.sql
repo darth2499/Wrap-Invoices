@@ -49,6 +49,7 @@ create table if not exists public.profiles (
   mileage_rate         numeric(6,3) not null default 0.70,
   tax_set_aside_pct    numeric(5,2) not null default 25,
   logo_mode            text not null default 'logo',
+  logo_preset          text,
   gmail_email          text,
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now()
@@ -67,6 +68,8 @@ create table if not exists public.clients (
   id              uuid primary key default gen_random_uuid(),
   owner_id        uuid not null default auth.uid() references auth.users(id) on delete cascade,
   name            text not null,
+  contact_first   text,
+  contact_last    text,
   email           text,
   cc_emails       text,
   address         text,

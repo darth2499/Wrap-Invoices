@@ -9,7 +9,7 @@ serve(async (req) => {
   const today = new Date().toISOString().slice(0, 10);
 
   const { data: invs, error } = await db.from("invoices")
-    .select("*, clients(name, email, cc_emails)")
+    .select("*, clients(*)")
     .eq("kind", "invoice").eq("status", "sent").eq("auto_remind", true).lt("due_date", today);
   if (error) throw error;
 
@@ -27,7 +27,7 @@ serve(async (req) => {
       }
       const profile = profiles.get(inv.owner_id) as Record<string, any> | null;
       const tok = tokens.get(inv.owner_id);
-      const client = inv.clients as { name: string; email: string | null; cc_emails: string | null } | null;
+      const client = inv.clients as { name: string; email: string | null; cc_emails: string | null; contact_first?: string | null } | null;
       if (!profile || !tok || !client?.email) continue;
 
       const steps: number[] = [...(profile.reminder_days ?? [3, 7, 14])].sort((a, b) => a - b);
@@ -41,7 +41,7 @@ serve(async (req) => {
       if (due <= 0) continue;
 
       const business = profile.business_name || tok.email;
-      const first = (client.name || "").split(" ")[0] || "there";
+      const first = String(client.contact_first || "").trim() || (client.name || "").split(" ")[0] || "there";
       const message = `Hi ${first},\n\nJust a friendly reminder that invoice #${inv.number} for ${money(due)} is now ${overdue} day${overdue === 1 ? "" : "s"} past due. The details are below, and you can download the PDF and receipts from the link.\n\nThank you!\n${business}`;
       const email = buildInvoiceEmail({
         ...(await invoiceEmailData(db, inv, profile, business)),
