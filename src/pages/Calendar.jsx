@@ -124,12 +124,12 @@ function DayPreview({ day, setDay }) {
       {day.items.length > 1 && (
         <div className="row wrap" style={{ gap: 6 }}>
           {day.items.map((it, k) => (
-            <button key={k} type="button" className={`ed-opt ${k === day.i ? 'on' : ''}`} onClick={() => setDay({ ...day, i: k })}>#{it.inv.number} {it.what || it.label}</button>
+            <button key={k} type="button" className={`ed-opt ${k === day.i ? 'on' : ''}`} onClick={() => setDay({ ...day, i: k })}>#{it.inv.number} {it.client || it.label}{it.what ? ` · ${it.what}` : ''}</button>
           ))}
         </div>
       )}
       <div className="row between" style={{ gap: 10 }}>
-        <span className="row" style={{ gap: 8, minWidth: 0 }}><b>#{inv.number}{x.what ? ` ${x.what}` : ''}</b><StatusPill st={x.st} /></span>
+        <span className="row" style={{ gap: 8, minWidth: 0 }}><b className="ellip">#{inv.number}{x.client ? ` · ${x.client}` : ''}{x.what ? ` · ${x.what}` : ''}</b><StatusPill st={x.st} /></span>
         <span className="num muted">{money(inv.total)}</span>
       </div>
       <InvoiceDoc business={db.profile} invoice={inv} client={derived.clients[inv.client_id]} lines={derived.linesFor(inv.id)} payments={db.payments.filter((p) => p.invoice_id === inv.id)} logoUrl={logoUrl} />

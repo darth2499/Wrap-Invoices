@@ -1,8 +1,10 @@
 // Day/night switch: a soft sun (light) or moon (dark) rises from below the page, arcs across and sets,
 // and the new theme wipes in right behind it, following its edge across the screen.
 // Browsers without View Transitions get the same arc with a quick color blend instead.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
+import { darkness, isAuto, startAuto, stopAuto } from '../lib/autoTheme.js';
+import { useStore } from '../store.jsx';
 
 const KEY = 'wrap_theme';
 const MS = 1200;
@@ -10,6 +12,7 @@ export function initialTheme() {
   try {
     const saved = localStorage.getItem(KEY);
     if (saved === 'dark' || saved === 'light') return saved;
+    if (saved === 'auto') return darkness() >= 0.5 ? 'dark' : 'light';
   } catch { /* private mode */ }
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
@@ -49,8 +52,30 @@ function arc(n = 48) {
 export default function ThemeToggle({ className = '', label }) {
   const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || 'light');
   const [orb, setOrb] = useState(null);
+  const [auto, setAuto] = useState(isAuto);
+  const [holding, setHolding] = useState(false);
+  const toast = useStore()?.toast;
+  // Hold the button (about half a second) to switch to automatic: follows sunrise and sunset.
+  const hold = useRef({ timer: null, fired: false });
+  const pressStart = () => {
+    hold.current.fired = false;
+    setHolding(true);
+    hold.current.timer = setTimeout(() => {
+      hold.current.fired = true;
+      setHolding(false);
+      try { localStorage.setItem(KEY, 'auto'); } catch { /* not saved */ }
+      startAuto();
+      setAuto(true);
+      setTheme(document.documentElement.dataset.theme);
+      navigator.vibrate?.(15);
+      toast?.('Automatic theme: light by day, dark by night, changing slowly around sunset and sunrise. Tap to pick one yourself.');
+    }, 600);
+  };
+  const pressEnd = () => { clearTimeout(hold.current.timer); setHolding(false); };
   const flip = () => {
+    if (hold.current.fired) { hold.current.fired = false; return; } // that press was a hold
     if (orb) return;
+    if (isAuto()) { stopAuto(); setAuto(false); }
     // Read the live theme (there's a toggle in the sidebar and one in the phone menu).
     const next = (document.documentElement.dataset.theme || theme) === 'dark' ? 'light' : 'dark';
     const kind = next === 'dark' ? 'moon' : 'sun';
@@ -90,7 +115,8 @@ export default function ThemeToggle({ className = '', label }) {
   );
   return (
     <>
-      <button type="button" className={`${label ? 'theme-row' : 'theme-toggle'} ${className}`} onClick={flip} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>
+      <button type="button" className={`${label ? 'theme-row' : 'theme-toggle'} ${auto ? 'auto' : ''} ${holding ? 'holding' : ''} ${className}`} onClick={flip}
+        onPointerDown={pressStart} onPointerUp={pressEnd} onPointerLeave={pressEnd} onPointerCancel={pressEnd} onContextMenu={(e) => e.preventDefault()} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title={auto ? 'Automatic (tap to choose, hold for automatic)' : `${theme === 'dark' ? 'Light mode' : 'Dark mode'} (hold for automatic)`}>
         {label && <span>{label}</span>}
         {label ? <span className="theme-toggle" aria-hidden="true">{icons}</span> : icons}
       </button>

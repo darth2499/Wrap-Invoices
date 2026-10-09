@@ -10,7 +10,6 @@ const sb = () =>
   }));
 
 const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
-// Back to where you were (clean URLs), e.g. /settings after connecting Gmail.
 const redirectTo = () => window.location.origin + window.location.pathname;
 
 function check({ data, error }) {

@@ -2,8 +2,10 @@ import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import './styles.css';
 import { applyTheme, initialTheme } from './components/ThemeToggle.jsx';
+import { startAuto } from './lib/autoTheme.js';
 
 applyTheme(initialTheme());
+try { if (localStorage.getItem('wrap_theme') === 'auto') startAuto(); } catch { /* private mode */ }
 // Until you pick a theme yourself, Wrap follows the system (and switches when it does).
 window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', (e) => {
   let saved = null;

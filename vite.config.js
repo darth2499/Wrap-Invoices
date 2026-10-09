@@ -1,4 +1,3 @@
-import { copyFileSync } from 'node:fs';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -28,17 +27,10 @@ function securityHeaders(env) {
   };
 }
 
-// Clean URLs (/reports, not /#/reports): GitHub Pages answers any unknown path with 404.html, so the build writes
-// 404.html as a copy of the app. On a custom domain the site lives at "/"; on username.github.io/repo set VITE_BASE=/repo/.
-const spaFallback = () => ({
-  name: 'spa-404',
-  apply: 'build',
-  closeBundle() { copyFileSync('dist/index.html', 'dist/404.html'); },
-});
-
+// base './' lets the site work on a custom domain or on username.github.io/repo.
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), securityHeaders(loadEnv(mode, process.cwd(), 'VITE_')), spaFallback()],
-  base: loadEnv(mode, process.cwd(), 'VITE_').VITE_BASE || '/',
+  plugins: [react(), securityHeaders(loadEnv(mode, process.cwd(), 'VITE_'))],
+  base: './',
   build: { chunkSizeWarningLimit: 12000 },
   // Keep the bundle pure ASCII (non-ASCII characters are written as \u escapes).
   esbuild: { charset: 'ascii' },
