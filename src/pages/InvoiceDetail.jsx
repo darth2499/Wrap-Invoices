@@ -8,6 +8,7 @@ import { statusOf, dueText } from '../lib/calc.js';
 import { money, fmtDate, fmtDateTime, fmtShort, fmtTsDate, num, todayISO, round2, payMethod } from '../lib/format.js';
 import * as A from '../lib/actions.js';
 import { go, shareUrl, useRoute } from '../router.js';
+import { suggestContext, rankReceipts } from '../lib/suggest.js';
 
 const METHODS = ['Bank transfer', 'Zelle', 'Check', 'Venmo', 'PayPal', 'Cash', 'Card', 'Other'];
 
@@ -317,6 +318,9 @@ function AttachModal({ inv, onClose }) {
   const [sel, setSel] = useState(new Set());
   const [q, setQ] = useState('');
   const list = s.db.receipts.filter((r) => r.invoice_id !== inv.id).filter((r) => !q || `${r.vendor} ${r.total} ${r.category}`.toLowerCase().includes(q.toLowerCase())).sort((a, b) => String(b.receipt_date).localeCompare(String(a.receipt_date)));
+  // Likely matches (same shoot days, the invoice's period, matching items) come first.
+  const ctx = suggestContext({ lines: s.derived.linesFor(inv.id), jobs: inv.jobs, issueDate: inv.issue_date, clientName: s.derived.clients[inv.client_id]?.name });
+  const { suggested, rest } = q ? { suggested: [], rest: list } : rankReceipts(list, ctx);
   const go2 = async (bill) => {
     const picked = s.db.receipts.filter((x) => sel.has(x.id));
     try {
@@ -333,12 +337,15 @@ function AttachModal({ inv, onClose }) {
       <input className="input" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
       <div className="col" style={{ gap: 0, maxHeight: 380, overflowY: 'auto' }}>
         {list.length === 0 && <Empty icon="receipt" title="No other receipts">Add some in Expenses.</Empty>}
-        {list.map((r) => (
-          <label key={r.id} className="check" style={{ borderTop: '1px solid var(--line-2)' }}>
+        {[...suggested, ...rest].map((r, k) => (
+          <div key={r.id}>
+          {suggested.length > 0 && (k === 0 || k === suggested.length) && <div className="pick-group">{k === 0 ? 'Suggested' : 'All receipts'}</div>}
+          <label className={`check ${k < suggested.length ? 'suggested' : ''}`} style={{ borderTop: '1px solid var(--line-2)' }}>
             <input type="checkbox" checked={sel.has(r.id)} onChange={() => setSel((x) => { const n = new Set(x); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })} />
             <span className="grow col" style={{ gap: 0 }}><b style={{ fontWeight: 500, color: 'var(--ink)' }}>{r.vendor || 'Receipt'}</b><span className="small muted">{fmtShort(r.receipt_date)}{r.invoice_id ? ` · now on #${s.derived.invoices[r.invoice_id]?.number}` : ''}</span></span>
             <span className="num">{money(r.total)}</span>
           </label>
+          </div>
         ))}
       </div>
     </Modal>

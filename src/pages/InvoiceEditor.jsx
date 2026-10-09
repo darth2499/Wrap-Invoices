@@ -5,6 +5,7 @@ import { totals, compileJobs, otRule, jobLabor, lineAmount } from '../lib/calc.j
 import { money, num, round2, todayISO, addDays, uid, datesLabel, datesCode, mmdd, fmtShort } from '../lib/format.js';
 import { saveInvoice, copyLink } from '../lib/actions.js';
 import { datesFromCode } from '../lib/shoots.js';
+import { suggestContext, rankReceipts } from '../lib/suggest.js';
 import { go } from '../router.js';
 
 const TERMS = [
@@ -259,7 +260,7 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
         </section>
       </div>
 
-      {picker?.type === 'receipts' && <ReceiptPicker db={db} exclude={picker.exclude} title={picker.title} onClose={() => setPicker(null)} onPick={(rs) => { picker.onPick(rs); setPicker(null); }} />}
+      {picker?.type === 'receipts' && <ReceiptPicker ctx={suggestContext({ lines: finalLines, jobs, issueDate: form.issue_date, clientName: derived.clients[form.client_id]?.name })} db={db} exclude={picker.exclude} title={picker.title} onClose={() => setPicker(null)} onPick={(rs) => { picker.onPick(rs); setPicker(null); }} />}
       {picker?.type === 'mileage' && <MileagePicker db={db} derived={derived} selected={mileageIds} onClose={() => setPicker(null)} onPick={(trips) => { picker.onPick(trips); setPicker(null); }} />}
     </div>
   );
@@ -616,24 +617,28 @@ function AttachedReceipts({ db, attachIds, setAttachIds, finalLines, openPicker 
   );
 }
 
-function ReceiptPicker({ db, exclude, onPick, onClose, title }) {
+function ReceiptPicker({ db, exclude, onPick, onClose, title, ctx }) {
   const [sel, setSel] = useState(new Set());
   const [q, setQ] = useState('');
   const list = db.receipts
     .filter((r) => !exclude?.has(r.id))
     .filter((r) => !q || `${r.vendor} ${r.category} ${r.total}`.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => (a.invoice_id ? 1 : 0) - (b.invoice_id ? 1 : 0) || String(b.receipt_date).localeCompare(String(a.receipt_date)));
+  const { suggested, rest } = q ? { suggested: [], rest: list } : rankReceipts(list, ctx);
   return (
     <Modal title={title || 'Choose receipts'} onClose={onClose} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!sel.size} onClick={() => onPick(db.receipts.filter((r) => sel.has(r.id)))}>Add {sel.size || ''}</Button></>}>
       <input className="input" placeholder="Search vendor, category, amount" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
       <div className="col" style={{ gap: 0, maxHeight: 380, overflowY: 'auto' }}>
         {list.length === 0 && <Empty icon="receipt" title="No receipts to add">Add receipts in Expenses first.</Empty>}
-        {list.map((r) => (
-          <label key={r.id} className="check" style={{ borderTop: '1px solid var(--line-2)', padding: '6px 0' }}>
+        {[...suggested, ...rest].map((r, k) => (
+          <div key={r.id}>
+          {suggested.length > 0 && (k === 0 || k === suggested.length) && <div className="pick-group">{k === 0 ? 'Suggested' : 'All receipts'}</div>}
+          <label className={`check ${k < suggested.length ? 'suggested' : ''}`} style={{ borderTop: '1px solid var(--line-2)', padding: '6px 0' }}>
             <input type="checkbox" checked={sel.has(r.id)} onChange={() => setSel((s) => { const n = new Set(s); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })} />
             <span className="grow col" style={{ gap: 0 }}><b style={{ fontWeight: 500, color: 'var(--ink)' }}>{r.vendor || 'Receipt'}</b><span className="small muted">{fmtShort(r.receipt_date)} · {r.category || 'Uncategorized'}{r.invoice_id ? ` · on invoice #${db.invoices.find((i) => i.id === r.invoice_id)?.number}` : ''}</span></span>
             <span className="num">{money(r.total)}</span>
           </label>
+          </div>
         ))}
       </div>
     </Modal>
