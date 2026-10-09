@@ -21,7 +21,7 @@ export function seedDemo(owner, token) {
     template: 'classic', accent: '#16161A', payment_instructions: 'Zelle: you@example.com\nOr check payable to Alex Rivera',
     footer_note: 'Thank you!', next_invoice_number: 1, next_quote_number: 1, default_terms_days: 30,
     ot_base_hours: 10, ot_mult1: 1.5, ot_mult1_hours: 2, ot_mult2: 2, reminder_days: [3, 7, 14], auto_remind_default: false,
-    mileage_rate: 0.7, tax_set_aside_pct: 25, gmail_email: null,
+    mileage_rate: 0.7, tax_set_aside_pct: 25, gmail_email: null, custom_categories: [], hidden_categories: [],
   };
 
   const c = (name, email, extra = {}) => ({ ...base, id: uid(), name, email, cc_emails: null, address: null, phone: null, notes: null, ot_base_hours: null, expects_1099: true, statement_token: token(), archived: false, created_at: ts(at(Y - 1, 0, 2)), ...extra });

@@ -731,3 +731,7 @@ begin
   end if;
   return null;
 end $$;
+
+-- ---------- your own expense categories ----------
+alter table public.profiles add column if not exists custom_categories jsonb not null default '[]'::jsonb;
+alter table public.profiles add column if not exists hidden_categories jsonb not null default '[]'::jsonb;

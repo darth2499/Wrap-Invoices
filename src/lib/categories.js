@@ -21,8 +21,12 @@ export const CATEGORIES = [
   { name: 'Education', line: '27a' },
   { name: 'Other', line: '27a' },
 ];
-export const categoryLabel = (name) => {
-  const c = CATEGORIES.find((x) => x.name === name);
-  return c ? `${c.name} · line ${c.line}` : name || 'Uncategorized';
-};
+export const categoryLabel = (name) => name || 'Uncategorized';
+
+/** The categories you use: the built-in ones you haven't removed, plus your own (Settings → Expense categories). */
+export function categoryList(profile = {}) {
+  const hidden = new Set(profile.hidden_categories || []);
+  const own = (profile.custom_categories || []).filter(Boolean).map((name) => ({ name, line: '27a', custom: true }));
+  return [...CATEGORIES.filter((c) => !hidden.has(c.name)), ...own.filter((c) => !CATEGORIES.some((d) => d.name === c.name))];
+}
 export const lineFor = (name) => CATEGORIES.find((x) => x.name === name)?.line || '27a';

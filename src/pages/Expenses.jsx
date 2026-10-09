@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.jsx';
 import { Button, Empty, Field, Icon, Modal, MoneyInput, Pill, Seg, Switch, Combobox } from '../components/ui.jsx';
-import { CATEGORIES, categoryLabel } from '../lib/categories.js';
+import { categoryList, categoryLabel } from '../lib/categories.js';
 import { addReceiptFile } from '../lib/receipts.js';
 import { setBillable } from '../lib/actions.js';
 import { money, fmtDate, fmtShort, num, todayISO, round2, plural, inPeriod, periodOptions } from '../lib/format.js';
@@ -311,10 +311,10 @@ export function ReceiptModal({ id, onClose, onNext }) {
             <Field label="Vendor"><input className="input" value={f.vendor} onChange={(e) => setF({ ...f, vendor: e.target.value })} /></Field>
             <Field label="Date"><input className="input" type="date" value={f.receipt_date || ''} onChange={(e) => setF({ ...f, receipt_date: e.target.value })} /></Field>
           </div>
-          <Field label="Category (Schedule C)">
+          <Field label="Category">
             <select className="input" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
               <option value="">Choose…</option>
-              {CATEGORIES.map((c) => <option key={c.name} value={c.name}>{c.name} · line {c.line}</option>)}
+              {[...categoryList(db.profile), ...(f.category && !categoryList(db.profile).some((c) => c.name === f.category) ? [{ name: f.category }] : [])].map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
             </select>
           </Field>
           <Field label="Attach to invoice" hint="(optional)">

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Icon } from './ui.jsx';
 import Search, { useSearchShortcut } from './Search.jsx';
+import ThemeToggle from './ThemeToggle.jsx';
 import { queueFiles } from '../lib/scanQueue.js';
 import { go } from '../router.js';
 import { useStore } from '../store.jsx';
@@ -15,6 +16,7 @@ const NAV = [
   { id: 'expenses', label: 'Expenses', icon: 'receipt' },
   { id: 'clients', label: 'Clients', icon: 'clients' },
   { id: 'reports', label: 'Reports', icon: 'reports' },
+  { id: 'taxes', label: 'Taxes', icon: 'file' },
   { id: 'settings', label: 'Settings', icon: 'settings' },
 ];
 
@@ -49,7 +51,10 @@ export default function Layout({ route, children }) {
         <div className="side-foot col" style={{ gap: 6 }}>
           {DEMO && <span className="pill partial" style={{ alignSelf: 'flex-start' }}>Demo mode</span>}
           <span>{DEMO ? 'Data stays in this browser' : `Signed in as ${user.email}`}</span>
-          <button className="btn link small" style={{ alignSelf: 'flex-start' }} onClick={() => api.auth.signOut()}>{DEMO && LIVE_CONFIGURED ? 'Exit demo' : 'Sign out'}</button>
+          <div className="row between" style={{ flexWrap: 'nowrap' }}>
+            <button className="btn link small" onClick={() => api.auth.signOut()}>{DEMO && LIVE_CONFIGURED ? 'Exit demo' : 'Sign out'}</button>
+            <ThemeToggle />
+          </div>
         </div>
       </nav>
       <main className="main">{children}</main>
@@ -73,12 +78,14 @@ function MobileNav({ current, review, onSearch }) {
       {open && (
         <div className="sheet" role="menu">
           <button onClick={() => { setOpen(false); onSearch(); }}><Icon name="search" />Search</button>
+          <div className="sheet-row"><span>Dark mode</span><ThemeToggle /></div>
           <a href="#/invoices/new" onClick={() => setOpen(false)}><Icon name="plus" />New invoice</a>
           <a href="#/invoices/new?kind=quote" onClick={() => setOpen(false)}><Icon name="quote" />New quote</a>
           <a href="#/quotes" onClick={() => setOpen(false)}><Icon name="quote" />Quotes</a>
           <a href="#/calendar" onClick={() => setOpen(false)}><Icon name="calendar" />Calendar</a>
           <a href="#/clients" onClick={() => setOpen(false)}><Icon name="clients" />Clients</a>
           <a href="#/reports" onClick={() => setOpen(false)}><Icon name="reports" />Reports</a>
+          <a href="#/taxes" onClick={() => setOpen(false)}><Icon name="file" />Taxes</a>
           <a href="#/settings" onClick={() => setOpen(false)}><Icon name="settings" />Settings</a>
           <button onClick={() => api.auth.signOut()}><Icon name="logout" />{DEMO && LIVE_CONFIGURED ? 'Exit demo' : 'Sign out'}</button>
         </div>

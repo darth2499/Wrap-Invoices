@@ -8,6 +8,7 @@ import { CLIENT_FIELDS, INVOICE_FIELDS, autoMap, clientsFromCsv, invoicesFromCsv
 import { isWaveAccounting, parseWaveAccounting, readWaveFiles } from '../lib/wave.js';
 import { money, num, todayISO, addDays, plural } from '../lib/format.js';
 import { DEMO } from '../config.js';
+import { CATEGORIES } from '../lib/categories.js';
 import { resetDemo } from '../api/demo.js';
 import { go } from '../router.js';
 
@@ -15,6 +16,7 @@ const SECTIONS = [
   { value: 'business', label: 'Business' },
   { value: 'look', label: 'Invoice look' },
   { value: 'rates', label: 'Rates & items' },
+  { value: 'categories', label: 'Expense categories' },
   { value: 'email', label: 'Email & reminders' },
   { value: 'people', label: 'People' },
   { value: 'data', label: 'Data & backup' },
@@ -42,6 +44,7 @@ export default function Settings({ section = 'business' }) {
       {section === 'business' && <Business />}
       {section === 'look' && <Look />}
       {section === 'rates' && <Rates />}
+      {section === 'categories' && <Categories />}
       {section === 'email' && <Email />}
       {section === 'people' && <People />}
       {section === 'data' && <Data />}
@@ -795,5 +798,43 @@ function WaveModal({ files, onClose }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+/** Expense categories: remove built-in ones you never use, add your own. */
+function Categories() {
+  const s = useStore();
+  const p = s.db.profile;
+  const hidden = new Set(p.hidden_categories || []);
+  const own = p.custom_categories || [];
+  const [name, setName] = useState('');
+  const save = (patch) => s.updateProfile(patch).catch((e) => s.toast(e.message, { error: true }));
+  const add = () => {
+    const n = name.trim();
+    if (!n) return;
+    if (CATEGORIES.some((c) => c.name.toLowerCase() === n.toLowerCase())) save({ hidden_categories: [...hidden].filter((h) => h.toLowerCase() !== n.toLowerCase()) });
+    else if (!own.some((o) => o.toLowerCase() === n.toLowerCase())) save({ custom_categories: [...own, n] });
+    setName('');
+  };
+  const used = (n) => s.db.receipts.filter((r) => r.category === n).length;
+  const Row = ({ n, off, onToggle }) => (
+    <div className={`cat-row ${off ? 'off' : ''}`}>
+      <span>{n}</span>
+      <span className="small muted num">{used(n) || ''}</span>
+      <Button size="sm" variant="ghost" icon={off ? 'plus' : 'x'} aria-label={off ? `Add ${n} back` : `Remove ${n}`} onClick={onToggle} />
+    </div>
+  );
+  return (
+    <section className="card card-pad col" style={{ gap: 12, maxWidth: 640 }}>
+      <h2>Expense categories</h2>
+      <form className="row" style={{ gap: 8, flexWrap: 'nowrap' }} onSubmit={(e) => { e.preventDefault(); add(); }}>
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="New category" aria-label="New category" />
+        <Button type="submit" variant="primary" icon="plus" disabled={!name.trim()}>Add</Button>
+      </form>
+      <div className="col" style={{ gap: 0 }}>
+        {own.map((n) => <Row key={n} n={n} onToggle={() => save({ custom_categories: own.filter((o) => o !== n) })} />)}
+        {CATEGORIES.map((c) => <Row key={c.name} n={c.name} off={hidden.has(c.name)} onToggle={() => save({ hidden_categories: hidden.has(c.name) ? [...hidden].filter((h) => h !== c.name) : [...hidden, c.name] })} />)}
+      </div>
+    </section>
   );
 }

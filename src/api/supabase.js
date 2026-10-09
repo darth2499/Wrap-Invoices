@@ -123,7 +123,7 @@ export const api = {
 
   files: {
     async upload(blob, { folder = 'receipts', ext = 'bin', key } = {}) {
-      const { key: k, url } = await call('files', { action: 'upload', folder, ext, key });
+      const { key: k, url } = await call('files', { action: 'upload', folder, ext, key, size: blob.size });
       const res = await fetch(url, { method: 'PUT', body: blob, headers: { 'Content-Type': blob.type || 'application/octet-stream' } });
       if (!res.ok) throw new Error(`Upload failed (${res.status}). Check the R2 CORS settings in SETUP.md.`);
       return k;
@@ -140,6 +140,10 @@ export const api = {
     async remove(keys) {
       const list = keys.filter(Boolean);
       if (list.length) await call('files', { action: 'delete', keys: list });
+    },
+    /** How much of the free storage is used: { used, limit, mine, counted_at } in bytes. */
+    usage(recount = false) {
+      return call('files', { action: 'usage', recount });
     },
   },
 

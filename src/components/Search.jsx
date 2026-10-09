@@ -10,7 +10,7 @@ const PAGES = [
   ['New quote', '/invoices/new?kind=quote', 'plus'], ['Calendar', '/calendar', 'calendar'], ['Receipts', '/expenses', 'receipt'],
   ['Mileage', '/expenses/mileage', 'car'], ['Crew payouts', '/expenses/crew', 'crew'], ['Clients', '/clients', 'clients'],
   ['Profit & loss', '/reports/overview', 'reports'], ['Unpaid by client', '/reports/unpaid', 'reports'], ['Quarterly taxes', '/reports/quarterly', 'reports'],
-  ['1099s', '/reports/1099', 'reports'], ['Tax export', '/reports/export', 'reports'], ['Business details', '/settings?section=business', 'settings'],
+  ['1099s', '/reports/1099', 'reports'], ['Tax export', '/reports/export', 'reports'], ['Taxes · 1099s & expenses to copy', '/taxes', 'file'], ['Business details', '/settings?section=business', 'settings'],
   ['Invoice look & templates', '/settings?section=look', 'settings'], ['Rates & saved items', '/settings?section=rates', 'settings'],
   ['Email & reminders · Gmail', '/settings?section=email', 'mail'], ['People & invites', '/settings?section=people', 'user'],
   ['Data, backup & import', '/settings?section=data', 'database'],
