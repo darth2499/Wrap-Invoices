@@ -264,13 +264,14 @@ function EmailModal({ inv, client, reminder, due, onClose }) {
   const isQuote = inv.kind === 'quote';
   const first = greetName(client);
   const biz = p.business_name || 'me';
+  const andReceipts = s.db.receipts.some((r) => r.invoice_id === inv.id && r.file_key) ? ' and receipts' : ''; // only mention receipts if there are some
   const [to, setTo] = useState(client?.email || '');
   const [cc, setCc] = useState(client?.cc_emails || '');
   const [subject, setSubject] = useState(reminder ? `Reminder: invoice #${inv.number} from ${biz}` : `${isQuote ? 'Quote' : 'Invoice'} #${inv.number} from ${biz}`);
   const [message, setMessage] = useState(
     reminder
-      ? `Hi ${first},\n\nJust a friendly reminder that invoice #${inv.number} for ${money(due)} is ${inv.due_date && inv.due_date < todayISO() ? 'now past due' : `due ${fmtDate(inv.due_date)}`}. You can view it and download the PDF and receipts from the link below.\n\nThank you!\n${biz}`
-      : `Hi ${first},\n\nHere's ${isQuote ? 'the quote' : `invoice #${inv.number}`}${inv.notes ? ` (${inv.notes})` : ''}. You can view it and download the PDF${isQuote ? '' : ' and receipts'} below.\n\nThank you!\n${biz}`,
+      ? `Hi ${first},\n\nJust a friendly reminder that invoice #${inv.number} for ${money(due)} is ${inv.due_date && inv.due_date < todayISO() ? 'now past due' : `due ${fmtDate(inv.due_date)}`}. You can view it and download the PDF${andReceipts} from the link below.\n\nThank you!\n${biz}`
+      : `Hi ${first},\n\nHere's ${isQuote ? 'the quote' : `invoice #${inv.number}`}${inv.notes ? ` (${inv.notes})` : ''}. You can view it and download the PDF${isQuote ? '' : andReceipts} below.\n\nThank you!\n${biz}`,
   );
   const [busy, setBusy] = useState(false);
   const preview = buildInvoiceEmail({

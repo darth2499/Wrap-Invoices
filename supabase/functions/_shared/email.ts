@@ -109,7 +109,7 @@ export async function invoiceEmailData(db: any, inv: any, profile: any, fallback
   const [{ data: lines }, { data: pays }, { count }, { data: client }] = await Promise.all([
     db.from("invoice_lines").select("item, description, amount").eq("invoice_id", inv.id).order("position"),
     db.from("payments").select("amount").eq("invoice_id", inv.id),
-    db.from("receipts").select("id", { count: "exact", head: true }).eq("invoice_id", inv.id),
+    db.from("receipts").select("id", { count: "exact", head: true }).eq("invoice_id", inv.id).not("file_key", "is", null),
     inv.client_id ? db.from("clients").select("name").eq("id", inv.client_id).single() : Promise.resolve({ data: null }),
   ]);
   const paid = (pays ?? []).reduce((t: number, p: { amount: number }) => t + Number(p.amount), 0);

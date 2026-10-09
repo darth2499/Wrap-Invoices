@@ -91,7 +91,8 @@ export default function Calendar() {
                   {items.slice(0, 3).map((x, k) => (
                     <span key={k} className={`cal-chip st-${x.st.key}`}>{x.label}</span>
                   ))}
-                  {items.length > 3 && <span className="cal-more">+{items.length - 3}</span>}
+                  {items.length > 3 && <span className="cal-more d-more">+{items.length - 3}</span>}
+                  {items.length > 2 && <span className="cal-more m-more">+{items.length - 2}</span>}
                 </span>
                 <span className="cal-dots">{items.slice(0, 4).map((x, k) => <i key={k} className={`st-${x.st.key}`} />)}</span>
               </button>

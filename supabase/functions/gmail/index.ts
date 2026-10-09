@@ -48,7 +48,9 @@ serve(async (req) => {
       const { data: sp } = ids.length ? await db.from("payments").select("invoice_id, amount").in("invoice_id", ids) : { data: [] as { invoice_id: string; amount: number }[] };
       const paidBy: Record<string, number> = {};
       for (const p of sp ?? []) paidBy[p.invoice_id] = (paidBy[p.invoice_id] ?? 0) + Number(p.amount);
+      const { count: withFiles } = ids.length ? await db.from("receipts").select("id", { count: "exact", head: true }).in("invoice_id", ids).not("file_key", "is", null) : { count: 0 };
       const email = buildStatementEmail({
+        hasReceipts: (withFiles ?? 0) > 0,
         link, clientName: client.name, message: String(body.message ?? ""), accent: profile?.accent ?? "#16161A",
         business: { name: business, email: profile?.business_email || null, phone: profile?.phone || null, website: profile?.website || null },
         invoices: (open ?? []).map((i) => ({ number: i.number, issueDate: i.issue_date, dueDate: i.due_date, due: Number(i.total) - (paidBy[i.id] ?? 0) })).filter((i) => i.due > 0.009),

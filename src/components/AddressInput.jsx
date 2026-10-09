@@ -31,39 +31,57 @@ export async function setBiasFrom(address) {
   } catch { /* no bias */ }
 }
 
-const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\b(street|st|avenue|ave|road|rd|way|drive|dr|boulevard|blvd|lane|ln|court|ct|place|pl)\b/g, '').replace(/\s+/g, ' ').trim();
 
+async function photon(q, signal, extra = '') {
+  const near = bias ? `&lat=${bias.lat}&lon=${bias.lon}&zoom=11&location_bias_scale=0.1` : '';
+  const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=15&lang=en${near}${extra}`, { signal });
+  return r.ok ? (await r.json()).features || [] : [];
+}
+
+/**
+ * Like a maps app: "47 forest" → 47 Forest Ln (American Canyon), 47 Forest View Dr (San Francisco)…
+ * Streets whose name STARTS with what you typed, nearest to your business first, with your house number on them.
+ * Exact matches from the map (house number + street) rank first; full-text matches fill in the rest.
+ */
 async function lookup(q, signal) {
   const key = q.toLowerCase();
   if (cache.has(key)) return cache.get(key);
-  // "1392 grove way": the map data often lacks that exact house number, so we also look up the street
-  // and put your number on it, and rank real number matches first.
   const m = q.match(/^(\d+[a-z]?)\s+(.+)$/i);
   const num = m?.[1];
-  const near = bias ? `&lat=${bias.lat}&lon=${bias.lon}&zoom=9&location_bias_scale=0.5` : '';
-  const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=12&lang=en${near}`, { signal });
-  if (!r.ok) return [];
-  const j = await r.json();
-  const want = norm(m?.[2] || q).split(' ').filter(Boolean);
+  const rest = (m?.[2] || q).trim();
+  const plain = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const words = plain(rest).split(' ').filter(Boolean);
+  const [streets, full] = await Promise.all([
+    num ? photon(rest, signal, '&osm_tag=highway') : Promise.resolve([]),
+    photon(q, signal),
+  ]);
   const seen = new Set();
-  const list = (j.features || []).map((f) => {
-    const x = shape(f);
+  const out = [];
+  const push = (x, score) => {
+    const k = `${x.street}|${x.place}`.toLowerCase();
+    if (!x.place || seen.has(k)) return;
+    seen.add(k);
+    out.push({ ...x, score });
+  };
+  const startsWith = (name) => { const n = plain(name); return words.every((w, i) => (i === words.length - 1 ? n.split(' ').some((t) => t.startsWith(w)) : n.includes(w))) && n.startsWith(words[0] || ''); };
+  for (const f of full) {
     const p = f.properties || {};
-    const streetHit = want.length && want.every((w) => norm(`${p.street || ''} ${p.name || ''} ${p.city || ''}`).includes(w));
-    let score = x.us ? 1 : 0;
-    if (num && p.housenumber === num) score += 6;
-    else if (num && streetHit && (p.osm_value === 'residential' || p.osm_key === 'highway' || !p.housenumber)) {
-      // A street match: use the number you typed.
-      const street = p.street || p.name;
-      Object.assign(x, { name: '', street: x.us ? `${num} ${street}` : `${street} ${num}` });
-      score += 4;
-    } else if (streetHit) score += 2;
-    return { ...x, score };
-  })
-    .filter((x) => (x.street || x.name) && x.place)
-    .sort((a, b) => b.score - a.score)
-    .filter((x) => { const k = `${x.name}|${x.street}|${x.place}`; if (seen.has(k)) return false; seen.add(k); return true; })
-    .slice(0, 5);
+    if (num && p.housenumber === num && p.street && startsWith(p.street)) push(shape(f), 10);
+  }
+  for (const f of streets) {
+    const p = f.properties || {};
+    const name = p.name || p.street;
+    if (!name || !startsWith(name)) continue;
+    const x = shape({ properties: { ...p, street: name, name: undefined, housenumber: num } });
+    push(x, 6 - out.length * 0.01);
+  }
+  if (out.length < 5) {
+    for (const f of full) {
+      const x = shape(f);
+      if ((x.street || x.name) && x.place) push(x, x.us ? 1 : 0);
+    }
+  }
+  const list = out.sort((a, b) => b.score - a.score).slice(0, 5);
   cache.set(key, list);
   return list;
 }

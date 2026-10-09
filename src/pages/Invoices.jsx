@@ -10,9 +10,15 @@ export default function Invoices({ kind }) {
   const { db, derived } = useStore();
   const route = useRoute();
   const isQuote = kind === 'quote';
-  const [filter, setFilter] = useState(route.query.f || (isQuote ? 'open' : 'unpaid'));
+  // The tab and period you picked come back after a refresh (per device).
+  const vkey = `wrap_list_${isQuote ? 'q' : 'i'}`;
+  const [view] = useState(() => { try { return JSON.parse(localStorage.getItem(vkey)) || {}; } catch { return {}; } });
+  const [filter, setFilterState] = useState(route.query.f || view.filter || (isQuote ? 'open' : 'unpaid'));
+  const keep = (patch) => { try { localStorage.setItem(vkey, JSON.stringify({ filter, period, ...patch })); } catch { /* not saved */ } };
+  const setFilter = (v) => { setFilterState(v); keep({ filter: v }); };
   const [q, setQ] = useState('');
-  const [period, setPeriod] = useState('all');
+  const [period, setPeriodState] = useState(view.period || 'all');
+  const setPeriod = (v) => { setPeriodState(v); keep({ period: v }); };
   const today = todayISO();
 
   const rows = useMemo(

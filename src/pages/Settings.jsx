@@ -322,10 +322,33 @@ function TaxRates() {
   );
 }
 
+/** Tap the days to send reminders (after the due date); add any other day. Saves as you tap. */
+function ReminderDays({ value, onChange }) {
+  const [extra, setExtra] = useState('');
+  const days = [...value].sort((a, b) => a - b);
+  const presets = [...new Set([1, 3, 7, 14, 21, 30, 45, 60, ...days])].sort((a, b) => a - b);
+  const toggle = (d) => { const next = days.includes(d) ? days.filter((x) => x !== d) : [...days, d].sort((a, b) => a - b); if (next.length) onChange(next); };
+  const add = () => { const d = parseInt(extra, 10); if (d > 0 && d < 366 && !days.includes(d)) onChange([...days, d].sort((a, b) => a - b)); setExtra(''); };
+  return (
+    <div className="col" style={{ gap: 8 }}>
+      <span className="small" style={{ fontWeight: 500 }}>Days after the due date</span>
+      <div className="row wrap" style={{ gap: 6 }} role="group" aria-label="Reminder days">
+        {presets.map((d) => (
+          <button key={d} type="button" className={`ed-opt ${days.includes(d) ? 'on' : ''}`} aria-pressed={days.includes(d)} onClick={() => toggle(d)}>{d}</button>
+        ))}
+        <span className="row" style={{ gap: 4 }}>
+          <input className="input num" style={{ width: 70, minHeight: 36 }} inputMode="numeric" placeholder="Other" value={extra} onChange={(e) => setExtra(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => e.key === 'Enter' && add()} aria-label="Add another day" />
+          {extra && <Button size="sm" onClick={add}>Add</Button>}
+        </span>
+      </div>
+      <span className="small muted">{days.length ? `Sends ${days.length === 1 ? 'once' : `${days.length} times`}: ${days.map((d) => `${d} day${d === 1 ? '' : 's'}`).join(', ')} after it’s due.` : ''}</span>
+    </div>
+  );
+}
+
 function Email() {
   const s = useStore();
   const p = s.db.profile;
-  const [days, setDays] = useState((p.reminder_days || []).join(', '));
   const [busy, setBusy] = useState(false);
   return (
     <div className="grid-2">
@@ -349,14 +372,8 @@ function Email() {
       <section className="card card-pad col" style={{ gap: 12 }}>
         <h2>Automatic reminders</h2>
         <p className="small muted">For invoices with “Automatic reminders” on, Wrap emails the client this many days after the due date (once each). Runs every morning.</p>
-        <Field label="Days after due date"><input className="input num" value={days} onChange={(e) => setDays(e.target.value)} placeholder="3, 7, 14" /></Field>
+        <ReminderDays value={p.reminder_days || []} onChange={(arr) => s.updateProfile({ reminder_days: arr }).then(() => s.toast('Saved'))} />
         <label className="row between"><span>Turn on for new invoices by default</span><Switch checked={p.auto_remind_default} onChange={(v) => s.updateProfile({ auto_remind_default: v })} label="Default auto-remind" /></label>
-        <Button variant="primary" style={{ alignSelf: 'flex-start' }} onClick={async () => {
-          const arr = [...new Set(days.split(/[,\s]+/).map((x) => parseInt(x, 10)).filter((x) => x > 0 && x < 366))].sort((a, b) => a - b);
-          await s.updateProfile({ reminder_days: arr.length ? arr : [3, 7, 14] });
-          setDays((arr.length ? arr : [3, 7, 14]).join(', '));
-          s.toast('Saved');
-        }}>Save</Button>
         {!p.gmail_email && <span className="small" style={{ color: 'var(--warn)' }}>Connect Gmail first — reminders are sent from it.</span>}
       </section>
     </div>

@@ -189,7 +189,7 @@ export function buildStatementEmail(e) {
     ${invs.length > 12 ? `<tr><td colspan="3" style="padding:10px 0;border-top:1px solid ${C.line2};font-size:13px;color:${C.muted}">+ ${plural(invs.length - 12, 'more invoice')} on the statement</td></tr>` : ''}
   </table>
 </td></tr>`;
-  const html = shell({ business: e.business || {}, preheader: `Statement: ${money(total)} due`, body: messageBlock(e.message) + card, footer: 'Each invoice and its receipts can be opened from the statement.' });
+  const html = shell({ business: e.business || {}, preheader: `Statement: ${money(total)} due`, body: messageBlock(e.message) + card, footer: e.hasReceipts === false ? 'Each invoice can be opened from the statement.' : 'Each invoice and its receipts can be opened from the statement.' });
   const text = [e.message?.trim(), '', `Statement — ${money(total)} due`, ...invs.map((i) => `#${i.number}  ${money(i.due)}${i.dueDate ? `  (due ${shortDate(i.dueDate)})` : ''}`), '', 'View your statement:', e.link, '', `— ${e.business?.name || ''}`].join('\n');
   return { html, text };
 }

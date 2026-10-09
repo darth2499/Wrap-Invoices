@@ -44,7 +44,11 @@ function Receipts({ query }) {
   const table = useTableColumns('wrap_exp_cols', RCOLS, ['vendor', 'date', 'category', 'invoice', 'amount']);
   const [filter, setFilterState] = useState(query.status === 'review' ? 'review' : saved.filter || 'all');
   const [year, setYearState] = useState(saved.year || 'all');
-  const remember = (patch) => { try { localStorage.setItem('wrap_exp_view', JSON.stringify({ filter, year, ...patch })); } catch { /* not saved */ } };
+  const [cat, setCatState] = useState(saved.cat || '');
+  const [range, setRangeState] = useState(saved.range || { from: '', to: '' }); // for "Custom range"
+  const remember = (patch) => { try { localStorage.setItem('wrap_exp_view', JSON.stringify({ filter, year, cat, range, ...patch })); } catch { /* not saved */ } };
+  const setCat = (v) => { setCatState(v); remember({ cat: v }); };
+  const setRange = (v) => { setRangeState(v); remember({ range: v }); };
   const setFilter = (v) => { setFilterState(v); remember({ filter: v }); };
   const setYear = (v) => { setYearState(v); remember({ year: v }); };
   const [q, setQ] = useState('');
@@ -58,10 +62,13 @@ function Receipts({ query }) {
     const t = q.trim().toLowerCase();
     return db.receipts
       .filter((r) => filter === 'all' || (filter === 'review' ? r.status === 'review' : filter === 'unattached' ? !r.invoice_id : !!r.invoice_id))
-      .filter((r) => inPeriod(r.receipt_date, year))
+      .filter((r) => (year === 'custom'
+        ? (!range.from || (r.receipt_date && r.receipt_date >= range.from)) && (!range.to || (r.receipt_date && r.receipt_date <= range.to))
+        : inPeriod(r.receipt_date, year)))
+      .filter((r) => !cat || (cat === '—' ? !r.category : r.category === cat))
       .filter((r) => !t || `${r.vendor} ${r.category} ${r.total} ${r.notes}`.toLowerCase().includes(t))
       .sort((a, b) => (a.status === 'review' ? 0 : 1) - (b.status === 'review' ? 0 : 1) || String(b.receipt_date || b.created_at).localeCompare(String(a.receipt_date || a.created_at)));
-  }, [db.receipts, filter, year, q]);
+  }, [db.receipts, filter, year, q, cat, range]);
   const shownKeys = list.slice(0, 120).map((r) => r.file_key).filter(Boolean);
 
   useEffect(() => {
@@ -161,7 +168,19 @@ function Receipts({ query }) {
       <div className="row wrap between">
         <div className="row wrap">
           <Seg value={filter} onChange={setFilter} label="Filter" options={[{ value: 'all', label: 'All' }, { value: 'review', label: 'To review', count: reviewCount }, { value: 'unattached', label: 'Not on an invoice' }, { value: 'attached', label: 'On an invoice' }]} />
-          <select className="input" style={{ width: 160 }} value={year} onChange={(e) => setYear(e.target.value)} aria-label="Period">{periodOptions(db.receipts.map((r) => r.receipt_date)).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+          <select className="input" style={{ width: 160 }} value={year} onChange={(e) => setYear(e.target.value)} aria-label="Period">{[...periodOptions(db.receipts.map((r) => r.receipt_date)), { value: 'custom', label: 'Custom range…' }].map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+          {year === 'custom' && (
+            <span className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+              <span style={{ width: 150 }}><DateInput value={range.from} onChange={(v) => setRange({ ...range, from: v })} placeholder="From" clearable aria-label="From date" /></span>
+              <span className="muted">–</span>
+              <span style={{ width: 150 }}><DateInput value={range.to} onChange={(v) => setRange({ ...range, to: v })} placeholder="To" clearable align="right" aria-label="To date" /></span>
+            </span>
+          )}
+          <select className="input" style={{ width: 180 }} value={cat} onChange={(e) => setCat(e.target.value)} aria-label="Category">
+            <option value="">All categories</option>
+            {categoryList(db.profile).map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+            <option value="—">Uncategorized</option>
+          </select>
         </div>
         <div className="row wrap">
           {highConf.length > 0 && filter === 'review' && <Button size="sm" icon="check" onClick={async () => { for (const r of highConf) await s.update('receipts', r.id, { status: 'confirmed' }); s.toast(`${highConf.length} confirmed`); }}>Confirm {highConf.length} sure ones</Button>}

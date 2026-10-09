@@ -60,7 +60,8 @@ export default function Taxes() {
     return Number(todayISO().slice(0, 4)) - (Number(todayISO().slice(5, 7)) <= 10 ? 1 : 0);
   });
   const setYear = (v) => { setYearState(v); try { localStorage.setItem('wrap_tax_year', String(v)); } catch { /* not saved */ } };
-  const [tab, setTab] = useState('income');
+  const [tab, setTabState] = useState(() => { try { return localStorage.getItem('wrap_tax_tab') || 'income'; } catch { return 'income'; } });
+  const setTab = (v) => { setTabState(v); try { localStorage.setItem('wrap_tax_tab', v); } catch { /* not saved */ } };
   const [open, setOpen] = useState(() => new Set());
   const prog = useProgress(year);
   const y = String(year);

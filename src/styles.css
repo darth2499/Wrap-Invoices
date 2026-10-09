@@ -148,10 +148,13 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px 6px; gap: 10px; }
 .modal-body { padding: 12px 20px 20px; display: flex; flex-direction: column; gap: 14px; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--line-2); flex-wrap: wrap; }
-.toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 200; display: flex; flex-direction: column; gap: 8px; align-items: center; width: min(92vw, 460px); }
-.toast { background: var(--primary); color: var(--on-primary); padding: 11px 14px; border-radius: 12px; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.2); display: flex; gap: 12px; align-items: center; width: 100%; }
-.toast.err { background: #7a1c14; }
-.toast button { background: none; border: 0; color: #c9d1ff; font-weight: 600; cursor: pointer; padding: 0; }
+.toasts { position: fixed; top: 16px; right: 16px; z-index: 200; display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: min(calc(100vw - 32px), 380px); pointer-events: none; }
+.toast { pointer-events: auto; background: var(--surface); color: var(--ink); border: 1px solid var(--line); padding: 12px 10px 12px 14px; border-radius: 12px; font-size: 13.5px; box-shadow: 0 10px 30px rgba(0,0,0,.14); display: flex; gap: 10px; align-items: center; width: 100%; animation: toast-in .22s ease; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } }
+.toast.err { border-color: var(--bad); color: var(--bad); }
+.toast .toast-act { background: none; border: 0; color: var(--accent-ink); font: inherit; font-weight: 600; cursor: pointer; padding: 0 4px; }
+.toast .toast-x { background: none; border: 0; color: var(--muted); cursor: pointer; width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; flex: none; }
+.toast .toast-x:hover { background: var(--hover); color: var(--ink); }
 .banner { padding: 12px 14px; border-radius: 12px; font-size: 13px; line-height: 1.5; display: flex; gap: 10px; align-items: flex-start; }
 .banner.info { background: var(--accent-bg); color: var(--accent-ink); }
 .banner.warn { background: var(--warn-bg); color: var(--warn); }
@@ -394,9 +397,14 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
 @media (max-width: 700px) {
   .scal { padding: 6px; }
   .scal-grid { gap: 2px; }
-  .cal-cell { min-height: 52px; align-items: center; padding: 4px 2px; }
-  .cal-chips { display: none; }
-  .cal-dots { display: flex; gap: 3px; flex-wrap: wrap; justify-content: center; }
+  /* Phones: tiny labels instead of dots, so you can see what was on each day without tapping */
+  .cal-cell { min-height: 74px; padding: 3px 2px; gap: 2px; }
+  .cal-cell .cal-num { width: 20px; height: 20px; font-size: 11px; align-self: center; }
+  .cal-chips { gap: 2px; }
+  .cal-chip { font-size: 9.5px; line-height: 1.15; padding: 2px 3px; border-radius: 4px; white-space: normal; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: normal; overflow-wrap: anywhere; hyphens: auto; }
+  .cal-chip:nth-child(n+3) { display: none; }
+  .cal-more { font-size: 9px; padding-left: 2px; }
+  .cal-dots { display: none !important; }
   .cal-dots i { width: 6px; height: 6px; border-radius: 50%; }
   .cal-dots .st-sent { background: var(--accent); } .cal-dots .st-paid, .cal-dots .st-accepted { background: var(--good); }
   .cal-dots .st-overdue { background: var(--bad); } .cal-dots .st-partial { background: var(--warn); } .cal-dots .st-draft { background: var(--faint); }
@@ -440,7 +448,7 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
 :root[data-theme='dark'] .st-draft, :root[data-theme='dark'] .st-ready { background: var(--chip-neutral); color: var(--ink-2); }
 :root[data-theme='dark'] .pill.overdue, :root[data-theme='dark'] .st-overdue { color: var(--bad); }
 :root[data-theme='dark'] .switch { background: #4a4b55; }
-:root[data-theme='dark'] .toast.err { background: #8c2a20; color: #fff; }
+
 :root[data-theme='dark'] .scrim { background: rgba(0,0,0,.5); }
 :root[data-theme='dark'] img.thumb, :root[data-theme='dark'] .thumb { background: var(--sunken); }
 :root[data-theme='dark'] .doc { border-color: transparent; }
@@ -687,3 +695,18 @@ html.vt-wipe::view-transition-old(wrap-orb) { display: none; }
 button.count-badge { border: 0; cursor: pointer; font: inherit; }
 .addr-busy { position: absolute; right: 10px; top: 12px; width: 14px; height: 14px; }
 @media (max-width: 600px) { .ov-actions { flex-wrap: nowrap; gap: 6px; width: 100%; } .ov-actions .btn { flex: 1 1 0 !important; min-height: 38px; padding: 0 8px; font-size: 13px; gap: 5px; white-space: nowrap; } .ov-actions .btn svg { width: 15px; height: 15px; } }
+@media (max-width: 800px) { .toasts { top: calc(10px + env(safe-area-inset-top)); right: 10px; width: calc(100vw - 20px); } }
+:root[data-theme='dark'] .toast { box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+.m-more { display: none; }
+@media (max-width: 800px) { .d-more { display: none; } .m-more { display: inline; } }
+/* Taxes on phones: amounts always show in full (names give way instead) */
+.copy-cell.num .copy-val, .tax-sum .copy-val, .tax-cat-total .copy-val { overflow: visible; text-overflow: clip; }
+@media (max-width: 700px) {
+  .tax-sum { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tax-sum > div:last-child { grid-column: 1 / -1; }
+  .tax-sum .copy-cell { font-size: 17px; padding-right: 4px; }
+  .tax-sum .copy-cell svg, .tax-row .copy-cell.num svg { display: none; }
+  .tax-row .copy-cell { font-size: 14px; padding: 0 6px; gap: 4px; }
+  .tax-cat-head { gap: 6px; }
+  .tax-cat-total { font-size: 14px; flex: none; }
+}

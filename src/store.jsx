@@ -30,7 +30,7 @@ export function StoreProvider({ user, children }) {
   const toast = useCallback((text, opts = {}) => {
     const id = Math.random().toString(36).slice(2);
     setToasts((t) => [...t, { id, text, ...opts }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), opts.ms || (opts.action ? 8000 : 3500));
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), opts.ms || (opts.action ? 7000 : 4000));
   }, []);
 
   /** Shows a confirm dialog; resolves true/false. */
@@ -139,8 +139,11 @@ export function StoreProvider({ user, children }) {
           <div key={t.id} className={`toast ${t.error ? 'err' : ''}`}>
             <span className="grow">{t.text}</span>
             {t.action && (
-              <button onClick={() => { t.action.run(); setToasts((x) => x.filter((y) => y.id !== t.id)); }}>{t.action.label}</button>
+              <button className="toast-act" onClick={() => { t.action.run(); setToasts((x) => x.filter((y) => y.id !== t.id)); }}>{t.action.label}</button>
             )}
+            <button className="toast-x" aria-label="Dismiss" onClick={() => setToasts((x) => x.filter((y) => y.id !== t.id))}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+            </button>
           </div>
         ))}
       </div>

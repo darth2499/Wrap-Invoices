@@ -42,7 +42,8 @@ serve(async (req) => {
 
       const business = profile.business_name || tok.email;
       const first = String(client.contact_first || "").trim() || (client.name || "").split(" ")[0] || "there";
-      const message = `Hi ${first},\n\nJust a friendly reminder that invoice #${inv.number} for ${money(due)} is now ${overdue} day${overdue === 1 ? "" : "s"} past due. The details are below, and you can download the PDF and receipts from the link.\n\nThank you!\n${business}`;
+      const { count: receipts } = await db.from("receipts").select("id", { count: "exact", head: true }).eq("invoice_id", inv.id).not("file_key", "is", null);
+      const message = `Hi ${first},\n\nJust a friendly reminder that invoice #${inv.number} for ${money(due)} is now ${overdue} day${overdue === 1 ? "" : "s"} past due. The details are below, and you can download the PDF${receipts ? " and receipts" : ""} from the link.\n\nThank you!\n${business}`;
       const email = buildInvoiceEmail({
         ...(await invoiceEmailData(db, inv, profile, business)),
         link: shareLink(appUrl(), inv.share_token), message, isReminder: true,

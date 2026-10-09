@@ -226,7 +226,7 @@ function StatementEmail({ client, owed, onClose }) {
   const first = greetName(client);
   const [to, setTo] = useState(client.email || '');
   const [subject, setSubject] = useState(`Statement from ${p.business_name || 'me'}`);
-  const [message, setMessage] = useState(`Hi ${first},\n\nHere’s a statement of the open invoices — ${money(owed)} in total. Each invoice and its receipts can be opened from the link.\n\nThank you!\n${p.business_name || ''}`);
+  const [message, setMessage] = useState(`Hi ${first},\n\nHere’s a statement of the open invoices — ${money(owed)} in total. Each invoice${s.db.receipts.some((r) => r.file_key && s.db.invoices.some((i) => i.id === r.invoice_id && i.client_id === client.id && i.status === 'sent')) ? ' and its receipts' : ''} can be opened from the link.\n\nThank you!\n${p.business_name || ''}`);
   const [busy, setBusy] = useState(false);
   const open = s.db.invoices
     .filter((i) => i.client_id === client.id && i.kind === 'invoice' && i.status === 'sent')

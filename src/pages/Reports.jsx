@@ -9,10 +9,12 @@ import { statusOf } from '../lib/calc.js';
 import { money, fmtDate, fmtLong, num, todayISO, daysBetween, round2 } from '../lib/format.js';
 import { toCSV, downloadBlob, receiptFileName, extFor } from '../lib/files.js';
 import { go } from '../router.js';
+import { shootDays } from '../lib/shoots.js';
 
 const TABS = [
   { value: 'overview', label: 'Profit & loss' },
   { value: 'unpaid', label: 'Unpaid' },
+  { value: 'clients', label: 'Clients vs last year' },
   { value: 'quarterly', label: 'Quarterly taxes' },
   { value: '1099', label: '1099s' },
   { value: 'export', label: 'Tax export' },
@@ -49,7 +51,8 @@ function useYearData(year) {
 export default function Reports({ tab }) {
   const { db } = useStore();
   const thisYear = Number(todayISO().slice(0, 4));
-  const [year, setYear] = useState(thisYear);
+  const [year, setYearState] = useState(() => { try { return Number(localStorage.getItem('wrap_rep_year')) || thisYear; } catch { return thisYear; } });
+  const setYear = (v) => { setYearState(v); try { localStorage.setItem('wrap_rep_year', String(v)); } catch { /* not saved */ } };
   const years = [...new Set([thisYear, ...db.invoices.map((i) => Number(i.issue_date?.slice(0, 4))), ...db.receipts.map((r) => Number(r.receipt_date?.slice(0, 4)))].filter(Boolean))].sort((a, b) => b - a);
   return (
     <div className="page">
@@ -60,6 +63,7 @@ export default function Reports({ tab }) {
       <Seg value={tab} onChange={(t) => go(`/reports/${t}`)} options={TABS} label="Report" />
       {tab === 'overview' && <ProfitLoss year={year} />}
       {tab === 'unpaid' && <Unpaid />}
+      {tab === 'clients' && <ClientsYoY year={year} />}
       {tab === 'quarterly' && <Quarterly year={year} />}
       {tab === '1099' && <Ten99 year={year} />}
       {tab === 'export' && <TaxExport year={year} />}
@@ -69,7 +73,8 @@ export default function Reports({ tab }) {
 
 function ProfitLoss({ year }) {
   const d = useYearData(year);
-  const [basis, setBasis] = useState('cash');
+  const [basis, setBasisState] = useState(() => { try { return localStorage.getItem('wrap_pl_basis') || 'cash'; } catch { return 'cash'; } });
+  const setBasis = (v) => { setBasisState(v); try { localStorage.setItem('wrap_pl_basis', v); } catch { /* not saved */ } };
   const inc = basis === 'cash' ? d.incCash : d.incAccrual;
   const income = inc.reduce((a, b) => a + b, 0);
   const expenses = Object.values(d.byCat).reduce((a, b) => a + b, 0);
@@ -338,3 +343,61 @@ function TaxExport({ year }) {
   );
 }
 
+
+/**
+ * Each client this year vs last year: what you billed and how many days you worked for them.
+ * For the current year it compares to the same point last year (Jan 1 → today's date), so it's fair mid-year.
+ */
+function ClientsYoY({ year }) {
+  const { db, derived } = useStore();
+  const today = todayISO();
+  const partial = String(year) === today.slice(0, 4);
+  const cutoff = today.slice(5); // MM-DD
+  const rows = useMemo(() => {
+    const billed = db.invoices.filter((i) => i.kind === 'invoice' && !['draft', 'void'].includes(i.status) && i.issue_date);
+    const inYear = (d, y) => d.startsWith(String(y)) && (!partial || d.slice(5) <= cutoff);
+    const days = {};
+    for (const sd of shootDays(billed, derived.linesFor)) {
+      const inv = derived.invoices[sd.invoiceId];
+      (days[`${inv.client_id}|${sd.date.slice(0, 4)}`] ||= new Set()).add(sd.date);
+    }
+    const by = {};
+    for (const i of billed) {
+      for (const [y, k] of [[year, 'now'], [year - 1, 'before']]) {
+        if (!inYear(i.issue_date, y)) continue;
+        const c = (by[i.client_id || 'none'] ||= { id: i.client_id, name: derived.clients[i.client_id]?.name || 'No client', now: 0, before: 0 });
+        c[k] += num(i.total);
+      }
+    }
+    return Object.values(by).map((c) => {
+      const count = (y) => [...(days[`${c.id}|${y}`] || [])].filter((d) => !partial || d.slice(5) <= cutoff).length;
+      return { ...c, daysNow: count(year), daysBefore: count(year - 1), diff: c.now - c.before };
+    }).sort((a, b) => b.now + b.before - (a.now + a.before));
+  }, [db.invoices, derived, year, partial, cutoff]);
+  const hasBoth = rows.some((r) => r.now > 0) && rows.some((r) => r.before > 0);
+  if (!hasBoth) return <section className="card"><Empty icon="clients" title={`Shows once you have invoices in both ${year - 1} and ${year}`} /></section>;
+  const tot = rows.reduce((t, r) => ({ now: t.now + r.now, before: t.before + r.before }), { now: 0, before: 0 });
+  const pct = (a, b) => (b > 0 ? `${a >= b ? '+' : '−'}${Math.abs(Math.round(((a - b) / b) * 100))}%` : a > 0 ? 'New' : '');
+  const until = new Date(`${today}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return (
+    <section className="card">
+      <div className="table-wrap">
+        <table className="table">
+          <thead><tr><th>Client</th><th className="right">{year - 1}{partial ? ` (to ${until})` : ''}</th><th className="right">{year}{partial ? ' so far' : ''}</th><th className="right">Change</th><th className="right">Days worked</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id || 'none'} className="click" onClick={() => r.id && go(`/clients/${r.id}`)}>
+                <td style={{ fontWeight: 500 }}>{r.name}</td>
+                <td className="right num muted">{money(r.before, { cents: false })}</td>
+                <td className="right num">{money(r.now, { cents: false })}</td>
+                <td className="right num" style={{ color: r.diff > 0 ? 'var(--good)' : r.diff < 0 ? 'var(--bad)' : 'var(--muted)' }}>{r.diff === 0 ? '—' : `${r.diff > 0 ? '+' : '−'}${money(Math.abs(r.diff), { cents: false })}`} <span className="small">{pct(r.now, r.before)}</span></td>
+                <td className="right num">{r.daysBefore || r.daysNow ? <>{r.daysBefore} → <b>{r.daysNow}</b></> : <span className="muted">—</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot><tr><td style={{ fontWeight: 600, borderTop: '1px solid var(--line)' }}>All clients</td><td className="right num" style={{ borderTop: '1px solid var(--line)' }}>{money(tot.before, { cents: false })}</td><td className="right num" style={{ fontWeight: 600, borderTop: '1px solid var(--line)' }}>{money(tot.now, { cents: false })}</td><td className="right num" style={{ borderTop: '1px solid var(--line)', color: tot.now >= tot.before ? 'var(--good)' : 'var(--bad)' }}>{pct(tot.now, tot.before)}</td><td style={{ borderTop: '1px solid var(--line)' }} /></tr></tfoot>
+        </table>
+      </div>
+    </section>
+  );
+}
