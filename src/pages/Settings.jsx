@@ -629,9 +629,11 @@ function ImportModal({ imp, onClose }) {
         s.toast(`${r.created} clients added${r.existing ? `, ${r.existing} already existed${r.updated ? ` (${r.updated} filled in)` : ''}` : ''}`);
       } else {
         const parts = [];
+        let action = null;
         if (!wave || withInvoices) {
-          const { created, filled, skipped } = await importInvoices(wave ? w.invoices : preview, { db: s.db, api: s.api, onStep: setStep, fill: imp.type === 'pdfs' });
-          parts.push(`${created} invoices imported`);
+          const { created, filled, skipped, ids } = await importInvoices(wave ? w.invoices : preview, { db: s.db, api: s.api, onStep: setStep, fill: imp.type === 'pdfs' });
+          parts.push(`${created} invoice${created === 1 ? '' : 's'} imported`);
+          if (ids.length) action = ids.length === 1 ? { label: 'View invoice', run: () => go(`/invoices/${ids[0]}`) } : { label: 'View invoices', run: () => go('/invoices') };
           if (filled) parts.push(`${filled} existing invoices filled in with line details`);
           if (skipped.length) parts.push(`${skipped.length} skipped: ${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? '…' : ''}`);
         }
@@ -639,7 +641,7 @@ function ImportModal({ imp, onClose }) {
           const { created, skipped } = await importExpenses(w.expenses, { db: s.db, api: s.api, onStep: setStep });
           parts.push(`${created} expenses added${skipped ? ` (${skipped} already there)` : ''}`);
         }
-        s.toast(parts.join(' · '), { ms: 9000 });
+        s.toast(parts.join(' · '), { ms: 12000, action });
       }
       await s.load();
       onClose();

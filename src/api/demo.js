@@ -283,7 +283,7 @@ export const api = {
       }
       state.invoice_lines = state.invoice_lines.filter((l) => l.invoice_id !== id);
       (lines || []).forEach((l, i) =>
-        state.invoice_lines.push({ id: uid(), owner_id: DEMO_UID, invoice_id: id, position: i, kind: l.kind || 'labor', item: l.item || '', description: l.description || null, note: l.note || null, qty: num(l.qty), rate: num(l.rate), amount: num(l.amount), tax_rate: num(l.tax_rate), day_type: l.day_type || null, receipt_id: l.receipt_id || null, dates: Array.isArray(l.dates) && l.dates.length ? l.dates : null }),
+        state.invoice_lines.push({ id: uid(), owner_id: DEMO_UID, invoice_id: id, position: i, kind: l.kind || 'labor', item: l.item || '', description: l.description || null, note: l.note || null, qty: num(l.qty), rate: num(l.rate), amount: num(l.amount), tax_rate: num(l.tax_rate), day_type: l.day_type || null, receipt_id: l.receipt_id || null, dates: Array.isArray(l.dates) && l.dates.length ? l.dates : null, extras: l.extras && typeof l.extras === 'object' && !Array.isArray(l.extras) ? l.extras : null }),
       );
       refreshStatus(id);
       save();

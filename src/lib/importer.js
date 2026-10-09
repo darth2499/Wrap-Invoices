@@ -158,11 +158,12 @@ export async function importInvoices(list, { db, api, onStep = () => {}, fill = 
   let created = 0;
   let filled = 0;
   const skipped = [];
+  const ids = []; // every invoice added or filled in, so the app can offer "View invoice"
   for (const [i, inv] of list.entries()) {
     onStep(`Importing ${i + 1} / ${list.length}`);
     if (existingNumbers.has(String(inv.number))) {
       const m = fill ? pdfMatch(inv, db) : { action: 'skip', reason: 'number already used' };
-      if (m.action === 'fill') { await fillInvoice(m, inv, { db, api }); filled++; } else skipped.push(`#${inv.number} (${m.reason})`);
+      if (m.action === 'fill') { await fillInvoice(m, inv, { db, api }); filled++; ids.push(m.ex.id); } else skipped.push(`#${inv.number} (${m.reason})`);
       continue;
     }
     let client = clientsByName.get(norm(inv.client));
@@ -180,22 +181,25 @@ export async function importInvoices(list, { db, api, onStep = () => {}, fill = 
       summary: null,
     });
     const total = t.total;
-    await api.update('invoices', id, { status: 'sent', sent_at: new Date(inv.date + 'T12:00:00').toISOString() });
     let pays = inv.payments?.length ? inv.payments : [];
     if (!pays.length) {
       const paid = round2(total - num(inv.amountDue));
       if (paid > 0) pays = [{ date: inv.amountDue > 0 ? inv.date : inv.due, amount: paid, method: null }];
     }
+    // A single PDF with nothing paid yet comes in as a draft to check and send from Wrap.
+    // History (Wave exports, or PDFs already paid) comes in as sent, since the client already has it.
+    if (!(fill && !pays.length)) await api.update('invoices', id, { status: 'sent', sent_at: new Date(inv.date + 'T12:00:00').toISOString() });
     if (pays.length) {
       await api.insert('payments', pays.map((p) => ({ invoice_id: id, paid_on: toDate(p.date) || inv.due, amount: round2(p.amount), method: p.method || null })));
     }
     existingNumbers.add(String(inv.number));
+    ids.push(id);
     created++;
   }
   // Keep the "next invoice #" counter ahead of anything imported.
   const maxNum = Math.max(0, ...[...existingNumbers].filter((n) => /^\d+$/.test(String(n))).map(Number));
   if (maxNum >= (db.profile.next_invoice_number || 1)) await api.updateProfile({ next_invoice_number: maxNum + 1 });
-  return { created, filled, skipped };
+  return { created, filled, skipped, ids };
 }
 
 /** Puts a PDF's line details onto an invoice that came in from the Wave CSV. Payments and status stay as they are. */

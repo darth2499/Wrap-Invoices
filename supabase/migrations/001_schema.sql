@@ -634,6 +634,7 @@ create trigger events_trim after insert on public.invoice_events for each row ex
 
 -- Shoot dates picked on each invoice line (shown on the Calendar), and history that doesn't pile up.
 alter table public.invoice_lines add column if not exists dates jsonb;
+alter table public.invoice_lines add column if not exists extras jsonb;
 
 create or replace function public.save_invoice(inv jsonb, lines jsonb, summary text default null)
 returns uuid
@@ -704,11 +705,12 @@ begin
 
   delete from public.invoice_lines where invoice_id = v_id;
   for l in select * from jsonb_array_elements(coalesce(lines, '[]'::jsonb)) loop
-    insert into public.invoice_lines (invoice_id, position, kind, item, description, note, qty, rate, amount, tax_rate, day_type, receipt_id, dates)
+    insert into public.invoice_lines (invoice_id, position, kind, item, description, note, qty, rate, amount, tax_rate, day_type, receipt_id, dates, extras)
     values (v_id, pos, coalesce(l->>'kind','labor'), coalesce(l->>'item',''), l->>'description', l->>'note',
       coalesce((l->>'qty')::numeric, 1), coalesce((l->>'rate')::numeric, 0), coalesce((l->>'amount')::numeric, 0),
       coalesce((l->>'tax_rate')::numeric, 0), l->>'day_type', nullif(l->>'receipt_id','')::uuid,
-      case when jsonb_typeof(l->'dates') = 'array' then l->'dates' else null end);
+      case when jsonb_typeof(l->'dates') = 'array' then l->'dates' else null end,
+      case when jsonb_typeof(l->'extras') = 'object' then l->'extras' else null end);
     pos := pos + 1;
   end loop;
 

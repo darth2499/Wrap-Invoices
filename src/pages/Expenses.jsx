@@ -108,7 +108,7 @@ function Receipts({ query }) {
     <>
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
         <button className="card phone-only" style={{ padding: 22, alignItems: 'center', gap: 14, cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit' }} onClick={() => cameraRef.current?.click()} disabled={busy}>
-          <span style={{ width: 46, height: 46, borderRadius: 12, background: 'var(--ink)', color: '#fff', display: 'grid', placeItems: 'center' }}><Icon name="camera" size={22} /></span>
+          <span style={{ width: 46, height: 46, borderRadius: 12, background: 'var(--primary)', color: 'var(--on-primary)', display: 'grid', placeItems: 'center' }}><Icon name="camera" size={22} /></span>
           <span className="col" style={{ gap: 2 }}><strong>Scan a receipt</strong><span className="small muted">Opens your camera. Auto-crops and sharpens.</span></span>
         </button>
         <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />

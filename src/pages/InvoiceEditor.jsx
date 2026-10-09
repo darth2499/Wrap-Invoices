@@ -18,7 +18,38 @@ const TERMS = [
   { label: 'Net 60', days: 60 },
 ];
 
-const blankLine = (extra = {}) => ({ key: uid(), kind: 'labor', item: '', description: '', note: '', dates: [], qty: 1, rate: 0, base_rate: 0, tax_rate: 0, day_type: null, receipt_id: null, ...extra });
+const blankLine = (extra = {}) => ({ key: uid(), kind: 'labor', item: '', description: '', note: '', dates: [], qty: 1, rate: 0, base_rate: 0, tax_rate: 0, day_type: null, receipt_id: null, addons: [], ...extra });
+
+/* Add-ons ride on a line (travel, per diem, hotel…) and roll into its total. */
+const addonSum = (l) => (l.addons || []).reduce((t, a) => t + lineAmount(a.qty, a.rate), 0);
+const lineTotal = (l) => round2(lineAmount(l.qty, l.rate) + addonSum(l));
+const shortMoney = (n) => `$${num(n).toLocaleString('en-US', { minimumFractionDigits: num(n) % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
+/**
+ * What the client sees for a line with add-ons: one line, one total, the breakdown in the description —
+ *   Google (10/05)
+ *   Travel ($375 x2)
+ *   Hotel ($500.55)
+ * The pieces are kept in `extras` so the line opens back up for editing.
+ */
+function compileLine(l) {
+  if (!l.addons?.length) return { ...l, amount: lineAmount(l.qty, l.rate), extras: null };
+  const total = lineTotal(l);
+  const desc = [
+    l.description || '',
+    num(l.qty) !== 1 ? `${l.item || 'Base'} (${shortMoney(l.rate)} x${num(l.qty)})` : '',
+    ...l.addons.map((a) => `${a.label || 'Other'} (${shortMoney(a.rate)}${num(a.qty) !== 1 ? ` x${num(a.qty)}` : ''})`),
+  ].filter(Boolean).join('\n');
+  return {
+    ...l, description: desc, qty: 1, rate: total, amount: total,
+    extras: { desc: l.description || '', qty: num(l.qty), rate: num(l.rate), base_rate: num(l.base_rate) || num(l.rate), items: l.addons.map(({ label, qty, rate }) => ({ label: label || '', qty: num(qty), rate: num(rate) })) },
+  };
+}
+/** A saved line back into its editable pieces. */
+function openLine(l) {
+  const x = l.extras;
+  if (!x || !Array.isArray(x.items)) return {};
+  return { description: x.desc || '', qty: num(x.qty) || 1, rate: num(x.rate), base_rate: num(x.base_rate) || num(x.rate), addons: x.items.map((a) => ({ id: uid(), label: a.label, qty: num(a.qty) || 1, rate: num(a.rate) })) };
+}
 const blankJob = (rate = 750, role = 'Camera Operator') => ({ id: uid(), company: '', role, rate, days: [], gear: [], expenses: [] });
 
 export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, clientId }) {
@@ -48,9 +79,8 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
     return base;
   });
   const [lines, setLines] = useState(() => {
-    if (!source) return [blankLine()];
-    const ls = derived.linesFor(source.id).map((l) => ({ ...blankLine(), ...l, key: uid(), base_rate: round2(num(l.rate) / dayTypeMult(l.day_type)), receipt_id: existing ? l.receipt_id : null }));
-    return ls.length ? ls : [blankLine()];
+    if (!source) return [];
+    return derived.linesFor(source.id).map((l) => ({ ...blankLine(), ...l, key: uid(), base_rate: round2(num(l.rate) / dayTypeMult(l.day_type)), receipt_id: existing ? l.receipt_id : null, ...openLine(l) }));
   });
   const [jobs, setJobs] = useState(() => {
     if (source?.jobs?.jobs) {
@@ -91,7 +121,7 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
 
   const finalLines = useMemo(() => {
     if (form.mode === 'advanced') return compileJobs(jobs, rule, db.day_types).map((l) => ({ ...l, tax_rate: 0 }));
-    return lines.filter((l) => l.item || l.description || num(l.rate)).map((l) => ({ ...l, amount: lineAmount(l.qty, l.rate) }));
+    return lines.filter((l) => l.item || l.description || num(l.rate) || l.addons?.length).map(compileLine);
   }, [form.mode, jobs, lines, rule, db.day_types]);
   const t = totals(finalLines, form.discount_type, form.discount_value);
 
@@ -118,12 +148,12 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
     if (mode === 'basic') {
       const compiled = compileJobs(jobs, rule, db.day_types);
       if (compiled.length && !(await s.confirm({ title: 'Switch to Basic?', body: 'Your jobs become regular lines you can edit one by one. The day picker and overtime calculator won’t be available for these lines anymore.', ok: 'Switch' }))) return;
-      setLines(compiled.length ? compiled.map((l) => blankLine({ ...l, base_rate: l.rate })) : [blankLine()]);
+      setLines(compiled.map((l) => blankLine({ ...l, base_rate: l.rate })));
     } else {
-      const real = lines.filter((l) => l.item || num(l.rate));
+      const real = lines.filter((l) => l.item || num(l.rate)).map(compileLine);
       if (real.length) {
         if (!(await s.confirm({ title: 'Switch to Advanced?', body: 'Your current lines will be kept under “Other items”. Add jobs to use the day picker and automatic overtime.', ok: 'Switch' }))) return;
-        setJobs((j) => ({ jobs: j.jobs.length ? j.jobs : [blankJob(defaultRate(db), defaultRole(db))], other: [...j.other, ...real.map((l) => ({ id: uid(), item: l.item, note: [l.description, num(l.qty) !== 1 ? `${l.qty} × ${money(l.rate)}` : ''].filter(Boolean).join(' · '), amount: lineAmount(l.qty, l.rate), receipt_id: l.receipt_id, kind: l.kind }))] }));
+        setJobs((j) => ({ jobs: j.jobs.length ? j.jobs : [blankJob(defaultRate(db), defaultRole(db))], other: [...j.other, ...real.map((l) => ({ id: uid(), item: l.item, note: [l.description, num(l.qty) !== 1 ? `${l.qty} × ${money(l.rate)}` : ''].filter(Boolean).join(' · '), amount: l.amount, receipt_id: l.receipt_id, kind: l.kind }))] }));
       }
     }
     set({ mode });
@@ -142,7 +172,7 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
       const { status, ...inv } = form;
       inv.number = form.number.trim();
       inv.jobs = form.mode === 'advanced' ? jobs : null;
-      const lineRows = finalLines.map(({ key, base_rate, showNote, id: _id, owner_id, invoice_id, position, ...l }) => l);
+      const lineRows = finalLines.map(({ key, base_rate, showNote, addons, focus, id: _id, owner_id, invoice_id, position, ...l }) => l);
       const savedId = await saveInvoice(s, inv, lineRows, existing && existing.status !== 'draft' ? summary || null : null);
       // Receipts: billed lines + backup attachments
       const billed = new Set(lineRows.map((l) => l.receipt_id).filter(Boolean));
@@ -397,7 +427,7 @@ function BasicLines({ lines, setLines, db, issueDate }) {
     [c[i], c[j]] = [c[j], c[i]];
     return c;
   });
-  const cols = `minmax(130px,1fr) minmax(170px,1.7fr) 64px 96px ${hasTax ? '86px ' : ''}92px 60px`;
+  const cols = `minmax(140px,1.2fr) minmax(170px,1.6fr) 64px 96px ${hasTax ? '86px ' : ''}92px 60px`;
   // Drag the grip to reorder lines (mouse or finger): the line follows the pointer over the others.
   const [dragKey, setDragKey] = useState(null);
   const startDrag = (key, e) => {
@@ -423,29 +453,113 @@ function BasicLines({ lines, setLines, db, issueDate }) {
     window.addEventListener('pointercancel', onUp);
   };
 
-  const addCatalog = (c) => setLines((ls) => [...ls.filter((l) => l.item || num(l.rate) || l.description), blankLine({ kind: c.kind, item: c.name, description: c.description || '', rate: num(c.rate), base_rate: num(c.rate), day_type: c.unit === 'day' && c.kind === 'labor' ? 'Full day' : null })]);
+  // Everything you can add: saved items first, then anything you've billed before (newest price wins).
+  const choices = useMemo(() => {
+    const seen = new Set(catalog.map((c) => c.name.toLowerCase()));
+    const out = catalog.map((c) => ({ key: `c:${c.id}`, name: c.name, sub: c.description || '', rate: num(c.rate), unit: c.unit, kind: c.kind, day: c.unit === 'day' && c.kind === 'labor', desc: c.description || '' }));
+    const when = Object.fromEntries(db.invoices.map((i) => [i.id, i.issue_date || '']));
+    const past = [...db.invoice_lines].filter((l) => l.item).sort((a, b) => String(when[b.invoice_id]).localeCompare(String(when[a.invoice_id])));
+    for (const l of past) {
+      const k = l.item.trim().toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const base = l.extras ? num(l.extras.rate) : num(l.rate) / (num(db.day_types.find((d) => d.name === l.day_type)?.multiplier) || 1);
+      out.push({ key: `p:${k}`, name: l.item.trim(), sub: String((l.extras ? l.extras.desc : l.description) || '').split('\n')[0], rate: round2(base), kind: l.kind, day: !!l.day_type, desc: '', past: true });
+    }
+    return out;
+  }, [catalog, db.invoice_lines, db.invoices, db.day_types]);
+  // Last price used for each add-on (e.g. Per Diem), so the next one starts there.
+  const addonRates = useMemo(() => {
+    const r = {};
+    const when = Object.fromEntries(db.invoices.map((i) => [i.id, i.issue_date || '']));
+    [...db.invoice_lines].filter((l) => l.extras?.items).sort((a, b) => String(when[a.invoice_id]).localeCompare(String(when[b.invoice_id])))
+      .forEach((l) => l.extras.items.forEach((a) => { if (a.label) r[a.label.toLowerCase()] = num(a.rate); }));
+    return r;
+  }, [db.invoice_lines, db.invoices]);
+  const addChoice = (c) => setLines((ls) => [...ls.filter((l) => l.item || num(l.rate) || l.description || l.addons?.length), blankLine({ kind: c.kind || 'labor', item: c.name, description: c.desc || '', rate: c.rate || 0, base_rate: c.rate || 0, day_type: c.day ? 'Full day' : null, focus: true })]);
 
   return (
     <>
       <div className="table-wrap">
         <div className="lines basic-lines" style={{ padding: '0 20px' }}>
-          <div className="line-head" style={{ gridTemplateColumns: cols }}>
+          {lines.length > 0 && <div className="line-head" style={{ gridTemplateColumns: cols }}>
             <span>Item</span><span>Description</span><span>Qty</span><span>Price</span>{hasTax && <span>Tax</span>}<span className="right">Amount</span><span />
-          </div>
+          </div>}
           {lines.map((l) => (
-            <BasicLine key={l.key} l={l} issueDate={issueDate} cols={cols} dragging={dragKey === l.key} onGrip={(e) => startDrag(l.key, e)} catalog={catalog} db={db} hasTax={hasTax} upd={upd} move={move} remove={() => setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== l.key) : [blankLine()]))} dup={() => setLines((ls) => { const i = ls.findIndex((x) => x.key === l.key); const c = [...ls]; c.splice(i + 1, 0, { ...l, key: uid(), receipt_id: null }); return c; })} />
+            <BasicLine key={l.key} l={l} issueDate={issueDate} cols={cols} dragging={dragKey === l.key} onGrip={(e) => startDrag(l.key, e)} catalog={catalog} db={db} hasTax={hasTax} addonRates={addonRates} upd={upd} move={move} remove={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} dup={() => setLines((ls) => { const i = ls.findIndex((x) => x.key === l.key); const c = [...ls]; c.splice(i + 1, 0, { ...l, key: uid(), receipt_id: null }); return c; })} />
           ))}
         </div>
       </div>
-      <div className="row wrap" style={{ padding: '12px 20px 18px' }}>
-        <Button size="sm" icon="plus" onClick={() => setLines((ls) => [...ls, blankLine()])}>Add line</Button>
-        {catalog.length > 0 && <Menu label="Saved items" icon="plus" variant="sm ghost" align="left" items={catalog.map((c) => ({ label: `${c.name} · ${money(c.rate)}${c.unit === 'flat' ? '' : `/${c.unit}`}`, onClick: () => addCatalog(c) }))} />}
+      <div style={{ padding: lines.length ? '12px 20px 18px' : '4px 20px 18px' }}>
+        <ItemSearch choices={choices} onPick={addChoice} onCreate={(name) => addChoice({ name })} startOpen={!lines.length} />
       </div>
     </>
   );
 }
 
-function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup, dragging, onGrip, issueDate }) {
+/**
+ * Wave-style "Add an item": type to search your saved items and everything you've billed before,
+ * pick one to add it with its price, or create a new one from what you typed.
+ */
+function ItemSearch({ choices, onPick, onCreate, startOpen }) {
+  const [open, setOpen] = useState(startOpen);
+  const [show, setShow] = useState(false); // the list, once you're in the box
+  const [q, setQ] = useState('');
+  const [i, setI] = useState(0);
+  const box = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const off = (e) => { if (!box.current?.contains(e.target)) { setShow(false); setQ(''); if (!startOpen) setOpen(false); } };
+    document.addEventListener('pointerdown', off);
+    return () => document.removeEventListener('pointerdown', off);
+  }, [open, startOpen]);
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const list = choices.filter((c) => words.every((w) => `${c.name} ${c.sub}`.toLowerCase().includes(w))).slice(0, 8);
+  const exact = choices.some((c) => c.name.toLowerCase() === q.trim().toLowerCase());
+  const rows = [...list.map((c) => ({ c })), ...(q.trim() && !exact ? [{ create: q.trim() }] : [])];
+  useEffect(() => setI(0), [q]);
+  const choose = (r) => { if (!r) return; r.create ? onCreate(r.create) : onPick(r.c); setQ(''); setShow(false); setOpen(false); };
+  if (!open) return <Button size="sm" icon="plus" onClick={() => setOpen(true)}>Add item</Button>;
+  return (
+    <div className="item-search" ref={box}>
+      <div className="item-search-input">
+        <Icon name="search" size={16} />
+        <input autoFocus={!startOpen || undefined} value={q} onChange={(e) => { setQ(e.target.value); setShow(true); }} placeholder="Add an item — search or type a new one" aria-label="Add an item"
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setI((x) => Math.min(rows.length - 1, x + 1)); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setI((x) => Math.max(0, x - 1)); }
+            else if (e.key === 'Enter') { e.preventDefault(); choose(rows[i]); }
+            else if (e.key === 'Escape') { setShow(false); setQ(''); if (!startOpen) setOpen(false); }
+          }} onFocus={() => setShow(true)} />
+      </div>
+      {show && rows.length > 0 && (
+        <div className="item-search-list" role="listbox">
+          {rows.map((r, k) => r.create ? (
+            <button key="create" type="button" role="option" aria-selected={k === i} className={`item-opt create ${k === i ? 'on' : ''}`} onMouseEnter={() => setI(k)} onClick={() => choose(r)}>
+              <Icon name="plus" size={16} /><span>Create “{r.create}” as a new item</span>
+            </button>
+          ) : (
+            <button key={r.c.key} type="button" role="option" aria-selected={k === i} className={`item-opt ${k === i ? 'on' : ''}`} onMouseEnter={() => setI(k)} onClick={() => choose(r)}>
+              <span className="col" style={{ gap: 0, minWidth: 0 }}><b>{r.c.name}</b>{r.c.sub && <span className="small muted ellip">{r.c.sub}</span>}</span>
+              <span className="num">{r.c.rate ? money(r.c.rate) : ''}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ADDONS = [
+  { label: 'Travel', rate: (l) => round2((num(l.base_rate) || num(l.rate)) / 2) }, // travel days are usually half the day rate
+  { label: 'Per Diem' },
+  { label: 'Hotel' },
+  { label: 'Parking' },
+  { label: 'Mileage' },
+  { label: '', name: 'Other' },
+];
+
+function BasicLine({ l, cols, catalog, db, hasTax, addonRates, upd, move, remove, dup, dragging, onGrip, issueDate }) {
   const [calOpen, setCalOpen] = useState(false);
   // Shoot dates are saved on the line (they show on the Calendar); older lines fall back to the dates in the description.
   const [calDates, setCalDates] = useState(() => (Array.isArray(l.dates) && l.dates.length ? l.dates : (() => { const m = String(l.description || '').match(/\((\d{2}\/\d{2}(?:-\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:-\d{2}\/\d{2})?)*)\)/); return m ? datesFromCode(m[1], issueDate) : []; })()));
@@ -480,7 +594,7 @@ function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup, dragg
       </div>
       <div className="col c-desc" style={{ gap: 6 }}>
         <div className="row" style={{ gap: 6, alignItems: 'stretch' }}>
-          <textarea className="input" rows={Math.min(8, Math.max(1, String(l.description || '').split('\n').length))} style={{ minHeight: 40, resize: 'vertical', padding: '9px 12px' }} value={l.description || ''} placeholder="Description" onChange={(e) => upd(l.key, { description: e.target.value })} aria-label="Description" />
+          <textarea className="input" autoFocus={l.focus || undefined} rows={Math.min(8, Math.max(1, String(l.description || '').split('\n').length))} style={{ minHeight: 40, resize: 'vertical', padding: '9px 12px' }} value={l.description || ''} placeholder="Description" onChange={(e) => upd(l.key, { description: e.target.value })} aria-label="Description" />
           <Popover open={calOpen} setOpen={setCalOpen} align="right" width={310} trigger={<Button variant="icon" icon="calendar" aria-label="Add dates" title="Add shoot dates" onClick={() => setCalOpen((o) => !o)} />}>
             <Calendar value={calDates} onChange={applyDates} />
             <div className="row between" style={{ paddingTop: 8 }}>
@@ -492,7 +606,10 @@ function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup, dragg
         {l.note != null && l.note !== false && (l.note !== '' || l.showNote) ? (
           <textarea className="input" rows={Math.min(6, Math.max(1, String(l.note || '').split('\n').length))} style={{ minHeight: 32, fontSize: 12, padding: '6px 12px' }} placeholder="Extra note (e.g. $750 + $750 plus 1 hour OT)" value={l.note || ''} onChange={(e) => upd(l.key, { note: e.target.value })} aria-label="Note" autoFocus={l.showNote && !l.note} />
         ) : (
-          <button type="button" className="btn link small" style={{ alignSelf: 'flex-start', fontSize: 12 }} onClick={() => upd(l.key, { showNote: true, note: l.note || '' })}>+ Add a note</button>
+          <span className="row" style={{ gap: 14 }}>
+            <button type="button" className="btn link small" style={{ fontSize: 12 }} onClick={() => upd(l.key, { showNote: true, note: l.note || '' })}>+ Note</button>
+            {!l.addons?.length && <AddonMenu l={l} addonRates={addonRates} upd={upd} />}
+          </span>
         )}
       </div>
       <label className="c-qty m-field"><span className="m-lbl">Qty</span><MoneyInput value={l.qty} onChange={(v) => upd(l.key, { qty: v })} aria-label="Quantity" /></label>
@@ -509,6 +626,41 @@ function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup, dragg
         { label: 'Duplicate', icon: 'copy', onClick: dup },
         { label: 'Delete line', icon: 'trash', danger: true, onClick: remove },
       ]} /></div>
+      {l.addons?.length > 0 && <Addons l={l} cols={cols} hasTax={hasTax} addonRates={addonRates} upd={upd} />}
+    </div>
+  );
+}
+
+/** Small menu of add-ons for a line; travel starts at half the day rate, others at the last price you used. */
+function AddonMenu({ l, addonRates, upd, button }) {
+  const add = (a) => {
+    const rate = a.rate ? a.rate(l) : num(addonRates[a.label.toLowerCase()]);
+    upd(l.key, { addons: [...(l.addons || []), { id: uid(), label: a.label, qty: 1, rate, fresh: true }] });
+  };
+  return <Menu label={button || '+ Add-on'} icon="" variant={button ? 'sm ghost' : 'link small addon-link'} align="left" items={ADDONS.map((a) => ({ label: a.name || a.label, onClick: () => add(a) }))} />;
+}
+
+/** The add-ons under a line, lined up with its Qty / Price / Amount columns, and the line's total. */
+function Addons({ l, cols, hasTax, addonRates, upd }) {
+  const set = (id, patch) => upd(l.key, { addons: l.addons.map((a) => (a.id === id ? { ...a, ...patch, fresh: false } : a)) });
+  return (
+    <div className="addons">
+      {l.addons.map((a) => (
+        <div key={a.id} className="addon-row" style={{ gridTemplateColumns: cols }}>
+          <span className="addon-tick" aria-hidden="true" />
+          <input className="input addon-label" value={a.label} placeholder="e.g. Kit fee" autoFocus={a.fresh && !a.label} onChange={(e) => set(a.id, { label: e.target.value })} aria-label="Add-on" />
+          <label className="m-field"><span className="m-lbl">Qty</span><MoneyInput value={a.qty} onChange={(v) => set(a.id, { qty: v })} aria-label={`${a.label || 'Add-on'} quantity`} /></label>
+          <label className="m-field"><span className="m-lbl">Price</span><MoneyInput value={a.rate} autoFocus={a.fresh && !!a.label && !a.rate} onChange={(v) => set(a.id, { rate: v })} aria-label={`${a.label || 'Add-on'} price`} /></label>
+          {hasTax && <span className="addon-tax" />}
+          <span className="num right muted addon-amt">{money(lineAmount(a.qty, a.rate))}</span>
+          <Button variant="ghost icon" icon="x" aria-label={`Remove ${a.label || 'add-on'}`} onClick={() => upd(l.key, { addons: l.addons.filter((x) => x.id !== a.id) })} />
+        </div>
+      ))}
+      <div className="addon-foot" style={{ gridTemplateColumns: cols }}>
+        <span />
+        <span className="addon-more"><AddonMenu l={l} addonRates={addonRates} upd={upd} /></span>
+        <span className="addon-total"><span className="muted small">Total</span><b className="num">{money(lineTotal(l))}</b></span>
+      </div>
     </div>
   );
 }
