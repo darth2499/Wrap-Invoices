@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../store.jsx';
 import { DEMO } from '../config.js';
 import AddressInput from '../components/AddressInput.jsx';
-import { Button, Empty, Field, Icon, Menu, Modal, Pill } from '../components/ui.jsx';
+import { Button, Empty, Field, Icon, Menu, Modal, Pill, StatusPill } from '../components/ui.jsx';
 import { statusOf } from '../lib/calc.js';
 import { money, fmtDate, num, todayISO, plural, greetName } from '../lib/format.js';
 import { go, shareUrl } from '../router.js';
@@ -119,7 +119,23 @@ function ClientDetail({ id }) {
           {all.length === 0 && <Empty icon="invoice" title="Nothing yet" />}
           {all.length > 0 && open.length === 0 && !showDone && <p className="small muted" style={{ padding: '0 20px 14px' }}>Everything’s paid up.</p>}
           {all.length > 0 && (
-            <div className="table-wrap">
+            <div className="m-list">
+              {(showDone ? all : open).map((i) => {
+                const paid = derived.paidFor(i.id);
+                const stt = statusOf(i, paid);
+                return (
+                  <button type="button" key={i.id} className="m-card" onClick={() => go(`/invoices/${i.id}`)}>
+                    <span className="who">{i.kind === 'quote' ? 'Quote' : 'Invoice'} #{i.number}</span>
+                    <span className="amt num">{money(i.status === 'sent' && i.kind === 'invoice' ? num(i.total) - paid : i.total)}</span>
+                    <span className="meta">{fmtDate(i.issue_date)}{derived.projects[i.project_id]?.name || i.notes ? ` · ${derived.projects[i.project_id]?.name || i.notes}` : ''}</span>
+                    <span className="st"><StatusPill st={stt} /></span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {all.length > 0 && (
+            <div className="table-wrap d-only">
               <table className="table" style={{ minWidth: 560 }}>
                 <tbody>
                   {(showDone ? all : open).map((i) => {
@@ -127,7 +143,7 @@ function ClientDetail({ id }) {
                     const stt = statusOf(i, paid);
                     return (
                       <tr key={i.id} className="click" onClick={() => go(`/invoices/${i.id}`)}>
-                        <td><Pill kind={stt.key}>{stt.label}</Pill></td>
+                        <td><StatusPill st={stt} /></td>
                         <td>{i.kind === 'quote' ? 'Quote' : 'Invoice'} #{i.number}<div className="small muted">{derived.projects[i.project_id]?.name || i.notes || ''}</div></td>
                         <td className="muted">{fmtDate(i.issue_date)}</td>
                         <td className="right num">{money(i.status === 'sent' && i.kind === 'invoice' ? num(i.total) - paid : i.total)}</td>
