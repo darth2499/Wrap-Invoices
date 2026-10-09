@@ -7,6 +7,7 @@ import { saveInvoice, copyLink } from '../lib/actions.js';
 import { datesFromCode } from '../lib/shoots.js';
 import { suggestContext, rankReceipts } from '../lib/suggest.js';
 import { go } from '../router.js';
+import InvoiceDoc from '../components/InvoiceDoc.jsx';
 
 const TERMS = [
   { label: 'Due on receipt', days: 0 },
@@ -178,19 +179,56 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
   const sentAlready = existing && existing.status !== 'draft';
   const title = existing ? `Edit ${label} #${existing.number}` : fromId ? `Copy of #${source?.number}` : `New ${label}`;
 
+  // Receipts billed as lines, and mileage trips, land in the lines (Basic) or "Other items" (Jobs & OT).
+  const expenseItem = (r) => (r.category === 'Parking & tolls' ? 'Parking' : r.category === 'Meals' ? 'Meal' : r.vendor || 'Expense');
+  function billReceipts(rs) {
+    dirty.current = true;
+    if (form.mode === 'advanced') setJobs((j) => ({ ...j, other: [...j.other, ...rs.map((r) => ({ id: uid(), item: expenseItem(r), note: `${r.vendor || ''}${r.receipt_date ? ` (${mmdd(r.receipt_date)})` : ''}`.trim(), amount: num(r.total), receipt_id: r.id }))] }));
+    else setLines((ls) => [...ls.filter((l) => l.item || num(l.rate)), ...rs.map((r) => blankLine({ kind: 'expense', item: expenseItem(r), description: `${r.vendor || ''}${r.receipt_date ? ` (${mmdd(r.receipt_date)})` : ''}`.trim(), rate: num(r.total), base_rate: num(r.total), receipt_id: r.id }))]);
+  }
+  function addTrips(trips) {
+    dirty.current = true;
+    setMileageIds(new Set([...mileageIds, ...trips.map((tr) => tr.id)]));
+    const rows = trips.map((tr) => { const mi = num(tr.miles) * (tr.round_trip ? 2 : 1); return { mi, rate: num(tr.rate), desc: `${[tr.start_place, tr.end_place].filter(Boolean).join(' → ')}${tr.round_trip ? ' (round trip)' : ''} (${mmdd(tr.trip_date)})` }; });
+    if (form.mode === 'advanced') setJobs((j) => ({ ...j, other: [...j.other, ...rows.map((r) => ({ id: uid(), item: 'Mileage', note: `${r.desc} · ${r.mi} mi`, amount: round2(r.mi * r.rate), receipt_id: null }))] }));
+    else setLines((ls) => [...ls.filter((l) => l.item || num(l.rate)), ...rows.map((r) => blankLine({ kind: 'expense', item: 'Mileage', description: r.desc, qty: r.mi, rate: r.rate, base_rate: r.rate }))]);
+  }
+
+  // Live invoice for the preview: exactly what the client will see.
+  const previewInv = { ...form, kind, ...t, subtotal: t.subtotal, total: t.total };
+  const previewLines = finalLines.map((l) => ({ ...l, amount: l.amount ?? lineAmount(l.qty, l.rate) }));
+  const [logoUrl, setLogoUrl] = useState(null);
+  useEffect(() => { if (p.logo_key) s.api.files.urls([p.logo_key]).then((u) => setLogoUrl(u[p.logo_key])).catch(() => {}); }, [p.logo_key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [bigPreview, setBigPreview] = useState(false);
+
+  // Details card: open while there's no client yet, otherwise a one-line summary you tap to change.
+  const [detailsOpen, setDetailsOpen] = useState(() => !form.client_id);
+  const [extra, setExtra] = useState(null);
+  const billedIds = new Set(finalLines.map((l) => l.receipt_id).filter(Boolean));
+  const receiptCount = new Set([...attachIds, ...billedIds]).size;
+  const chips = [
+    { key: 'receipts', icon: 'receipt', on: receiptCount > 0, label: receiptCount ? `${receiptCount} receipt${receiptCount === 1 ? '' : 's'}` : 'Receipts' },
+    { key: 'mileage', icon: 'car', on: mileageIds.size > 0, label: mileageIds.size ? `${mileageIds.size} trip${mileageIds.size === 1 ? '' : 's'}` : 'Mileage' },
+    { key: 'discount', icon: 'tag', on: num(form.discount_value) > 0, label: num(form.discount_value) > 0 ? (form.discount_type === 'percent' ? `${num(form.discount_value)}% off` : `${money(form.discount_value)} off`) : 'Discount' },
+    { key: 'deposit', icon: 'deposit', on: !!form.deposit_percent, label: form.deposit_percent ? `${form.deposit_percent}% deposit` : 'Deposit' },
+    { key: 'notes', icon: 'note', on: !!form.notes, label: 'Notes' },
+    ...(!isQuote ? [{ key: 'remind', icon: 'bell', on: !!form.auto_remind, label: form.auto_remind ? 'Reminders on' : 'Reminders' }] : []),
+  ];
+  const dueBits = [`#${form.number || '—'}`, fmtShort(form.issue_date), form.due_date ? `${isQuote ? 'valid until' : 'due'} ${fmtShort(form.due_date)}${!isQuote && form.terms && form.terms !== 'Custom' ? ` (${form.terms})` : ''}` : ''].filter(Boolean).join(' · ');
+
+  const saveButtons = (
+    <>
+      {!sentAlready && <Button busy={busy} onClick={() => save()}>Save draft</Button>}
+      <Button variant="primary" busy={busy} icon="check" onClick={() => save(sentAlready ? null : 'final')}>{sentAlready ? 'Save changes' : 'Save'}</Button>
+    </>
+  );
+
   return (
-    <div className="page">
+    <div className="page ed-page">
       <div className="page-head">
         <div className="col" style={{ gap: 4 }}>
           <button className="btn link small" style={{ alignSelf: 'flex-start' }} onClick={() => (existing ? go(`/invoices/${existing.id}`) : history.back())}>← Cancel</button>
-          <div className="row wrap" style={{ gap: 14 }}>
-            <h1>{title}</h1>
-            <Seg value={form.mode} onChange={switchMode} label="Editor mode" options={[{ value: 'basic', label: 'Basic' }, { value: 'advanced', label: 'Advanced · jobs & OT' }]} />
-          </div>
-        </div>
-        <div className="row wrap">
-          {!sentAlready && <Button busy={busy} onClick={() => save()}>Save draft</Button>}
-          <Button variant="primary" busy={busy} icon="check" onClick={() => save(sentAlready ? null : 'final')}>{sentAlready ? 'Save changes' : 'Save'}</Button>
+          <h1>{title}</h1>
         </div>
       </div>
 
@@ -198,72 +236,143 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
         <div className="banner info" style={{ flexWrap: 'wrap' }}>
           <Icon name="history" />
           <div className="grow" style={{ minWidth: 240 }}>
-            This {label} was already sent. Saving updates what your client sees <b>at the same link</b> — the previous version is kept in History.
-            <input className="input" style={{ marginTop: 8, background: '#fff' }} placeholder="What changed? (optional, shows in History)" value={summary} onChange={(e) => setSummary(e.target.value)} />
+            Already sent — saving updates the same link. The old version stays in History.
+            <input className="input" style={{ marginTop: 8 }} placeholder="What changed? (optional)" value={summary} onChange={(e) => setSummary(e.target.value)} />
           </div>
         </div>
       )}
       {error && <div className="banner bad" role="alert">{error}</div>}
 
-      <section className="card card-pad" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, position: 'relative', zIndex: 4 }}>
-        <Combobox label="Client" value={form.client_id} options={clientOptions} placeholder="Search or add a client" onChange={(v) => set({ client_id: v, project_id: null })} onCreate={createClient} createLabel={(q) => `+ Add “${q}” as a new client`} />
-        <Combobox label="Project (optional)" value={form.project_id} options={projectOptions} placeholder={client ? `Search ${client.name}’s projects` : 'Search or create'} onChange={(v) => set({ project_id: v })} onCreate={createProject} createLabel={(q) => `+ Create project “${q}”`} />
-        <Field label={`${isQuote ? 'Quote' : 'Invoice'} no.`}><input className="input num" value={form.number} onChange={(e) => set({ number: e.target.value })} /></Field>
-        <Field label="Date"><input className="input" type="date" value={form.issue_date} onChange={(e) => { const v = e.target.value; const tt = TERMS.find((x) => x.label === form.terms); set({ issue_date: v, due_date: tt ? addDays(v, tt.days) : form.due_date }); }} /></Field>
-        {!isQuote ? (
-          <Field label="Payment terms">
-            <select className="input" value={TERMS.some((x) => x.label === form.terms) ? form.terms : 'custom'} onChange={(e) => (e.target.value === 'custom' ? set({ terms: 'Custom' }) : setTerms(e.target.value))}>
-              {TERMS.map((x) => <option key={x.label}>{x.label}</option>)}
-              <option value="custom">Custom due date</option>
-            </select>
-          </Field>
-        ) : null}
-        <Field label={isQuote ? 'Valid until' : 'Due date'}><input className="input" type="date" value={form.due_date || ''} onChange={(e) => set({ due_date: e.target.value, terms: isQuote ? form.terms : TERMS.find((x) => addDays(form.issue_date, x.days) === e.target.value)?.label || 'Custom' })} /></Field>
-        <Field label="Notes / period" style={{ gridColumn: '1 / -1' }}><input className="input" placeholder={isQuote ? 'e.g. 50% deposit to book' : 'e.g. Month of October'} value={form.notes || ''} onChange={(e) => set({ notes: e.target.value })} /></Field>
-      </section>
-
-      {form.mode === 'basic' ? (
-        <BasicLines issueDate={form.issue_date} lines={lines} setLines={(fn) => { dirty.current = true; setLines(fn); }} db={db} derived={derived} openPicker={setPicker} mileageIds={mileageIds} setMileageIds={setMileageIds} />
-      ) : (
-        <AdvancedJobs jobs={jobs} setJobs={(fn) => { dirty.current = true; setJobs(fn); }} rule={rule} db={db} openPicker={setPicker} finalLines={finalLines} total={t.total} />
-      )}
-
-      <div className="grid-2">
-        <AttachedReceipts db={db} attachIds={attachIds} setAttachIds={setAttachIds} finalLines={finalLines} openPicker={setPicker} />
-        <section className="card card-pad col" style={{ gap: 12 }}>
-          <div className="row wrap" style={{ gap: 12 }}>
-            <Field label="Discount" style={{ flex: '1 1 150px' }}>
-              <div className="row" style={{ gap: 6 }}>
-                <MoneyInput value={form.discount_value || ''} onChange={(v) => set({ discount_value: v })} placeholder="0" />
-                <select className="input" style={{ width: 70 }} value={form.discount_type} onChange={(e) => set({ discount_type: e.target.value })} aria-label="Discount type"><option value="amount">$</option><option value="percent">%</option></select>
-              </div>
-            </Field>
-            <Field label="Deposit requested" hint="(optional)" style={{ flex: '1 1 120px' }}>
-              <select className="input" value={form.deposit_percent ?? ''} onChange={(e) => set({ deposit_percent: e.target.value ? Number(e.target.value) : null })}>
-                <option value="">None</option>{[25, 30, 50, 100].map((v) => <option key={v} value={v}>{v}%</option>)}
-              </select>
-            </Field>
-          </div>
-          {!isQuote && (
-            <label className="row between" style={{ minHeight: 40 }}>
-              <span className="col" style={{ gap: 0 }}><span>Automatic reminders</span><span className="small muted">Emails your client {(p.reminder_days || []).join(', ')} days after the due date</span></span>
-              <Switch checked={form.auto_remind} onChange={(v) => set({ auto_remind: v })} label="Automatic reminders" />
-            </label>
+      <div className="ed-split">
+        <div className="col ed-main" style={{ gap: 14, minWidth: 0 }}>
+          {/* Who + when */}
+          {detailsOpen ? (
+            <section className="card card-pad ed-details">
+              <button type="button" className="ed-collapse" aria-label="Collapse details" onClick={() => setDetailsOpen(false)}><Icon name="chevD" size={18} /></button>
+              <div className="ed-wide"><Combobox label="Client" value={form.client_id} options={clientOptions} placeholder="Search or add a client" onChange={(v) => set({ client_id: v, project_id: null })} onCreate={createClient} createLabel={(q) => `+ Add “${q}” as a new client`} /></div>
+              <div className="ed-wide"><Combobox label="Project" value={form.project_id} options={projectOptions} placeholder={client ? `${client.name}’s projects` : 'Optional'} onChange={(v) => set({ project_id: v })} onCreate={createProject} createLabel={(q) => `+ Create project “${q}”`} /></div>
+              <Field label={`${isQuote ? 'Quote' : 'Invoice'} no.`}><input className="input num" value={form.number} onChange={(e) => set({ number: e.target.value })} /></Field>
+              <Field label="Date"><input className="input" type="date" value={form.issue_date} onChange={(e) => { const v = e.target.value; const tt = TERMS.find((x) => x.label === form.terms); set({ issue_date: v, due_date: tt ? addDays(v, tt.days) : form.due_date }); }} /></Field>
+              {!isQuote && (
+                <Field label="Terms">
+                  <select className="input" value={TERMS.some((x) => x.label === form.terms) ? form.terms : 'custom'} onChange={(e) => (e.target.value === 'custom' ? set({ terms: 'Custom' }) : setTerms(e.target.value))}>
+                    {TERMS.map((x) => <option key={x.label}>{x.label}</option>)}
+                    <option value="custom">Custom due date</option>
+                  </select>
+                </Field>
+              )}
+              <Field label={isQuote ? 'Valid until' : 'Due'}><input className="input" type="date" value={form.due_date || ''} onChange={(e) => set({ due_date: e.target.value, terms: isQuote ? form.terms : TERMS.find((x) => addDays(form.issue_date, x.days) === e.target.value)?.label || 'Custom' })} /></Field>
+            </section>
+          ) : (
+            <button type="button" className="card ed-summary" onClick={() => setDetailsOpen(true)} aria-label="Change client, number and dates">
+              <span className="col" style={{ gap: 2, minWidth: 0, flex: 1 }}>
+                <span className="ed-who">{client?.name || 'No client'}{form.project_id && <span className="muted" style={{ fontWeight: 400 }}> · {db.projects.find((pr) => pr.id === form.project_id)?.name}</span>}</span>
+                <span className="small muted num">{dueBits}</span>
+              </span>
+              <Icon name="edit" size={16} />
+            </button>
           )}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '6px 24px', paddingTop: 10, borderTop: '1px solid var(--line-2)' }}>
-            <span className="muted">Subtotal</span><span className="num right">{money(t.subtotal)}</span>
-            {t.discount_total > 0 && <><span className="muted">Discount</span><span className="num right">−{money(t.discount_total)}</span></>}
-            {t.tax_total > 0 && <><span className="muted">Tax</span><span className="num right">{money(t.tax_total)}</span></>}
-            <strong>Total</strong><strong className="num right" style={{ fontSize: 18 }}>{money(t.total)}</strong>
-            {form.deposit_percent ? <><span className="muted">Deposit due ({form.deposit_percent}%)</span><span className="num right">{money((t.total * form.deposit_percent) / 100)}</span></> : null}
+
+          {/* What you did */}
+          <section className="card ed-work">
+            <div className="row between ed-work-head">
+              <h2>What you did</h2>
+              <Seg value={form.mode} onChange={switchMode} label="Editor mode" options={[{ value: 'basic', label: 'Lines' }, { value: 'advanced', label: 'Jobs & OT' }]} />
+            </div>
+            {form.mode === 'basic' ? (
+              <BasicLines issueDate={form.issue_date} lines={lines} setLines={(fn) => { dirty.current = true; setLines(fn); }} db={db} />
+            ) : (
+              <AdvancedJobs jobs={jobs} setJobs={(fn) => { dirty.current = true; setJobs(fn); }} rule={rule} db={db} openPicker={setPicker} />
+            )}
+          </section>
+
+          {/* Extras: one tap to open, filled when used */}
+          <div className="ed-chips" role="toolbar" aria-label="Extras">
+            {chips.map((c) => (
+              <button key={c.key} type="button" className={`ed-chip ${c.on ? 'on' : ''} ${extra === c.key ? 'open' : ''}`} aria-expanded={extra === c.key} onClick={() => setExtra((x) => (x === c.key ? null : c.key))}>
+                <Icon name={c.on ? c.icon : 'plus'} size={15} />{c.label}
+              </button>
+            ))}
           </div>
-        </section>
+
+          {extra && (
+            <section className="card card-pad col ed-extra" style={{ gap: 12 }}>
+              {extra === 'receipts' && <ReceiptsPanel db={db} attachIds={attachIds} setAttachIds={(v) => { dirty.current = true; setAttachIds(v); }} billed={billedIds} openPicker={setPicker} bill={billReceipts} />}
+              {extra === 'mileage' && (
+                <>
+                  {db.mileage_trips.filter((tr) => mileageIds.has(tr.id)).map((tr) => (
+                    <div key={tr.id} className="row between ed-item"><span>{fmtShort(tr.trip_date)} · {[tr.start_place, tr.end_place].filter(Boolean).join(' → ')}</span><span className="num muted">{num(tr.miles) * (tr.round_trip ? 2 : 1)} mi</span></div>
+                  ))}
+                  <Button size="sm" icon="car" style={{ alignSelf: 'flex-start' }} onClick={() => setPicker({ type: 'mileage', onPick: addTrips })}>Add trips</Button>
+                </>
+              )}
+              {extra === 'discount' && (
+                <Field label="Discount">
+                  <div className="row" style={{ gap: 6, maxWidth: 260 }}>
+                    <MoneyInput value={form.discount_value || ''} onChange={(v) => set({ discount_value: v })} placeholder="0" autoFocus />
+                    <select className="input" style={{ width: 70 }} value={form.discount_type} onChange={(e) => set({ discount_type: e.target.value })} aria-label="Discount type"><option value="amount">$</option><option value="percent">%</option></select>
+                  </div>
+                </Field>
+              )}
+              {extra === 'deposit' && (
+                <div className="row wrap" style={{ gap: 6 }}>
+                  {[null, 25, 30, 50, 100].map((v) => (
+                    <button key={v ?? 'none'} type="button" className={`ed-opt ${form.deposit_percent === v ? 'on' : ''}`} onClick={() => set({ deposit_percent: v })}>{v ? `${v}%` : 'None'}</button>
+                  ))}
+                  {form.deposit_percent ? <span className="small muted num" style={{ alignSelf: 'center', marginLeft: 6 }}>{money((t.total * form.deposit_percent) / 100)} due up front</span> : null}
+                </div>
+              )}
+              {extra === 'notes' && <textarea className="input" rows={3} autoFocus placeholder={isQuote ? 'e.g. 50% deposit to book' : 'e.g. Month of October'} value={form.notes || ''} onChange={(e) => set({ notes: e.target.value })} aria-label="Notes" />}
+              {extra === 'remind' && (
+                <label className="row between" style={{ minHeight: 40 }}>
+                  <span className="col" style={{ gap: 0 }}><span>Automatic reminders</span><span className="small muted">{(p.reminder_days || []).join(', ')} days after the due date</span></span>
+                  <Switch checked={form.auto_remind} onChange={(v) => set({ auto_remind: v })} label="Automatic reminders" />
+                </label>
+              )}
+            </section>
+          )}
+        </div>
+
+        {/* Live preview + save (wide screens) */}
+        <aside className="ed-side col">
+          <button type="button" className="ed-preview" onClick={() => setBigPreview(true)} aria-label="Open full-size preview">
+            <ScaledDoc><InvoiceDoc business={p} invoice={previewInv} client={client} lines={previewLines} logoUrl={logoUrl} /></ScaledDoc>
+          </button>
+          <div className="row" style={{ gap: 8 }}>{saveButtons}</div>
+        </aside>
       </div>
 
+      {/* Narrow screens: total + save stay in reach */}
+      <div className="ed-bar">
+        <button type="button" className="ed-bar-total" onClick={() => setBigPreview(true)} aria-label="Preview">
+          <span className="small muted">Total</span><b className="num">{money(t.total)}</b><Icon name="eye" size={16} />
+        </button>
+        {saveButtons}
+      </div>
+
+      {bigPreview && (
+        <Modal title="Preview" wide onClose={() => setBigPreview(false)}>
+          <InvoiceDoc business={p} invoice={previewInv} client={client} lines={previewLines} logoUrl={logoUrl} />
+        </Modal>
+      )}
       {picker?.type === 'receipts' && <ReceiptPicker ctx={suggestContext({ lines: finalLines, jobs, issueDate: form.issue_date, clientName: derived.clients[form.client_id]?.name })} db={db} exclude={picker.exclude} title={picker.title} onClose={() => setPicker(null)} onPick={(rs) => { picker.onPick(rs); setPicker(null); }} />}
       {picker?.type === 'mileage' && <MileagePicker db={db} derived={derived} selected={mileageIds} onClose={() => setPicker(null)} onPick={(trips) => { picker.onPick(trips); setPicker(null); }} />}
     </div>
   );
+}
+
+/** Shrinks the full-size invoice to fit its box, so the preview is the real thing. */
+function ScaledDoc({ children, width = 760 }) {
+  const box = useRef(null);
+  const [z, setZ] = useState(0.5);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return undefined;
+    const ro = new ResizeObserver(() => setZ(Math.min(1, el.clientWidth / width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [width]);
+  return <div ref={box} className="scaled-doc"><div style={{ width, zoom: z }}>{children}</div></div>;
 }
 
 function defaultRate(db) {
@@ -276,7 +385,7 @@ function defaultRole(db) {
 /* ------------------------------------------------------------------ */
 /* Basic: Wave-style line items                                        */
 /* ------------------------------------------------------------------ */
-function BasicLines({ lines, setLines, db, openPicker, mileageIds, setMileageIds, issueDate }) {
+function BasicLines({ lines, setLines, db, issueDate }) {
   const catalog = db.catalog_items.filter((c) => !c.archived).sort((a, b) => a.position - b.position);
   const hasTax = db.tax_rates.length > 0;
   const upd = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
@@ -288,7 +397,7 @@ function BasicLines({ lines, setLines, db, openPicker, mileageIds, setMileageIds
     [c[i], c[j]] = [c[j], c[i]];
     return c;
   });
-  const cols = `minmax(150px,1.1fr) minmax(170px,1.5fr) 72px 104px ${hasTax ? '90px ' : ''}104px 68px`;
+  const cols = `minmax(130px,1fr) minmax(170px,1.7fr) 64px 96px ${hasTax ? '86px ' : ''}92px 60px`;
   // Drag the grip to reorder lines (mouse or finger): the line follows the pointer over the others.
   const [dragKey, setDragKey] = useState(null);
   const startDrag = (key, e) => {
@@ -317,9 +426,9 @@ function BasicLines({ lines, setLines, db, openPicker, mileageIds, setMileageIds
   const addCatalog = (c) => setLines((ls) => [...ls.filter((l) => l.item || num(l.rate) || l.description), blankLine({ kind: c.kind, item: c.name, description: c.description || '', rate: num(c.rate), base_rate: num(c.rate), day_type: c.unit === 'day' && c.kind === 'labor' ? 'Full day' : null })]);
 
   return (
-    <section className="card">
+    <>
       <div className="table-wrap">
-        <div className="lines basic-lines" style={{ padding: '6px 20px 0' }}>
+        <div className="lines basic-lines" style={{ padding: '0 20px' }}>
           <div className="line-head" style={{ gridTemplateColumns: cols }}>
             <span>Item</span><span>Description</span><span>Qty</span><span>Price</span>{hasTax && <span>Tax</span>}<span className="right">Amount</span><span />
           </div>
@@ -328,16 +437,11 @@ function BasicLines({ lines, setLines, db, openPicker, mileageIds, setMileageIds
           ))}
         </div>
       </div>
-      <div className="row wrap" style={{ padding: '12px 20px 18px', borderTop: '1px solid var(--line-2)' }}>
-        <Button size="sm" icon="plus" onClick={() => setLines((ls) => [...ls, blankLine()])}>Add a line</Button>
-        {catalog.length > 0 && <Menu label="Saved item" icon="plus" variant="sm" align="left" items={catalog.map((c) => ({ label: `${c.name} · ${money(c.rate)}${c.unit === 'flat' ? '' : `/${c.unit}`}`, onClick: () => addCatalog(c) }))} />}
-        <Button size="sm" icon="receipt" onClick={() => openPicker({ type: 'receipts', title: 'Bill receipts to this invoice', exclude: new Set(lines.map((l) => l.receipt_id).filter(Boolean)), onPick: (rs) => setLines((ls) => [...ls.filter((l) => l.item || num(l.rate)), ...rs.map((r) => blankLine({ kind: 'expense', item: r.category === 'Parking & tolls' ? 'Parking' : r.category === 'Meals' ? 'Meal' : r.vendor || 'Expense', description: `${r.vendor || ''}${r.receipt_date ? ` (${mmdd(r.receipt_date)})` : ''}`.trim(), rate: num(r.total), base_rate: num(r.total), receipt_id: r.id }))]) })}>Billable receipts</Button>
-        <Button size="sm" icon="car" onClick={() => openPicker({ type: 'mileage', onPick: (trips) => {
-          setMileageIds(new Set([...mileageIds, ...trips.map((t) => t.id)]));
-          setLines((ls) => [...ls.filter((l) => l.item || num(l.rate)), ...trips.map((t) => { const mi = num(t.miles) * (t.round_trip ? 2 : 1); return blankLine({ kind: 'expense', item: 'Mileage', description: `${[t.start_place, t.end_place].filter(Boolean).join(' → ')}${t.round_trip ? ' (round trip)' : ''} (${mmdd(t.trip_date)})`, qty: mi, rate: num(t.rate), base_rate: num(t.rate) }); })]);
-        } })}>Mileage</Button>
+      <div className="row wrap" style={{ padding: '12px 20px 18px' }}>
+        <Button size="sm" icon="plus" onClick={() => setLines((ls) => [...ls, blankLine()])}>Add line</Button>
+        {catalog.length > 0 && <Menu label="Saved items" icon="plus" variant="sm ghost" align="left" items={catalog.map((c) => ({ label: `${c.name} · ${money(c.rate)}${c.unit === 'flat' ? '' : `/${c.unit}`}`, onClick: () => addCatalog(c) }))} />}
       </div>
-    </section>
+    </>
   );
 }
 
@@ -412,7 +516,7 @@ function BasicLine({ l, cols, catalog, db, hasTax, upd, move, remove, dup, dragg
 /* ------------------------------------------------------------------ */
 /* Advanced: jobs with a day picker, hours per day and overtime        */
 /* ------------------------------------------------------------------ */
-function AdvancedJobs({ jobs, setJobs, rule, db, openPicker, finalLines, total }) {
+function AdvancedJobs({ jobs, setJobs, rule, db, openPicker }) {
   const updJob = (id, fn) => setJobs((j) => ({ ...j, jobs: j.jobs.map((x) => (x.id === id ? fn(x) : x)) }));
   const busy = {};
   jobs.jobs.forEach((j) => j.days.forEach((d) => (busy[d.date] = j.company || 'another job')));
@@ -427,51 +531,28 @@ function AdvancedJobs({ jobs, setJobs, rule, db, openPicker, finalLines, total }
   const gearItems = db.catalog_items.filter((c) => c.kind === 'gear' && !c.archived);
 
   return (
-    <>
-      <div className="row wrap between">
-        <div><h2 style={{ fontSize: 18 }}>Jobs</h2><p className="small muted">One card per shoot. Its parking, meals and gear stay with it.</p></div>
-        <span className="small muted">Overtime after {rule.base} h · {rule.m1}× for {rule.m1h} h, then {rule.m2}× <a href="#/settings?section=rates">change</a></span>
-      </div>
-      <div className="row wrap" style={{ alignItems: 'flex-start', gap: 16 }}>
-        <div className="col" style={{ gap: 12, flex: '2 1 560px', minWidth: 0 }}>
-          {jobs.jobs.map((job) => (
-            <JobCard key={job.id} job={job} rule={rule} db={db} busy={busy} companies={companies} roles={roles} gearItems={gearItems}
-              upd={(fn) => updJob(job.id, fn)} remove={() => setJobs((j) => ({ ...j, jobs: j.jobs.filter((x) => x.id !== job.id) }))} openPicker={openPicker} />
-          ))}
-          <Button className="block" style={{ minHeight: 50, borderStyle: 'dashed' }} icon="plus" onClick={() => setJobs((j) => ({ ...j, jobs: [...j.jobs, blankJob(j.jobs[j.jobs.length - 1]?.rate ?? defaultRate(db), j.jobs[j.jobs.length - 1]?.role ?? defaultRole(db))] }))}>Add job</Button>
-          <section className="card card-pad col" style={{ gap: 10 }}>
-            <div><h3>Other items</h3><p className="small muted">Things not tied to one shoot, like dropping off a drive.</p></div>
-            {jobs.other.map((o) => (
-              <div key={o.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(100px,1fr) minmax(140px,2fr) 100px 36px', gap: 8, alignItems: 'center' }}>
-                <input className="input" value={o.item} placeholder="Item" aria-label="Item" onChange={(e) => setJobs((j) => ({ ...j, other: j.other.map((x) => (x.id === o.id ? { ...x, item: e.target.value } : x)) }))} />
-                <input className="input" value={o.note || ''} placeholder="Description" aria-label="Description" onChange={(e) => setJobs((j) => ({ ...j, other: j.other.map((x) => (x.id === o.id ? { ...x, note: e.target.value } : x)) }))} />
-                <MoneyInput value={o.amount} aria-label="Amount" onChange={(v) => setJobs((j) => ({ ...j, other: j.other.map((x) => (x.id === o.id ? { ...x, amount: v } : x)) }))} />
-                <Button variant="ghost icon" icon="x" aria-label="Remove" onClick={() => setJobs((j) => ({ ...j, other: j.other.filter((x) => x.id !== o.id) }))} />
-              </div>
-            ))}
-            <div className="row wrap">
-              <Button size="sm" icon="plus" onClick={() => setJobs((j) => ({ ...j, other: [...j.other, { id: uid(), item: '', note: '', amount: 0, receipt_id: null }] }))}>Other item</Button>
-              <Button size="sm" icon="receipt" onClick={() => openPicker({ type: 'receipts', title: 'Bill receipts as other items', exclude: new Set(finalLines.map((l) => l.receipt_id).filter(Boolean)), onPick: (rs) => setJobs((j) => ({ ...j, other: [...j.other, ...rs.map((r) => ({ id: uid(), item: r.category === 'Parking & tolls' ? 'Parking' : r.category === 'Meals' ? 'Meal' : r.vendor || 'Expense', note: `${r.vendor || ''}${r.receipt_date ? ` (${mmdd(r.receipt_date)})` : ''}`.trim(), amount: num(r.total), receipt_id: r.id }))] })) })}>From receipts</Button>
+    <div className="col ed-jobs" style={{ gap: 12, padding: '0 20px 18px' }}>
+      <span className="small muted">Overtime after {rule.base} h · {rule.m1}× for {rule.m1h} h, then {rule.m2}× <a href="#/settings?section=rates">change</a></span>
+      {jobs.jobs.map((job) => (
+        <JobCard key={job.id} job={job} rule={rule} db={db} busy={busy} companies={companies} roles={roles} gearItems={gearItems}
+          upd={(fn) => updJob(job.id, fn)} remove={() => setJobs((j) => ({ ...j, jobs: j.jobs.filter((x) => x.id !== job.id) }))} openPicker={openPicker} />
+      ))}
+      <Button className="block" style={{ minHeight: 46, borderStyle: 'dashed' }} icon="plus" onClick={() => setJobs((j) => ({ ...j, jobs: [...j.jobs, blankJob(j.jobs[j.jobs.length - 1]?.rate ?? defaultRate(db), j.jobs[j.jobs.length - 1]?.role ?? defaultRole(db))] }))}>Add job</Button>
+      {jobs.other.length > 0 && (
+        <div className="col" style={{ gap: 8, paddingTop: 6 }}>
+          <span className="small muted">Other items</span>
+          {jobs.other.map((o) => (
+            <div key={o.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(100px,1fr) minmax(140px,2fr) 100px 36px', gap: 8, alignItems: 'center' }}>
+              <input className="input" value={o.item} placeholder="Item" aria-label="Item" onChange={(e) => setJobs((j) => ({ ...j, other: j.other.map((x) => (x.id === o.id ? { ...x, item: e.target.value } : x)) }))} />
+              <input className="input" value={o.note || ''} placeholder="Description" aria-label="Description" onChange={(e) => setJobs((j) => ({ ...j, other: j.other.map((x) => (x.id === o.id ? { ...x, note: e.target.value } : x)) }))} />
+              <MoneyInput value={o.amount} aria-label="Amount" onChange={(v) => setJobs((j) => ({ ...j, other: j.other.map((x) => (x.id === o.id ? { ...x, amount: v } : x)) }))} />
+              <Button variant="ghost icon" icon="x" aria-label="Remove" onClick={() => setJobs((j) => ({ ...j, other: j.other.filter((x) => x.id !== o.id) }))} />
             </div>
-          </section>
+          ))}
         </div>
-
-        <aside className="card card-pad col" style={{ gap: 4, position: 'sticky', top: 16, flex: '1 1 300px', minWidth: 0 }}>
-          <div className="row between" style={{ paddingBottom: 6 }}><h3>On the invoice</h3><span className="small muted">Live preview</span></div>
-          {finalLines.length === 0 && <span className="small muted">Pick shoot days to see the lines.</span>}
-          {finalLines.map((l, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '2px 12px', padding: '8px 0', borderTop: '1px solid var(--line-2)' }}>
-              <span style={{ fontWeight: 500, fontSize: 13 }}>{l.item}</span>
-              <span className="num right" style={{ fontSize: 13 }}>{money(l.amount)}</span>
-              <span className="small muted">{l.description}</span>
-              <span className="num small muted right">{l.qty} × {money(l.rate)}</span>
-              {l.note && <span className="small muted" style={{ gridColumn: '1 / -1' }}>{l.note}</span>}
-            </div>
-          ))}
-          <div className="row between" style={{ paddingTop: 10, borderTop: '1.5px solid var(--ink)', fontWeight: 600 }}><span>Total</span><span className="num">{money(total)}</span></div>
-        </aside>
-      </div>
-    </>
+      )}
+      <Button size="sm" variant="ghost" icon="plus" style={{ alignSelf: 'flex-start' }} onClick={() => setJobs((j) => ({ ...j, other: [...j.other, { id: uid(), item: '', note: '', amount: 0, receipt_id: null }] }))}>Other item</Button>
+    </div>
   );
 }
 
@@ -593,27 +674,27 @@ function JobCard({ job, rule, db, busy, companies, roles, gearItems, upd, remove
 }
 
 /* ------------------------------------------------------------------ */
-/* Receipts attached as backup                                          */
+/* Receipts: billed ones are lines, the rest ride along as backup      */
 /* ------------------------------------------------------------------ */
-function AttachedReceipts({ db, attachIds, setAttachIds, finalLines, openPicker }) {
-  const billed = new Set(finalLines.map((l) => l.receipt_id).filter(Boolean));
+function ReceiptsPanel({ db, attachIds, setAttachIds, billed, openPicker, bill }) {
   const all = new Set([...attachIds, ...billed]);
   const list = db.receipts.filter((r) => all.has(r.id));
   return (
-    <section className="card card-pad col" style={{ gap: 10 }}>
-      <div className="row between"><h2>Receipts</h2><Button size="sm" icon="plus" onClick={() => openPicker({ type: 'receipts', title: 'Attach receipts (backup only — not billed)', exclude: all, onPick: (rs) => setAttachIds(new Set([...attachIds, ...rs.map((r) => r.id)])) })}>Attach</Button></div>
-      <p className="small muted">Attached receipts are grouped with this invoice and included in the PDF + receipts zip. Billed ones also appear as lines.</p>
-      {list.length === 0 && <span className="small muted">None attached yet.</span>}
+    <>
       {list.map((r) => (
-        <div key={r.id} className="row between" style={{ borderTop: '1px solid var(--line-2)', paddingTop: 8 }}>
-          <span className="col" style={{ gap: 0 }}><b style={{ fontWeight: 500 }}>{r.vendor || 'Receipt'}</b><span className="small muted num">{money(r.total)} · {fmtShort(r.receipt_date)}</span></span>
-          <span className="row">
-            {billed.has(r.id) ? <span className="pill sent">Billed</span> : <span className="pill draft">Backup</span>}
+        <div key={r.id} className="row between ed-item">
+          <span className="col" style={{ gap: 0, minWidth: 0 }}><b style={{ fontWeight: 500 }}>{r.vendor || 'Receipt'}</b><span className="small muted num">{fmtShort(r.receipt_date)} · {money(r.total)}</span></span>
+          <span className="row" style={{ flexWrap: 'nowrap' }}>
+            {billed.has(r.id) ? <span className="pill sent">Billed</span> : <span className="pill draft">Attached</span>}
             {!billed.has(r.id) && <Button variant="ghost icon" icon="x" aria-label="Detach" onClick={() => setAttachIds(new Set([...attachIds].filter((x) => x !== r.id)))} />}
           </span>
         </div>
       ))}
-    </section>
+      <div className="row wrap" style={{ gap: 8 }}>
+        <Button size="sm" icon="plus" onClick={() => openPicker({ type: 'receipts', title: 'Bill receipts', exclude: all, onPick: bill })}>Bill</Button>
+        <Button size="sm" variant="ghost" icon="plus" onClick={() => openPicker({ type: 'receipts', title: 'Attach receipts', exclude: all, onPick: (rs) => setAttachIds(new Set([...attachIds, ...rs.map((r) => r.id)])) })}>Attach</Button>
+      </div>
+    </>
   );
 }
 

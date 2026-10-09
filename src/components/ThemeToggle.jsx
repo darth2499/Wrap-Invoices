@@ -27,9 +27,9 @@ export default function ThemeToggle({ className = '' }) {
     const html = document.documentElement;
     html.classList.add('theme-blend');
     setOrb(next === 'dark' ? 'moon' : 'sun');
-    // Colors start blending as the orb passes the middle of the screen.
-    setTimeout(() => { applyTheme(next); setTheme(next); }, 600);
-    setTimeout(() => { html.classList.remove('theme-blend'); setOrb(null); }, 1750);
+    // Colors blend while the orb hangs at the top of its arc.
+    setTimeout(() => { applyTheme(next); setTheme(next); }, 380);
+    setTimeout(() => { html.classList.remove('theme-blend'); setOrb(null); }, 1250);
   };
   return (
     <>
