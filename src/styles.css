@@ -275,7 +275,7 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
 @media (max-width: 700px) {
   .seg { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; }
   .seg::-webkit-scrollbar { display: none; }
-  .seg .tab { flex: none; white-space: nowrap; }
+  .seg .tab { flex: 1 0 auto; justify-content: center; text-align: center; white-space: nowrap; } /* a few tabs share the width evenly; many keep their size and scroll */
 }
 /* ---------- lists become cards on phones (no sideways scrolling) ---------- */
 .m-list { display: none; }
@@ -734,10 +734,10 @@ html.theme-slow *, html.theme-slow *::before, html.theme-slow *::after { transit
 @media (max-width: 800px) {
   body::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top); background: var(--bg); z-index: 45; pointer-events: none; }
 }
-/* Home Screen app: iOS softly blurs the top edge of the page as you scroll. A solid band there (with matching
-   space above the content) means only plain page color is ever under that blur. */
+/* Home Screen app: iOS softly blurs the top edge of the page as you scroll. A page-colored band behind the
+   status bar that feathers out (no hard line) keeps that edge plain, with matching space above the content. */
 @media (display-mode: standalone) and (max-width: 800px) {
-  body::before { height: calc(env(safe-area-inset-top) + 28px); }
-  .main { padding-top: calc(46px + env(safe-area-inset-top)); }
-  .toasts { top: calc(34px + env(safe-area-inset-top)); }
+  body::before { height: calc(env(safe-area-inset-top) + 22px); background: linear-gradient(var(--bg) calc(100% - 22px), transparent); }
+  .main { padding-top: calc(40px + env(safe-area-inset-top)); }
+  .toasts { top: calc(28px + env(safe-area-inset-top)); }
 }

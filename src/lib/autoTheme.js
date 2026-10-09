@@ -43,11 +43,11 @@ export function darkness(now = new Date()) {
 let timer = null;
 const root = () => document.documentElement;
 
-function paint() {
+function paint(first = false) {
   const t = darkness();
   const dark = t >= 0.5;
   const html = root();
-  if ((html.dataset.theme === 'dark') !== dark) {
+  if (!first && (html.dataset.theme === 'dark') !== dark) {
     // The one visible moment: text flips. Fade it slowly.
     html.classList.add('theme-slow');
     setTimeout(() => html.classList.remove('theme-slow'), 4500);
@@ -59,17 +59,20 @@ function paint() {
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', mixHex(from.bg, to.bg, k));
 }
 
+// Coming back to the app after a while: catch up at once instead of fading in front of you.
+const onVisible = () => { if (document.visibilityState === 'visible') paint(true); };
+
 export function startAuto() {
   stopAuto(false);
-  paint();
+  paint(true); // turning it on: switch right away (the slow fade is only for sunset/sunrise)
   timer = setInterval(paint, 20000);
-  document.addEventListener('visibilitychange', paint);
+  document.addEventListener('visibilitychange', onVisible);
 }
 
 export function stopAuto(clear = true) {
   if (timer) clearInterval(timer);
   timer = null;
-  document.removeEventListener('visibilitychange', paint);
+  document.removeEventListener('visibilitychange', onVisible);
   if (clear) for (const name of [...Object.keys(LIGHT), 'glass']) root().style.removeProperty(`--${name}`);
 }
 
