@@ -106,13 +106,15 @@ export function statusOf(inv, paid = 0, today = todayISO()) {
   if (inv.status === 'paid') return { key: 'paid', label: 'Paid' };
   if (inv.status === 'draft') return { key: 'draft', label: 'Draft' };
   if (inv.kind === 'invoice' && !inv.sent_at && paid <= 0) return { key: 'ready', label: 'Not sent' };
+  const seen = Number(inv.view_count) > 0; // the client opened the link
   const overdue = inv.due_date && inv.due_date < today;
   if (overdue) {
     const d = daysBetween(inv.due_date, today);
-    return { key: 'overdue', label: paid > 0 ? 'Partial · overdue' : 'Overdue', days: d };
+    return { key: 'overdue', label: paid > 0 ? 'Partial · overdue' : 'Overdue', days: d, seen };
   }
-  if (paid > 0) return { key: 'partial', label: 'Partially paid' };
-  return { key: 'sent', label: 'Sent' };
+  if (paid > 0) return { key: 'partial', label: 'Partially paid', seen };
+  if (seen) return { key: 'seen', label: 'Seen', seen };
+  return { key: 'sent', label: 'Sent', seen };
 }
 
 export function dueText(inv, today = todayISO()) {

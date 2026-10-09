@@ -34,6 +34,7 @@ const PATHS = {
   eye: <><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>,
   bell: <><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z" /><path d="M10 20a2 2 0 0 0 4 0" /></>,
   cash: <><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="3" /></>,
+  pin: <><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z" /><circle cx="12" cy="9.5" r="2.5" /></>,
   tag: <><path d="M3 12V4h8l10 10-8 8z" /><circle cx="7.5" cy="8.5" r="1.4" /></>,
   note: <><path d="M5 3h10l4 4v14H5z" /><path d="M9 12h6M9 16h4" /></>,
   deposit: <><path d="M12 3a9 9 0 1 0 9 9h-9z" /><path d="M15 3.5A9 9 0 0 1 20.5 9H15z" /></>,
@@ -75,6 +76,15 @@ export function Field({ label, hint, children, style, className = '' }) {
 
 export function Pill({ kind, children }) {
   return <span className={`pill ${kind}`}>{children}</span>;
+}
+
+/** An invoice's status; an eye means the client has opened it (Overdue 👁, Partially paid 👁). */
+export function StatusPill({ st, extra = '' }) {
+  return (
+    <span className={`pill ${st.key}`} title={st.seen ? 'Your client has opened it' : undefined}>
+      {st.label}{extra}{st.seen && st.key !== 'seen' && <span className="seen-eye"><Icon name="eye" size={12} /></span>}
+    </span>
+  );
 }
 
 export function Seg({ value, options, onChange, label }) {

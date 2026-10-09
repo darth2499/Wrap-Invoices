@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.jsx';
+import AddressInput from '../components/AddressInput.jsx';
 import { Button, Empty, Field, Icon, Modal, MoneyInput, Pill, Seg, Switch, Combobox } from '../components/ui.jsx';
 import { categoryList, categoryLabel } from '../lib/categories.js';
 import { addReceiptFile } from '../lib/receipts.js';
@@ -416,8 +417,8 @@ function TripModal({ trip, onClose }) {
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
         <Field label="Date"><input className="input" type="date" value={f.trip_date} onChange={(e) => setF({ ...f, trip_date: e.target.value })} /></Field>
         <Field label="Miles (one way)"><MoneyInput value={f.miles} onChange={(v) => setF({ ...f, miles: v })} /></Field>
-        <Field label="From"><input className="input" value={f.start_place} onChange={(e) => setF({ ...f, start_place: e.target.value })} placeholder="Home" /></Field>
-        <Field label="To"><input className="input" value={f.end_place} onChange={(e) => setF({ ...f, end_place: e.target.value })} placeholder="Shoot location" /></Field>
+        <Field label="From"><AddressInput value={f.start_place} onChange={(v) => setF({ ...f, start_place: v })} placeholder="Home" /></Field>
+        <Field label="To"><AddressInput value={f.end_place} onChange={(v) => setF({ ...f, end_place: v })} placeholder="Shoot location" /></Field>
       </div>
       <label className="check"><input type="checkbox" checked={f.round_trip} onChange={(e) => setF({ ...f, round_trip: e.target.checked })} />Round trip (counts the miles twice)</label>
       <Field label="Purpose"><input className="input" value={f.purpose} onChange={(e) => setF({ ...f, purpose: e.target.value })} placeholder="e.g. Brand shoot" /></Field>

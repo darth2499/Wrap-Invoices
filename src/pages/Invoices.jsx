@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../store.jsx';
-import { Button, Empty, Pill, Seg, Icon, Menu } from '../components/ui.jsx';
+import { Button, Empty, Seg, Icon, Menu, StatusPill } from '../components/ui.jsx';
 import * as A from '../lib/actions.js';
 import { statusOf, dueText } from '../lib/calc.js';
 import { money, fmtDate, num, todayISO, inPeriod, periodOptions } from '../lib/format.js';
@@ -88,6 +88,7 @@ export default function Invoices({ kind }) {
   const store = useStore();
   const actions = (r) => {
     const open = r.status !== 'void' && r.status !== 'paid' && (isQuote || r.status !== 'draft');
+    const life = A.lifecycle(store, r);
     return [
       { label: 'Edit', icon: 'edit', onClick: () => go(`/invoices/${r.id}/edit`) },
       open && { label: r.share_token ? 'Send again' : `Send ${isQuote ? 'quote' : 'invoice'}`, icon: 'mail', onClick: () => go(`/invoices/${r.id}?do=send`) },
@@ -95,8 +96,9 @@ export default function Invoices({ kind }) {
       !isQuote && open && { label: 'Record payment', icon: 'cash', onClick: () => go(`/invoices/${r.id}?do=pay`) },
       { label: 'Download PDF', icon: 'download', onClick: () => A.downloadPdf(store, r).catch((e) => store.toast(e.message, { error: true })) },
       { label: 'Duplicate', icon: 'copy', onClick: () => go(`/invoices/new?from=${r.id}`) },
-      { label: 'Delete', icon: 'trash', danger: true, onClick: () => A.confirmDelete(store, r) },
-      !isQuote && r.status !== 'draft' && r.status !== 'void' && { label: 'Void', icon: 'x', danger: true, onClick: async () => { if (await store.confirm({ title: `Void invoice #${r.number}?`, body: 'It stays in your records but no longer counts as owed.', ok: 'Void', danger: true })) await A.voidInvoice(store, r); } },
+      life.canUndraft && { label: 'Move back to draft', icon: 'history', onClick: () => A.moveToDraft(store, r) },
+      life.canDelete && { label: 'Delete', icon: 'trash', danger: true, onClick: () => A.confirmDelete(store, r) },
+      life.canVoid && { label: 'Void', icon: 'x', danger: true, onClick: async () => { if (await store.confirm({ title: `Void invoice #${r.number}?`, body: 'Your client has already seen it, so it stays in your records but no longer counts as owed.', ok: 'Void', danger: true })) await A.voidInvoice(store, r); } },
     ];
   };
 
@@ -132,7 +134,7 @@ export default function Invoices({ kind }) {
                 <span className="who">{r.client?.name || 'No client'}</span>
                 <span className="amt num">{money(isQuote || r.status === 'paid' || r.status === 'void' || r.status === 'draft' ? r.total : r.due)}</span>
                 <span className="meta">#{r.number} · {['sent'].includes(r.status) && !isQuote ? dueText(r, today) : fmtDate(r.issue_date)}{r.project?.name || r.notes ? ` · ${r.project?.name || r.notes}` : ''}</span>
-                <span className="st"><Pill kind={r.st.key}>{r.st.label}</Pill></span>
+                <span className="st"><StatusPill st={r.st} /></span>
               </button>
             ))}
             <div className="row between small" style={{ padding: '10px 16px', borderTop: '1px solid var(--line)' }}><span className="muted">{shown.length} shown</span><strong className="num">{money(sum)}</strong></div>
@@ -179,7 +181,7 @@ export default function Invoices({ kind }) {
 
 const amountOf = (r, isQuote) => money(isQuote || r.status === 'paid' || r.status === 'void' || r.status === 'draft' ? r.total : r.due);
 const COLS = {
-  status: { sort: (r) => r.st.label, label: () => 'Status', cell: (r) => <Pill kind={r.st.key}>{r.st.label}</Pill> },
+  status: { sort: (r) => r.st.label, label: () => 'Status', cell: (r) => <StatusPill st={r.st} /> },
   number: { sort: (r) => Number(r.number) || 0, label: () => 'No.', cell: (r) => <span className="num muted">{r.number}</span> },
   client: {
     sort: (r) => (r.client?.name || '').toLowerCase(),

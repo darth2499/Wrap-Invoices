@@ -1,0 +1,107 @@
+// "What's new" on the Overview: what happened lately and what's coming up, newest and most urgent first.
+//   Happened: a client opened an invoice, a payment came in, a quote was accepted, an invoice became overdue,
+//             automatic reminders went out.
+//   Today:    invoices due today, receipts waiting to be checked, tax deadlines.
+//   Coming:   invoices due in the next few days, tax deadlines in the next 3 weeks.
+import { addDays, daysBetween, money, num } from './format.js';
+
+const RECENT_DAYS = 14;
+
+/** A tax deadline moves to the next weekday when it lands on a weekend. */
+function weekday(iso) {
+  const d = new Date(`${iso}T12:00:00`);
+  const shift = d.getDay() === 6 ? 2 : d.getDay() === 0 ? 1 : 0;
+  return shift ? addDays(iso, shift) : iso;
+}
+
+/** Federal deadlines a freelancer cares about, around today. */
+export function taxDates(today, { quarterly = true, crew = false } = {}) {
+  const y = Number(today.slice(0, 4));
+  const out = [];
+  for (const yr of [y - 1, y, y + 1]) {
+    out.push({ date: weekday(`${yr}-04-15`), title: `${yr - 1} tax return due`, sub: 'Federal income tax return (Form 1040 with Schedule C)', go: '/taxes', kind: 'return' });
+    if (quarterly) {
+      out.push({ date: weekday(`${yr}-04-15`), title: `Q1 estimated tax due`, sub: `For ${yr} income (Jan–Mar)`, go: '/reports/quarterly', kind: 'q' });
+      out.push({ date: weekday(`${yr}-06-15`), title: `Q2 estimated tax due`, sub: `For ${yr} income (Apr–May)`, go: '/reports/quarterly', kind: 'q' });
+      out.push({ date: weekday(`${yr}-09-15`), title: `Q3 estimated tax due`, sub: `For ${yr} income (Jun–Aug)`, go: '/reports/quarterly', kind: 'q' });
+      out.push({ date: weekday(`${yr}-01-15`), title: `Q4 estimated tax due`, sub: `For ${yr - 1} income (Sep–Dec)`, go: '/reports/quarterly', kind: 'q' });
+    }
+    if (crew) out.push({ date: weekday(`${yr}-01-31`), title: '1099-NEC forms due', sub: `Send them to crew you paid in ${yr - 1}`, go: '/reports/1099', kind: '1099' });
+  }
+  return out;
+}
+
+const ago = (iso, today) => {
+  const d = daysBetween(iso.slice(0, 10), today);
+  return d <= 0 ? 'Today' : d === 1 ? 'Yesterday' : `${d} days ago`;
+};
+const ahead = (iso, today) => {
+  const d = daysBetween(today, iso);
+  return d <= 0 ? 'Today' : d === 1 ? 'Tomorrow' : `In ${d} days`;
+};
+
+/** Builds the feed. Each item: { key, icon, tone, title, sub, when, at, go } — `at` is when it happened (for "new" dots). */
+export function buildFeed({ db, derived, statusOf, today }) {
+  const items = [];
+  const cutoff = addDays(today, -RECENT_DAYS);
+  const who = (inv) => derived.clients[inv.client_id]?.name || 'No client';
+  const invoices = db.invoices.filter((i) => i.kind === 'invoice');
+
+  for (const inv of db.invoices) {
+    // Client opened the link
+    if (inv.last_viewed_at && inv.last_viewed_at.slice(0, 10) >= cutoff && inv.status !== 'void') {
+      items.push({ key: `v${inv.id}`, icon: 'eye', tone: 'seen', title: `${who(inv)} opened #${inv.number}`, sub: num(inv.view_count) > 1 ? `Viewed ${inv.view_count} times` : 'First time they opened it', at: inv.last_viewed_at, when: ago(inv.last_viewed_at, today), go: `/invoices/${inv.id}` });
+    }
+    if (inv.kind === 'quote' && inv.status === 'accepted') {
+      items.push({ key: `a${inv.id}`, icon: 'check', tone: 'good', title: `Quote #${inv.number} accepted`, sub: `${who(inv)} · turn it into an invoice`, at: inv.updated_at || today, when: ago(inv.updated_at || today, today), go: `/invoices/${inv.id}` });
+    }
+  }
+
+  for (const inv of invoices.filter((i) => i.status === 'sent')) {
+    const paid = derived.paidFor(inv.id);
+    const st = statusOf(inv, paid, today);
+    const left = num(inv.total) - paid;
+    if (!inv.due_date || st.key === 'ready') continue;
+    if (inv.due_date === today) {
+      items.push({ key: `d${inv.id}`, icon: 'calendar', tone: 'warn', title: `#${inv.number} is due today`, sub: `${who(inv)} · ${money(left)}`, at: `${today}T00:00:00`, when: 'Today', go: `/invoices/${inv.id}`, urgent: true });
+    } else if (inv.due_date < today && inv.due_date >= addDays(today, -7)) {
+      // Became overdue this week (older ones are in "Needs attention")
+      const day = addDays(inv.due_date, 1);
+      items.push({ key: `o${inv.id}`, icon: 'bell', tone: 'bad', title: `#${inv.number} became overdue`, sub: `${who(inv)} · ${money(left)}`, at: `${day}T00:00:00`, when: ago(day, today), go: `/invoices/${inv.id}` });
+    } else if (inv.due_date > today && inv.due_date <= addDays(today, 3)) {
+      items.push({ key: `s${inv.id}`, icon: 'calendar', tone: 'muted', title: `#${inv.number} due soon`, sub: `${who(inv)} · ${money(left)}`, at: null, when: ahead(inv.due_date, today), go: `/invoices/${inv.id}`, upcoming: inv.due_date });
+    }
+  }
+
+  // Payments in
+  for (const p of db.payments.filter((x) => x.paid_on && x.paid_on >= cutoff)) {
+    const inv = derived.invoices[p.invoice_id];
+    if (!inv) continue;
+    items.push({ key: `p${p.id}`, icon: 'cash', tone: 'good', title: `${money(p.amount)} received`, sub: `${who(inv)} · #${inv.number}${inv.status === 'paid' ? ' · paid in full' : ''}`, at: p.created_at || `${p.paid_on}T12:00:00`, when: ago(p.paid_on, today), go: `/invoices/${inv.id}` });
+  }
+
+  // Automatic reminders that went out
+  for (const e of db.invoice_events.filter((x) => x.type === 'reminder' && x.created_at?.slice(0, 10) >= addDays(today, -7))) {
+    const inv = derived.invoices[e.invoice_id];
+    if (inv) items.push({ key: `r${e.id}`, icon: 'mail', tone: 'muted', title: `Reminder sent for #${inv.number}`, sub: who(inv), at: e.created_at, when: ago(e.created_at, today), go: `/invoices/${inv.id}` });
+  }
+
+  // Receipts waiting to be checked
+  const review = db.receipts.filter((r) => r.status === 'review');
+  if (review.length) {
+    const newest = review.map((r) => r.created_at || '').sort().pop() || today;
+    items.push({ key: 'review', icon: 'receipt', tone: 'warn', title: `${review.length} receipt${review.length === 1 ? '' : 's'} to check`, sub: 'Confirm what was read automatically', at: newest, when: ago(newest, today), go: '/expenses?status=review' });
+  }
+
+  // Tax deadlines: from 3 weeks ahead until the day itself
+  const crew = db.crew_payouts.some((c) => (c.paid_on || c.work_date || '').startsWith(String(Number(today.slice(0, 4)) - 1)));
+  for (const t of taxDates(today, { quarterly: num(db.profile.tax_set_aside_pct) > 0, crew })) {
+    if (t.date < today || t.date > addDays(today, 21)) continue;
+    items.push({ key: `t${t.kind}${t.date}${t.title}`, icon: 'file', tone: t.date === today ? 'bad' : 'warn', title: t.title, sub: t.sub, at: null, when: ahead(t.date, today), go: t.go, upcoming: t.date, urgent: t.date === today });
+  }
+
+  // Urgent first, then what happened (newest first), then what's coming (soonest first).
+  const rank = (x) => (x.urgent ? 0 : x.upcoming ? 2 : 1);
+  return items.sort((a, b) => rank(a) - rank(b)
+    || (a.upcoming && b.upcoming ? a.upcoming.localeCompare(b.upcoming) : String(b.at || '').localeCompare(String(a.at || ''))));
+}

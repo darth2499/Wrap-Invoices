@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store.jsx';
 import { Button, Icon, Pill, Empty } from '../components/ui.jsx';
 import { ForecastChart, MonthBars, MONTHS } from '../components/charts.jsx';
@@ -6,6 +6,7 @@ import { forecastYear, forecastExpenses } from '../lib/forecast.js';
 import { statusOf, dueText } from '../lib/calc.js';
 import { money, moneyK, num, todayISO, plural } from '../lib/format.js';
 import { go } from '../router.js';
+import { buildFeed } from '../lib/feed.js';
 
 export default function Overview() {
   const { db, derived } = useStore();
@@ -42,8 +43,7 @@ export default function Overview() {
       );
     }
     const drafts = db.invoices.filter((i) => i.kind === 'invoice' && i.status === 'draft');
-    const accepted = db.invoices.filter((i) => i.kind === 'quote' && i.status === 'accepted');
-    return { open, overdue, paidYtd, expYtd, owed, labels, years, billed, exp, drafts, accepted, f: forecastYear(db.invoices, today), fx: forecastExpenses(db.receipts, db.crew_payouts, today) };
+    return { open, overdue, paidYtd, expYtd, owed, labels, years, billed, exp, drafts, f: forecastYear(db.invoices, today), fx: forecastExpenses(db.receipts, db.crew_payouts, today) };
   }, [db, derived, today, year]);
 
   const outstanding = data.open.reduce((s, i) => s + i.due, 0);
@@ -52,7 +52,6 @@ export default function Overview() {
   const review = db.receipts.filter((r) => r.status === 'review');
   const attention = [
     ...data.overdue.sort((a, b) => b.st.days - a.st.days).map((i) => ({ key: i.id, title: `${derived.clients[i.client_id]?.name || 'No client'} · #${i.number}`, sub: dueText(i, today), amount: i.due, bad: true, go: `/invoices/${i.id}` })),
-    ...data.accepted.map((q) => ({ key: q.id, title: `Quote #${q.number} accepted`, sub: `${derived.clients[q.client_id]?.name || ''} — turn it into an invoice`, amount: num(q.total), go: `/invoices/${q.id}` })),
     ...data.drafts.map((i) => ({ key: i.id, title: `Draft #${i.number} · ${derived.clients[i.client_id]?.name || 'No client'}`, sub: 'Not sent yet', amount: num(i.total), go: `/invoices/${i.id}` })),
   ];
 
@@ -77,17 +76,13 @@ export default function Overview() {
         <Kpi label={`Expenses in ${year}`} value={money(data.expYtd, { cents: false })} sub={review.length ? `${review.length} receipts to review` : 'From your receipts'} onClick={() => go('/expenses')} />
       </div>
 
+      <WhatsNew />
+
       <div className="grid-2 attention-row">
         <section className="card">
           <div className="card-head"><h2>Needs attention</h2>{data.overdue.length > 0 && <a href="#/invoices?f=overdue" className="small">All overdue</a>}</div>
-          {attention.length === 0 && review.length === 0 && <Empty icon="check" title="All caught up" />}
-          {review.length > 0 && (
-            <button className="list-row" style={{ gridTemplateColumns: '1fr auto' }} onClick={() => go('/expenses?status=review')}>
-              <span className="col" style={{ gap: 2 }}><b style={{ fontWeight: 500 }}>{plural(review.length, 'receipt')} to check</b><span className="small muted">Confirm what was read automatically</span></span>
-              <Pill kind="review">Review</Pill>
-            </button>
-          )}
-          {attention.slice(0, review.length ? 4 : 5).map((a) => (
+          {attention.length === 0 && <Empty icon="check" title="All caught up" />}
+          {attention.slice(0, 5).map((a) => (
             <button key={a.key} className="list-row" style={{ gridTemplateColumns: '1fr auto' }} onClick={() => go(a.go)}>
               <span className="col" style={{ gap: 2 }}><b style={{ fontWeight: 500 }}>{a.title}</b><span className="small" style={{ color: a.bad ? 'var(--bad)' : 'var(--muted)' }}>{a.sub}</span></span>
               <span className="num">{money(a.amount)}</span>
@@ -176,5 +171,42 @@ function ForecastHeadline({ net, growth }) {
     <div className="forecast-headline">
       {before}<span style={{ color: net >= 0 ? 'var(--accent)' : 'var(--bad)' }}>{moneyK(Math.abs(net))}</span>{after}
     </div>
+  );
+}
+
+/** What happened lately and what's coming up. A dot marks anything new since your last visit. */
+function WhatsNew() {
+  const { db, derived } = useStore();
+  const today = todayISO();
+  const items = useMemo(() => buildFeed({ db, derived, statusOf, today }), [db, derived, today]);
+  const [lastSeen] = useState(() => { try { return localStorage.getItem('wrap_feed_seen') || ''; } catch { return ''; } });
+  useEffect(() => { try { localStorage.setItem('wrap_feed_seen', new Date().toISOString()); } catch { /* not saved */ } }, []);
+  const [all, setAll] = useState(false);
+  if (!items.length) return null;
+  const isNew = (x) => x.at && lastSeen && x.at > lastSeen;
+  const fresh = items.filter(isNew).length;
+  const shown = all ? items : items.slice(0, 6);
+  return (
+    <section className="card feed">
+      <div className="card-head"><h2>What’s new{fresh > 0 && <span className="count-badge on" style={{ marginLeft: 8 }}>{fresh}</span>}</h2></div>
+      <div className="feed-list">
+        {shown.map((x) => (
+          <button key={x.key} type="button" className="feed-row" onClick={() => go(x.go)}>
+            <span className={`feed-icon tone-${x.tone}`}><Icon name={x.icon} size={16} /></span>
+            <span className="col" style={{ gap: 1, minWidth: 0 }}>
+              <b className="ellip">{x.title}</b>
+              <span className="small muted ellip">{x.sub}</span>
+            </span>
+            <span className="feed-when">{isNew(x) && <i className="feed-dot" aria-label="New" />}{x.when}</span>
+          </button>
+        ))}
+      </div>
+      {items.length > 6 && (
+        <button type="button" className="feed-more" onClick={() => setAll((v) => !v)} aria-expanded={all}>
+          <Icon name="chevD" size={16} style={{ transform: all ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+          {all ? 'Less' : `${items.length - 6} more`}
+        </button>
+      )}
+    </section>
   );
 }

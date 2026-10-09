@@ -1,7 +1,8 @@
 // Shoot calendar: every day you worked (from invoice line dates), so you can see where each invoice lands.
 import { useEffect, useMemo, useState } from 'react';
+import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import { useStore } from '../store.jsx';
-import { Button, Pill, Seg } from '../components/ui.jsx';
+import { Button, Modal, Seg, StatusPill } from '../components/ui.jsx';
 import { shootDays } from '../lib/shoots.js';
 import { statusOf } from '../lib/calc.js';
 import { money, todayISO } from '../lib/format.js';
@@ -14,7 +15,7 @@ export default function Calendar() {
   const { db, derived } = useStore();
   const today = todayISO();
   const [ym, setYm] = useState(today.slice(0, 7));
-  const [pick, setPick] = useState(null); // a day with several invoices: { items, x, y }
+  const [day, setDay] = useState(null); // the day you tapped: { date, items, i }
   const [view, setView] = useState(() => { try { return localStorage.getItem('wrap_cal_view') || 'shoots'; } catch { return 'shoots'; } });
   const pickView = (v) => { setView(v); try { localStorage.setItem('wrap_cal_view', v); } catch { /* not saved */ } };
 
@@ -39,22 +40,9 @@ export default function Calendar() {
   while (cells.length % 7) cells.push(null);
   const shift = (k) => { const d = new Date(y, m - 1 + k, 1); setYm(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`); };
   const monthDays = Object.keys(byDate).filter((d) => d.startsWith(ym)).length;
-  useEffect(() => {
-    if (!pick) return undefined;
-    const close = (e) => { if (!e.target.closest?.('.cal-pick')) setPick(null); };
-    const esc = (e) => e.key === 'Escape' && setPick(null);
-    document.addEventListener('pointerdown', close);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('keydown', esc);
-    return () => { document.removeEventListener('pointerdown', close); window.removeEventListener('scroll', close, true); window.removeEventListener('keydown', esc); };
-  }, [pick]);
-  // Tap a day: one invoice opens it; several show a short list to pick from.
-  const open = (items, e) => {
-    if (items.length === 1) return go(`/invoices/${items[0].inv.id}`);
-    const r = e.currentTarget.getBoundingClientRect();
-    const w = 260;
-    return setPick({ items, x: Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)), y: r.bottom + 6 });
-  };
+  // Tap a day to see its invoice right here (several on one day: switch between them).
+  const open = (date, items) => setDay({ date, items, i: 0 });
+
 
   return (
     <div className="page">
@@ -78,7 +66,7 @@ export default function Calendar() {
             const items = byDate[d] || [];
             if (!items.length) return <span key={d} className={`cal-cell ${d === today ? 'today' : ''}`}><span className="cal-num">{Number(d.slice(8))}</span></span>;
             return (
-              <button type="button" key={d} className={`cal-cell has ${d === today ? 'today' : ''}`} onClick={(e) => open(items, e)} aria-label={`${d}: ${items.length ? items.map((x) => `${x.label} (#${x.inv.number})`).join(', ') : 'no shoots'}`}>
+              <button type="button" key={d} className={`cal-cell has ${d === today ? 'today' : ''}`} onClick={() => open(d, items)} aria-label={`${d}: ${items.length ? items.map((x) => `${x.label} (#${x.inv.number})`).join(', ') : 'no shoots'}`}>
                 <span className="cal-num">{Number(d.slice(8))}</span>
                 <span className="cal-chips">
                   {items.slice(0, 3).map((x, k) => (
@@ -93,16 +81,38 @@ export default function Calendar() {
         </div>
       </section>
 
-      {pick && (
-        <div className="cal-pick" style={{ left: pick.x, top: pick.y }} role="menu">
-          {pick.items.map((x, k) => (
-            <button type="button" role="menuitem" key={k} onClick={() => go(`/invoices/${x.inv.id}`)}>
-              <span className="col" style={{ gap: 0, minWidth: 0 }}><b className="ellip">{x.label}</b><span className="small muted">#{x.inv.number} · {money(x.inv.total)}</span></span>
-              <Pill kind={x.st.key}>{x.st.label}</Pill>
-            </button>
+      {day && <DayPreview day={day} setDay={setDay} />}
+    </div>
+  );
+}
+
+/** The tapped day's invoice, shown over the calendar, with a way to open or edit it. */
+function DayPreview({ day, setDay }) {
+  const s = useStore();
+  const { db, derived } = s;
+  const x = day.items[day.i];
+  const inv = x.inv;
+  const [logoUrl, setLogoUrl] = useState(null);
+  useEffect(() => { if (db.profile.logo_key) s.api.files.urls([db.profile.logo_key]).then((u) => setLogoUrl(u[db.profile.logo_key])).catch(() => {}); }, [db.profile.logo_key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const close = () => setDay(null);
+  const when = new Date(`${day.date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  return (
+    <Modal wide title={when} onClose={close} footer={<>
+      {inv.status !== 'void' && <Button icon="edit" onClick={() => go(`/invoices/${inv.id}/edit`)}>Edit</Button>}
+      <Button variant="primary" onClick={() => go(`/invoices/${inv.id}`)}>Open {inv.kind === 'quote' ? 'quote' : 'invoice'}</Button>
+    </>}>
+      {day.items.length > 1 && (
+        <div className="row wrap" style={{ gap: 6 }}>
+          {day.items.map((it, k) => (
+            <button key={k} type="button" className={`ed-opt ${k === day.i ? 'on' : ''}`} onClick={() => setDay({ ...day, i: k })}>#{it.inv.number} · {it.label}</button>
           ))}
         </div>
       )}
-    </div>
+      <div className="row between" style={{ gap: 10 }}>
+        <span className="row" style={{ gap: 8 }}><b>#{inv.number}</b><StatusPill st={x.st} /></span>
+        <span className="num muted">{money(inv.total)}</span>
+      </div>
+      <InvoiceDoc business={db.profile} invoice={inv} client={derived.clients[inv.client_id]} lines={derived.linesFor(inv.id)} payments={db.payments.filter((p) => p.invoice_id === inv.id)} logoUrl={logoUrl} />
+    </Modal>
   );
 }

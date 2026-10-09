@@ -95,7 +95,12 @@ export default function InvoiceEditor({ id, kind: kindProp = 'invoice', fromId, 
     }
     return { jobs: [blankJob(defaultRate(db), defaultRole(db))], other: [] };
   });
-  const [attachIds, setAttachIds] = useState(() => new Set(existing ? db.receipts.filter((r) => r.invoice_id === existing.id).map((r) => r.id) : []));
+  // Receipts attached as backup only. Billed ones live on their lines, so removing the line frees the receipt again.
+  const [attachIds, setAttachIds] = useState(() => {
+    if (!existing) return new Set();
+    const billed = new Set(derived.linesFor(existing.id).flatMap(lineReceipts));
+    return new Set(db.receipts.filter((r) => r.invoice_id === existing.id && !billed.has(r.id)).map((r) => r.id));
+  });
   const [mileageIds, setMileageIds] = useState(() => new Set(existing ? db.mileage_trips.filter((t) => t.invoice_id === existing.id).map((t) => t.id) : []));
   const [summary, setSummary] = useState('');
   const [busy, setBusy] = useState(false);
@@ -489,6 +494,17 @@ function BasicLines({ lines, setLines, db, issueDate, openPicker }) {
       exclude: new Set(lines.flatMap(lineReceipts)), onPick,
     }),
   };
+  // Folds a line into the one above as an add-on (e.g. a billed parking receipt into the shoot day it belongs to).
+  const nest = (key) => setLines((ls) => {
+    const i = ls.findIndex((x) => x.key === key);
+    if (i < 1) return ls;
+    const l = ls[i];
+    const own = { id: uid(), label: l.item || 'Expense', qty: num(l.qty) || 1, rate: num(l.rate), receipt_id: l.receipt_id || null, unit: null };
+    const c = [...ls];
+    c[i - 1] = { ...c[i - 1], addons: [...(c[i - 1].addons || []), own, ...(l.addons || [])] };
+    c.splice(i, 1);
+    return c;
+  });
   const addChoice = (c) => setLines((ls) => [...ls.filter((l) => l.item || num(l.rate) || l.description || l.addons?.length), blankLine({ kind: c.kind || 'labor', item: c.name, description: c.desc || '', rate: c.rate || 0, base_rate: c.rate || 0, day_type: c.day ? 'Full day' : null, focus: true })]);
 
   return (
@@ -498,8 +514,8 @@ function BasicLines({ lines, setLines, db, issueDate, openPicker }) {
           {lines.length > 0 && <div className="line-head" style={{ gridTemplateColumns: cols }}>
             <span>Item</span><span>Description</span><span>Qty</span><span>Price</span>{hasTax && <span>Tax</span>}<span className="right">Amount</span><span />
           </div>}
-          {lines.map((l) => (
-            <BasicLine key={l.key} l={l} issueDate={issueDate} cols={cols} dragging={dragKey === l.key} onGrip={(e) => startDrag(l.key, e)} catalog={catalog} db={db} hasTax={hasTax} addonRates={addonRates} addonCtx={addonCtx} upd={upd} move={move} remove={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} dup={() => setLines((ls) => { const i = ls.findIndex((x) => x.key === l.key); const c = [...ls]; c.splice(i + 1, 0, { ...l, key: uid(), receipt_id: null }); return c; })} />
+          {lines.map((l, i) => (
+            <BasicLine key={l.key} l={l} nest={i > 0 ? () => nest(l.key) : null} issueDate={issueDate} cols={cols} dragging={dragKey === l.key} onGrip={(e) => startDrag(l.key, e)} catalog={catalog} db={db} hasTax={hasTax} addonRates={addonRates} addonCtx={addonCtx} upd={upd} move={move} remove={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} dup={() => setLines((ls) => { const i = ls.findIndex((x) => x.key === l.key); const c = [...ls]; c.splice(i + 1, 0, { ...l, key: uid(), receipt_id: null }); return c; })} />
           ))}
         </div>
       </div>
@@ -573,7 +589,7 @@ const ADDONS = [
   { label: '', name: 'Other' },
 ];
 
-function BasicLine({ l, cols, catalog, db, hasTax, addonRates, addonCtx, upd, move, remove, dup, dragging, onGrip, issueDate }) {
+function BasicLine({ l, nest, cols, catalog, db, hasTax, addonRates, addonCtx, upd, move, remove, dup, dragging, onGrip, issueDate }) {
   const [calOpen, setCalOpen] = useState(false);
   // Shoot dates are saved on the line (they show on the Calendar); older lines fall back to the dates in the description.
   const [calDates, setCalDates] = useState(() => (Array.isArray(l.dates) && l.dates.length ? l.dates : (() => { const m = String(l.description || '').match(/\((\d{2}\/\d{2}(?:-\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:-\d{2}\/\d{2})?)*)\)/); return m ? datesFromCode(m[1], issueDate) : []; })()));
@@ -637,6 +653,7 @@ function BasicLine({ l, cols, catalog, db, hasTax, addonRates, addonCtx, upd, mo
       <div className="c-menu row" style={{ gap: 0, flexWrap: 'nowrap' }}><span className="grip" onPointerDown={onGrip} aria-label="Drag to reorder" role="button" tabIndex={-1}><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg></span><Menu label="" icon="more" variant="ghost icon" items={[
         { label: 'Move up', icon: 'chevL', onClick: () => move(l.key, -1) },
         { label: 'Move down', icon: 'chevR', onClick: () => move(l.key, 1) },
+        nest && { label: 'Make it an add-on of the line above', icon: 'chevL', onClick: nest },
         { label: 'Duplicate', icon: 'copy', onClick: dup },
         { label: 'Delete line', icon: 'trash', danger: true, onClick: remove },
       ]} /></div>

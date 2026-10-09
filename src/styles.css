@@ -129,6 +129,8 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
 .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
 .pill.draft, .pill.ready { background: #ededea; color: var(--ink-2); }
 .pill.sent { background: var(--accent-bg); color: var(--accent-ink); }
+.pill.seen, .st-seen { background: #e3f1f6; color: #145a73; }
+.pill .seen-eye { margin-left: 4px; vertical-align: -2px; opacity: .8; }
 .pill.partial { background: var(--warn-bg); color: var(--warn); }
 .pill.overdue { background: var(--bad-bg); color: #a8231a; }
 .pill.paid, .pill.accepted, .pill.good { background: var(--good-bg); color: var(--good); }
@@ -208,7 +210,7 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
 .login { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
 .spinner { width: 18px; height: 18px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media print { .side, .no-print { display: none !important; } .main { padding: 0; } body { background: #fff; } }
+@media print { .side, .no-print { display: none !important; } .main { padding: 0; margin-left: 0 !important; } body { background: #fff; } }
 .page > .seg, .col > .seg { align-self: flex-start; }
 
 /* ---------- phone layout ---------- */
@@ -363,9 +365,11 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
 @media (max-width: 800px) { .basic-line { grid-template-columns: 1fr 1fr 72px !important; } }
 /* desktop sidebar stays put, so sign out / exit demo is always in the bottom-left corner */
 @media (min-width: 801px) {
-  .side { position: sticky; top: 0; height: 100vh; overflow-y: auto; align-self: flex-start; flex: 0 0 220px; }
+  /* Pinned to the window (not sticky), so it never nudges while the page scrolls or bounces. */
+  .side { position: fixed; top: 0; bottom: 0; left: 0; width: 220px; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; z-index: 20; background: var(--bg); }
   .shell { flex-wrap: nowrap; }
-  .main { min-width: 0; flex: 1 1 auto; }
+  .main { min-width: 0; flex: 1 1 auto; margin-left: 220px; }
+  html { overscroll-behavior-y: none; scrollbar-gutter: stable; }
 }
 /* ---------- shoot calendar ---------- */
 .scal { padding: 10px; width: 100%; align-self: stretch; }
@@ -375,10 +379,6 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
 .cal-cell:not(.has) { cursor: default; }
 .cal-cell.has:hover { background: var(--hover); }
 .cal-cell.has:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
-.cal-pick { position: fixed; z-index: 60; width: 260px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.16); padding: 6px; display: flex; flex-direction: column; gap: 2px; animation: ed-in .15s ease; }
-.cal-pick button { all: unset; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--ink); }
-.cal-pick button:hover { background: var(--hover); }
-.cal-pick b { font-weight: 500; }
 .cal-num { font-size: 12.5px; font-weight: 500; color: var(--ink-2); width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; }
 .cal-cell.today .cal-num { background: var(--primary); color: var(--on-primary); }
 .cal-chips { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -627,3 +627,30 @@ html.vt-wipe::view-transition-old(wrap-orb) { display: none; }
 .addon-qty .unit { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--muted); pointer-events: none; }
 :root[data-theme='dark'] .daychip.ot { background: #3a2f1a; border-color: #8a6a2e; }
 .addon-qty:has(.unit) .input { padding-right: 28px; }
+
+:root[data-theme='dark'] .pill.seen, :root[data-theme='dark'] .st-seen { background: #173845; color: #8fd0e6; }
+@media (max-width: 800px) { .cal-dots .st-seen { background: #3a9ec2; } }
+
+/* ---------- What's new (Overview) ---------- */
+.feed-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; padding: 0 12px 8px; }
+.feed-row { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 8px; border-radius: 10px; cursor: pointer; border-top: 1px solid var(--line-2); }
+.feed-row:nth-child(-n+2) { border-top: 0; }
+.feed-row:hover { background: var(--hover); }
+.feed-row b { font-weight: 500; }
+.feed-icon { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: var(--sunken); color: var(--muted); }
+.feed-icon.tone-good { background: var(--good-bg); color: var(--good); }
+.feed-icon.tone-bad { background: var(--bad-bg); color: var(--bad); }
+.feed-icon.tone-warn { background: var(--warn-bg); color: var(--warn); }
+.feed-icon.tone-seen { background: #e3f1f6; color: #145a73; }
+:root[data-theme='dark'] .feed-icon.tone-seen { background: #173845; color: #8fd0e6; }
+.feed-when { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.feed-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.feed-more { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px; border-top: 1px solid var(--line-2); font-size: 13px; color: var(--muted); box-sizing: border-box; }
+.feed-more:hover { color: var(--ink); background: var(--hover); }
+@media (max-width: 800px) { .feed-list { grid-template-columns: 1fr; } .feed-row:nth-child(2) { border-top: 1px solid var(--line-2); } }
+
+/* Address suggestions */
+.addr { position: relative; }
+.addr-list { position: absolute; left: 0; right: 0; min-width: min(340px, 86vw); top: calc(100% + 4px); z-index: 40; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.16); padding: 6px; }
+.addr-list .item-opt { justify-content: flex-start; color: var(--ink); }
+.addr-list .item-opt > svg { color: var(--muted); flex: none; }

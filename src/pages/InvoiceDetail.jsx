@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.jsx';
-import { Button, Field, Menu, Modal, MoneyInput, Pill, Switch, Empty } from '../components/ui.jsx';
+import { Button, Field, Menu, Modal, MoneyInput, Switch, Empty, StatusPill } from '../components/ui.jsx';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import EmailPreview from '../components/EmailPreview.jsx';
 import { buildInvoiceEmail } from '../lib/emailTemplate.js';
@@ -61,6 +61,7 @@ export default function InvoiceDetail({ id }) {
     }
   };
 
+  const life = A.lifecycle(s, inv);
   const more = [
     { label: 'Duplicate', icon: 'copy', onClick: () => go(`/invoices/new?from=${inv.id}`) },
     !isQuote && inv.status === 'sent' && !inv.sent_at && { label: 'Mark as sent (sent another way)', icon: 'check', onClick: () => run('sent', () => A.markSent(s, inv), 'Marked as sent') },
@@ -69,14 +70,15 @@ export default function InvoiceDetail({ id }) {
     isQuote && ['sent', 'draft', 'accepted'].includes(inv.status) && { label: 'Mark declined', icon: 'x', onClick: () => run('dec', () => s.update('invoices', inv.id, { status: 'declined' }), 'Marked declined') },
     inv.share_token && { label: 'Open client link', icon: 'eye', onClick: () => window.open(shareUrl(inv.share_token) + '?preview=1', '_blank') },
     inv.share_token && { label: 'Turn off client link', icon: 'x', onClick: async () => (await s.confirm({ title: 'Turn off the client link?', body: 'The link you sent stops working right away. Sending again makes a new link.', ok: 'Turn off' })) && run('unshare', () => s.update('invoices', inv.id, { share_token: null }), 'Client link turned off') },
+    life.canUndraft && { label: 'Move back to draft', icon: 'history', onClick: () => A.moveToDraft(s, inv) },
     inv.status === 'void' && { label: 'Undo void', icon: 'history', onClick: () => run('unvoid', () => A.unvoidInvoice(s, inv), 'Restored') },
-    {
+    life.canDelete && {
       label: `Delete ${label.toLowerCase()}`, icon: 'trash', danger: true,
       onClick: async () => { if (await A.confirmDelete(s, inv)) go(isQuote ? '/quotes' : '/invoices'); },
     },
-    inv.status !== 'void' && inv.status !== 'draft' && !isQuote && {
+    life.canVoid && {
       label: 'Void invoice', icon: 'x', danger: true,
-      onClick: async () => (await s.confirm({ title: `Void invoice #${inv.number}?`, body: 'It stays in your records (numbers stay in order) but no longer counts as owed. The client link will say it’s no longer active.', ok: 'Void', danger: true })) && run('void', () => A.voidInvoice(s, inv), 'Voided'),
+      onClick: async () => (await s.confirm({ title: `Void invoice #${inv.number}?`, body: 'Your client has already seen it, so it stays in your records (numbers stay in order) but no longer counts as owed. The client link will say it’s no longer active.', ok: 'Void', danger: true })) && run('void', () => A.voidInvoice(s, inv), 'Voided'),
     },
   ];
 
@@ -87,7 +89,7 @@ export default function InvoiceDetail({ id }) {
           <a href={isQuote ? '#/quotes' : '#/invoices'} className="small">← All {isQuote ? 'quotes' : 'invoices'}</a>
           <div className="row wrap" style={{ gap: 12 }}>
             <h1>{label} #{inv.number}</h1>
-            <Pill kind={st.key}>{st.label}{st.key === 'overdue' ? ` · ${st.days} days` : ''}</Pill>
+            <StatusPill st={st} extra={st.key === 'overdue' ? ` · ${st.days} days` : ''} />
             {inv.version > 1 && <span className="pill draft">Version {inv.version}</span>}
           </div>
           <span className="muted">{client?.name || 'No client'} · {money(inv.total)}{!isQuote && inv.status === 'sent' ? ` · ${dueText(inv)}` : ''}</span>

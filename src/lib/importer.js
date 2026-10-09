@@ -239,6 +239,42 @@ export async function importExpenses(list, { db, api, onStep = () => {} }) {
   return { created: rows.length, skipped };
 }
 
+/**
+ * Turns the breakdown you typed into a Wave line into add-ons, so it opens in Wrap as pieces you can edit:
+ *   Camera Operator · $2,240.55        →  Camera Operator  $750
+ *   Google (10/05)                          ↳ Travel    2 × $375
+ *   Travel ($375 x2)                        ↳ Per Diem  3 × $80
+ *   Per Diem ($80 x3)                       ↳ Hotel     1 × $500.55
+ *   Hotel ($500.55)
+ * Only when the pieces add up (the rest is the base price); otherwise the line is left exactly as it was.
+ */
+export function withAddons(l) {
+  if (num(l.qty) !== 1) return l;
+  const rows = [l.description, l.note].filter(Boolean).join('\n').split('\n').map((x) => x.trim()).filter(Boolean);
+  const MI = /^(.+?)\s*\(\s*([\d,.]+)\s*mi(?:les)?\s*[x×@]\s*\$([\d.]+)\s*\)$/i;
+  const ADD = /^(.+?)\s*\(\s*\$([\d,]+(?:\.\d+)?)\s*(?:[x×]\s*(\d+(?:\.\d+)?))?\s*\)$/i;
+  const keep = [];
+  const items = [];
+  for (const row of rows) {
+    const mi = row.match(MI);
+    const a = !mi && row.match(ADD);
+    if (mi) items.push({ label: mi[1].trim(), qty: num(mi[2]), rate: num(mi[3]), unit: 'mi' });
+    else if (a) items.push({ label: a[1].trim(), qty: a[3] ? num(a[3]) : 1, rate: num(a[2]) });
+    else keep.push(row);
+  }
+  if (!items.length) return l;
+  // "Camera Operator ($750 x2)" is the base itself, not an add-on.
+  const baseRow = items.findIndex((x) => x.label.toLowerCase() === String(l.item || '').trim().toLowerCase());
+  const base = baseRow >= 0 ? items.splice(baseRow, 1)[0] : null;
+  const extra = items.reduce((t, x) => t + x.qty * x.rate, 0);
+  const rest = round2(num(l.amount) - extra);
+  if (rest < 0 || (base && Math.abs(base.qty * base.rate - rest) > 0.01)) return l;
+  return {
+    ...l, description: rows.join('\n'), note: '',
+    extras: { desc: keep.join('\n'), qty: base ? base.qty : 1, rate: base ? base.rate : rest, base_rate: base ? base.rate : rest, items },
+  };
+}
+
 /** Reads a Wave invoice PDF (its text, pulled out in the browser) and returns an import-ready invoice. */
 export async function invoiceFromPdf(file, api) {
   const { pdfText, pdfFirstPageImage, blobToBase64 } = await import('./pdftext.js');
@@ -264,7 +300,7 @@ export async function invoiceFromPdf(file, api) {
     discount: num(r.discount),
     notes: r.notes || null,
     payments: (r.payments || []).map((p) => ({ date: p.date, amount: num(p.amount), method: p.method })),
-    lines: (r.lines || []).map((l) => ({ kind: 'labor', item: l.item, description: l.description || '', note: l.note || '', qty: num(l.qty) || 1, rate: num(l.rate), amount: num(l.amount) })),
+    lines: (r.lines || []).map((l) => withAddons({ kind: 'labor', item: l.item, description: l.description || '', note: l.note || '', qty: num(l.qty) || 1, rate: num(l.rate), amount: num(l.amount) })),
     fileName: file.name,
   };
 }

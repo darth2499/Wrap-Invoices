@@ -12,7 +12,7 @@ function securityHeaders(env) {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: blob: https://*.r2.cloudflarestorage.com",
-    `connect-src 'self' blob: data: https://*.supabase.co ${supa} https://*.r2.cloudflarestorage.com`.replace(/\s+/g, ' ').trim(),
+    `connect-src 'self' blob: data: https://*.supabase.co ${supa} https://*.r2.cloudflarestorage.com https://photon.komoot.io`.replace(/\s+/g, ' ').trim(),
     "frame-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",

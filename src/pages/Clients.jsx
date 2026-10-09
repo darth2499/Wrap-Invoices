@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../store.jsx';
+import AddressInput from '../components/AddressInput.jsx';
 import { Button, Empty, Field, Menu, Modal, Pill } from '../components/ui.jsx';
 import { statusOf } from '../lib/calc.js';
 import { money, fmtDate, num, todayISO, plural } from '../lib/format.js';
@@ -204,7 +205,7 @@ export function ClientModal({ client, onClose, onSaved }) {
         <Field label="CC emails" hint="(comma-separated)"><input className="input" value={f.cc_emails} onChange={(e) => setF({ ...f, cc_emails: e.target.value })} /></Field>
         <Field label="Phone"><input className="input" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
       </div>
-      <Field label="Address"><textarea className="input" rows={3} value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} /></Field>
+      <Field label="Address"><AddressInput multiline value={f.address} onChange={(v) => setF({ ...f, address: v })} /></Field>
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
         <Field label="Overtime starts after" hint="(hours, blank = your default)"><input className="input num" inputMode="decimal" value={f.ot_base_hours} onChange={(e) => setF({ ...f, ot_base_hours: e.target.value })} placeholder={String(s.db.profile.ot_base_hours)} /></Field>
         <label className="check" style={{ alignSelf: 'end' }}><input type="checkbox" checked={f.expects_1099} onChange={(e) => setF({ ...f, expects_1099: e.target.checked })} />They’ll send me a 1099</label>

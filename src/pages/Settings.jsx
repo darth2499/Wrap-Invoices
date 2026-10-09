@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.jsx';
+import AddressInput from '../components/AddressInput.jsx';
 import { Button, Empty, Field, Icon, Modal, MoneyInput, Seg, Switch } from '../components/ui.jsx';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import { exportBackup, readBackup, restoreBackup } from '../lib/backup.js';
@@ -101,7 +102,7 @@ function Business() {
           <Field label="Phone"><input className="input" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
         </div>
         <Field label="Website" hint="(optional)"><input className="input" value={f.website} onChange={(e) => setF({ ...f, website: e.target.value })} placeholder="yourwebsite.com" /></Field>
-        <Field label="Address"><textarea className="input" rows={3} value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} /></Field>
+        <Field label="Address"><AddressInput multiline value={f.address} onChange={(v) => setF({ ...f, address: v })} /></Field>
         <Button variant="primary" busy={busy} disabled={!dirty} onClick={() => save()} style={{ alignSelf: 'flex-start' }}>Save</Button>
       </section>
       <section className="card card-pad col" style={{ gap: 14 }}>

@@ -67,6 +67,31 @@ export async function deletePayment(s, p) {
   await s.reload('invoices');
 }
 
+/**
+ * What you can do to end an invoice:
+ *  - Before the client has opened it (and nothing's been paid), it can simply be deleted.
+ *  - Once they've seen it or paid something, it's voided instead, so your records stay complete.
+ *  - Saved but never actually sent: it can go back to being a draft.
+ */
+export function lifecycle(s, inv) {
+  const isQuote = inv.kind === 'quote';
+  const seen = num(inv.view_count) > 0;
+  const paid = s.db.payments.some((p) => p.invoice_id === inv.id);
+  const canDelete = isQuote || inv.status === 'draft' || (!seen && !paid);
+  return {
+    canDelete,
+    canVoid: !isQuote && !canDelete && !['draft', 'void'].includes(inv.status),
+    canUndraft: !isQuote && inv.status === 'sent' && !inv.sent_at && !seen && !paid,
+  };
+}
+
+export async function moveToDraft(s, inv) {
+  await s.update('invoices', inv.id, { status: 'draft', sent_at: null });
+  await logEvent(s, inv.id, 'edited', 'Moved back to draft');
+  await s.reload('invoices', 'invoice_events');
+  s.toast('Moved back to draft');
+}
+
 export async function voidInvoice(s, inv) {
   await s.update('invoices', inv.id, { status: 'void', voided_at: new Date().toISOString() });
   await logEvent(s, inv.id, 'voided', null);
