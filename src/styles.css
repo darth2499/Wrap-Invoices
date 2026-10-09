@@ -734,3 +734,10 @@ html.theme-slow *, html.theme-slow *::before, html.theme-slow *::after { transit
 @media (max-width: 800px) {
   body::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top); background: var(--bg); z-index: 45; pointer-events: none; }
 }
+/* Home Screen app: iOS softly blurs the top edge of the page as you scroll. A solid band there (with matching
+   space above the content) means only plain page color is ever under that blur. */
+@media (display-mode: standalone) and (max-width: 800px) {
+  body::before { height: calc(env(safe-area-inset-top) + 28px); }
+  .main { padding-top: calc(46px + env(safe-area-inset-top)); }
+  .toasts { top: calc(34px + env(safe-area-inset-top)); }
+}

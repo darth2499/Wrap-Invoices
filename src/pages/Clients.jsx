@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../store.jsx';
 import { DEMO } from '../config.js';
 import AddressInput from '../components/AddressInput.jsx';
-import { Button, Empty, Field, Menu, Modal, Pill } from '../components/ui.jsx';
+import { Button, Empty, Field, Icon, Menu, Modal, Pill } from '../components/ui.jsx';
 import { statusOf } from '../lib/calc.js';
 import { money, fmtDate, num, todayISO, plural, greetName } from '../lib/format.js';
 import { go, shareUrl } from '../router.js';
@@ -76,10 +76,14 @@ function ClientDetail({ id }) {
   const [edit, setEdit] = useState(false);
   const [mail, setMail] = useState(false);
   const [newProject, setNewProject] = useState('');
+  const [showDone, setShowDone] = useState(false); // paid & closed invoices stay folded away
   if (!c) return <div className="page"><Empty title="Client not found"><a href="#/clients">Back to clients</a></Empty></div>;
   const st = stats(c);
   const projects = db.projects.filter((p) => p.client_id === c.id);
   const all = db.invoices.filter((i) => i.client_id === c.id).sort((a, b) => String(b.issue_date).localeCompare(String(a.issue_date)));
+  const isDone = (i) => ['paid', 'void', 'converted', 'declined'].includes(i.status);
+  const open = all.filter((i) => !isDone(i));
+  const done = all.filter(isDone);
   const copyStatement = async () => {
     const url = shareUrl(c.statement_token, 's');
     try { await navigator.clipboard.writeText(url); s.toast('Statement link copied'); } catch { window.prompt('Copy this link:', url); }
@@ -113,11 +117,12 @@ function ClientDetail({ id }) {
         <section className="card" style={{ gridColumn: '1 / -1' }}>
           <div className="card-head"><h2>Invoices &amp; quotes</h2></div>
           {all.length === 0 && <Empty icon="invoice" title="Nothing yet" />}
+          {all.length > 0 && open.length === 0 && !showDone && <p className="small muted" style={{ padding: '0 20px 14px' }}>Everything’s paid up.</p>}
           {all.length > 0 && (
             <div className="table-wrap">
               <table className="table" style={{ minWidth: 560 }}>
                 <tbody>
-                  {all.map((i) => {
+                  {(showDone ? all : open).map((i) => {
                     const paid = derived.paidFor(i.id);
                     const stt = statusOf(i, paid);
                     return (
@@ -132,6 +137,12 @@ function ClientDetail({ id }) {
                 </tbody>
               </table>
             </div>
+          )}
+          {done.length > 0 && (
+            <button type="button" className="feed-more" onClick={() => setShowDone((v) => !v)} aria-expanded={showDone}>
+              <Icon name="chevD" size={16} style={{ transform: showDone ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+              {showDone ? 'Hide paid & closed' : `${done.length} paid & closed`}
+            </button>
           )}
         </section>
         <section className="card card-pad col" style={{ gap: 10 }}>
