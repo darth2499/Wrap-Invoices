@@ -4,7 +4,7 @@ import { Button, Icon, Pill, Empty } from '../components/ui.jsx';
 import { ForecastChart, MonthBars, MONTHS } from '../components/charts.jsx';
 import { forecastYear, forecastExpenses } from '../lib/forecast.js';
 import { statusOf, dueText } from '../lib/calc.js';
-import { money, moneyK, num, todayISO, plural } from '../lib/format.js';
+import { money, moneyK, num, todayISO, plural, fmtShort, daysBetween } from '../lib/format.js';
 import { go } from '../router.js';
 import { buildFeed } from '../lib/feed.js';
 
@@ -50,6 +50,9 @@ export default function Overview() {
   const overdueSum = data.overdue.reduce((s, i) => s + i.due, 0);
   const oldest = data.overdue.reduce((m, i) => Math.max(m, i.st.days || 0), 0);
   const review = db.receipts.filter((r) => r.status === 'review');
+  // Bills you need to pay (imported invoices and crew payouts), soonest due first; ones without a due date last.
+  const toPay = db.crew_payouts.filter((p) => !p.paid_on).sort((a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999') || num(b.amount) - num(a.amount));
+  const toPaySum = toPay.reduce((t, p) => t + num(p.amount), 0);
   const attention = [
     ...data.overdue.sort((a, b) => b.st.days - a.st.days).map((i) => ({ key: i.id, title: `${derived.clients[i.client_id]?.name || 'No client'} · #${i.number}`, sub: dueText(i, today), amount: i.due, bad: true, go: `/invoices/${i.id}` })),
   ];
@@ -77,7 +80,7 @@ export default function Overview() {
 
       <WhatsNew />
 
-      <div className="grid-2 attention-row">
+      <div className={`grid-2 attention-row ${toPay.length ? 'three' : ''}`}>
         <section className="card">
           <div className="card-head"><h2>Overdue</h2>{data.overdue.length > 0 && <a href="#/invoices?f=overdue" className="small">All overdue</a>}</div>
           {attention.length === 0 && <Empty icon="check" title="Nothing overdue" />}
@@ -102,6 +105,26 @@ export default function Overview() {
             </button>
           ))}
         </section>
+
+        {toPay.length > 0 && (
+          <section className="card to-pay">
+            <div className="card-head"><h2>To pay</h2><span className="num small muted">{money(toPaySum)}</span></div>
+            {toPay.slice(0, 5).map((p) => {
+              const late = p.due_date && p.due_date < today;
+              const when = !p.due_date ? 'No due date' : late ? `${plural(daysBetween(p.due_date, today), 'day')} overdue` : p.due_date === today ? 'Due today' : `Due ${fmtShort(p.due_date)}`;
+              return (
+                <button key={p.id} className="list-row" style={{ gridTemplateColumns: '1fr auto' }} onClick={() => go(`/expenses/crew?payout=${p.id}`)}>
+                  <span className="col" style={{ gap: 2, minWidth: 0 }}>
+                    <b className="ellip" style={{ fontWeight: 500 }}>{derived.crew[p.crew_id]?.name || 'Crew'}{p.source_number ? ` · #${p.source_number}` : ''}</b>
+                    <span className="small" style={{ color: late ? 'var(--bad)' : p.due_date === today ? 'var(--warn)' : 'var(--muted)' }}>{when}</span>
+                  </span>
+                  <span className="num">{money(p.amount)}</span>
+                </button>
+              );
+            })}
+            {toPay.length > 5 && <a href="#/expenses/crew" className="small" style={{ padding: '10px 20px 14px' }}>All {toPay.length}</a>}
+          </section>
+        )}
       </div>
 
       <section className="card card-pad col forecast" style={{ gap: 14 }}>

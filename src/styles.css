@@ -798,3 +798,8 @@ h2 .count-badge { vertical-align: 3px; font-family: var(--font); }
 .bill-copy:hover { background: var(--hover); color: var(--ink); }
 .bill-line:hover .bill-copy, .bill-copy:focus-visible { opacity: 1; }
 @media (hover: none) { .bill-copy { opacity: 1; } }
+
+/* Overview: a third card (To pay) when you have bills to pay */
+.attention-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1240px) { .attention-row.three { grid-template-columns: 1fr 1fr; } .attention-row.three > .to-pay { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .attention-row.three { grid-template-columns: 1fr; } }
