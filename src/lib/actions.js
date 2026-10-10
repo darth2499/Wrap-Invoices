@@ -184,6 +184,66 @@ function receiptLine(r) {
   return { kind: 'expense', item, description: desc, qty: 1, rate: num(r.total), amount: round2(num(r.total)), receipt_id: r.id, note: '' };
 }
 
+const shortMoney = (n) => `$${num(n).toLocaleString('en-US', { minimumFractionDigits: num(n) % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
+/** A line's add-ons changed: rebuild its amount and description the way the editor writes them. */
+function recompile(l) {
+  const ex = l.extras;
+  if (!ex) return l;
+  if (!ex.items?.length) {
+    const qty = num(ex.qty) || 1;
+    return { ...l, description: ex.desc || '', qty, rate: num(ex.rate), amount: round2(qty * num(ex.rate)), extras: null };
+  }
+  const amount = round2(num(ex.qty) * num(ex.rate) + ex.items.reduce((t, a) => t + num(a.qty) * num(a.rate), 0));
+  const description = [
+    ex.desc || '',
+    num(ex.qty) !== 1 ? `${l.item || 'Base'} (${shortMoney(ex.rate)} x${num(ex.qty)})` : '',
+    ...ex.items.map((a) => (a.unit === 'mi' ? `${a.label || 'Mileage'} (${num(a.qty)} mi x $${num(a.rate)})` : `${a.label || 'Other'} (${shortMoney(a.rate)}${num(a.qty) !== 1 ? ` x${num(a.qty)}` : ''})`)),
+  ].filter(Boolean).join('\n');
+  return { ...l, description, qty: 1, rate: amount, amount };
+}
+// Which line a billed receipt sits under: its item and first description line (lines get new ids on every save).
+const spotOf = (l) => `${String(l.item || '').trim().toLowerCase()}|${String(l.extras?.desc ?? l.description ?? '').split('\n')[0].trim().toLowerCase()}`;
+
+/**
+ * Billing receipts on a basic invoice.
+ *   Off: the receipt comes out wherever it is (its own line, or an add-on under a line), and Wrap remembers
+ *        which line it was under.
+ *   On:  it goes back under that same line as an add-on. If it was its own line (or that line is gone), it's
+ *        added as its own line. A receipt that's already on the invoice is never added twice.
+ * Moving it in the editor (out to its own line, or under another line) changes where it goes next time.
+ */
+async function basicBilling(s, current, receipts, on) {
+  const ids = new Set(receipts.map((r) => r.id));
+  if (!on) {
+    for (const r of receipts) {
+      const host = current.find((l) => l.extras?.items?.some((a) => a.receipt_id === r.id));
+      const item = host?.extras.items.find((a) => a.receipt_id === r.id);
+      const spot = host ? { line: spotOf(host), label: item.label } : null;
+      await s.update('receipts', r.id, { ai: { ...(r.ai || {}), bill_spot: spot } }).catch(() => {});
+    }
+    return current
+      .filter((l) => !ids.has(l.receipt_id))
+      .map((l) => (l.extras?.items?.some((a) => ids.has(a.receipt_id))
+        ? recompile({ ...l, extras: { ...l.extras, items: l.extras.items.filter((a) => !ids.has(a.receipt_id)) } })
+        : l));
+  }
+  let lines = [...current];
+  const present = new Set(lines.flatMap((l) => [l.receipt_id, ...(l.extras?.items || []).map((a) => a.receipt_id)]).filter(Boolean));
+  for (const r of receipts) {
+    if (present.has(r.id)) continue;
+    const spot = r.ai?.bill_spot;
+    const at = spot ? lines.findIndex((l) => !l.receipt_id && spotOf(l) === spot.line) : -1;
+    if (at >= 0) {
+      const host = lines[at];
+      const ex = host.extras || { desc: host.description || '', qty: num(host.qty) || 1, rate: num(host.rate), base_rate: num(host.base_rate) || num(host.rate), items: [] };
+      lines[at] = recompile({ ...host, extras: { ...ex, items: [...ex.items, { label: spot.label || receiptLine(r).item, qty: 1, rate: round2(num(r.total)), receipt_id: r.id }] } });
+    } else {
+      lines = [...lines, receiptLine(r)];
+    }
+  }
+  return lines;
+}
+
 /**
  * Bills (on=true) or un-bills (on=false) one or more receipts on an invoice, rebuilding its lines once
  * and saving (a sent invoice keeps the old version in History).
@@ -222,8 +282,7 @@ export async function setBillableMany(s, inv, receipts, on) {
     const client = s.derived.clients[inv.client_id];
     lines = compileJobs(jobs, otRule(s.db.profile, client), s.db.day_types);
   } else {
-    lines = current.filter((l) => !ids.has(l.receipt_id));
-    if (on) lines = [...lines, ...receipts.map(receiptLine)];
+    lines = await basicBilling(s, current, receipts, on);
   }
   const { id, kind, number, client_id, project_id, issue_date, due_date, terms, notes, mode, discount_type, discount_value, deposit_percent, auto_remind } = inv;
   const what = receipts.length === 1 ? `${receipts[0].vendor || 'receipt'} (${money(receipts[0].total)})` : `${receipts.length} receipts`;
