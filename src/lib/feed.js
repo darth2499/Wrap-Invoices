@@ -4,6 +4,7 @@
 //   Today:    invoices due today, receipts waiting to be checked, tax deadlines.
 //   Coming:   invoices due in the next few days, tax deadlines in the next 3 weeks.
 import { addDays, daysBetween, money, num } from './format.js';
+import { datesFromCode } from './shoots.js';
 
 const RECENT_DAYS = 14;
 
@@ -39,6 +40,75 @@ const ahead = (iso, today) => {
   const d = daysBetween(today, iso);
   return d <= 0 ? 'Today' : d === 1 ? 'Tomorrow' : `In ${d} days`;
 };
+
+const CODE = /\((\d{2}\/\d{2}(?:-\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:-\d{2}\/\d{2})?)*)\)/;
+const median = (xs) => { const a = [...xs].sort((x, y) => x - y); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+const normName = (s) => String(s || '').toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+/** True when most past prices sit close together (so there's a real pattern to compare against). */
+const steady = (xs, m) => xs.filter((x) => Math.abs(x - m) <= m * 0.1).length >= Math.ceil(xs.length * 0.6);
+
+/**
+ * Lines (and invoice totals) on drafts and unpaid invoices from the last 45 days whose price is far (30%+) from
+ * what you usually charge for the same thing: that client's past invoices first, otherwise everyone's.
+ * Mileage and receipt add-ons are skipped (those amounts change every time).
+ */
+function priceChecks({ db, derived, today, who }) {
+  const out = [];
+  const invs = db.invoices.filter((i) => i.kind === 'invoice' && i.status !== 'void');
+  const past = invs.filter((i) => i.status === 'sent' || i.status === 'paid');
+  const prices = (inv) => {
+    const list = [];
+    for (const l of derived.linesFor(inv.id)) {
+      if (l.receipt_id || l.kind === 'mileage' || l.kind === 'expense') continue;
+      const name = normName(l.item);
+      let rate = num(l.extras ? l.extras.rate : l.rate);
+      // One line covering several days at qty 1 (e.g. imported "(08/02-08/03)"): compare the price per day.
+      const code = String(l.extras?.desc ?? l.description ?? '').match(CODE);
+      const days = code ? datesFromCode(code[1], inv.issue_date).length : 0;
+      if (!l.extras && num(l.qty) === 1 && days > 1) rate /= days;
+      if (name && rate > 0) list.push({ name, label: l.item, rate: Math.round(rate * 100) / 100, perDay: !l.extras && num(l.qty) === 1 && days > 1 });
+      for (const a of l.extras?.items || []) {
+        if (a.unit === 'mi' || a.receipt_id || !num(a.rate)) continue;
+        const n = normName(a.label);
+        if (n) list.push({ name: n, label: a.label, rate: num(a.rate) });
+      }
+    }
+    return list;
+  };
+  const hist = new Map(); // name → [{ client, rate, inv }]
+  for (const inv of past) for (const p of prices(inv)) {
+    if (!hist.has(p.name)) hist.set(p.name, []);
+    hist.get(p.name).push({ client: inv.client_id, rate: p.rate, inv: inv.id });
+  }
+  const cutoff = addDays(today, -45);
+  const checking = invs.filter((i) => (i.status === 'draft' || (i.status === 'sent' && derived.paidFor(i.id) <= 0)) && String(i.issue_date || today) >= cutoff);
+  for (const inv of checking) {
+    const seen = new Set();
+    for (const p of prices(inv)) {
+      if (seen.has(p.name)) continue;
+      seen.add(p.name);
+      const all = (hist.get(p.name) || []).filter((h) => h.inv !== inv.id);
+      const mine = all.filter((h) => h.client === inv.client_id).map((h) => h.rate);
+      const ref = mine.length >= 2 ? mine : all.length >= 3 ? all.map((h) => h.rate) : null;
+      if (!ref) continue;
+      const m = median(ref);
+      if (!steady(ref, m) || Math.abs(p.rate - m) < m * 0.3) continue;
+      const usual = `You usually charge ${mine.length >= 2 ? `${who(inv)} ` : ''}${money(m)}${p.perDay ? ' a day' : ''}`;
+      out.push({ key: `px${inv.id}|${p.name}|${p.rate}`, icon: 'tag', tone: 'warn', dismiss: true, todo: true, when: '',
+        title: `#${inv.number}: ${p.label} at ${money(p.rate)}${p.perDay ? ' a day' : ''}`, sub: `${usual} · ${p.rate > m ? 'higher' : 'lower'} than normal`, go: `/invoices/${inv.id}` });
+    }
+    // The whole invoice, for clients you bill about the same amount every time.
+    const totals = past.filter((i) => i.client_id === inv.client_id && i.id !== inv.id).map((i) => num(i.total)).filter((t) => t > 0);
+    if (totals.length >= 4 && num(inv.total) > 0) {
+      const m = median(totals);
+      if (steady(totals, m) && Math.abs(num(inv.total) - m) >= m * 0.3) {
+        out.push({ key: `pt${inv.id}|${num(inv.total)}`, icon: 'tag', tone: 'warn', dismiss: true, todo: true, when: '',
+          title: `#${inv.number} totals ${money(inv.total)}`, sub: `${who(inv)} invoices are usually about ${money(m)}`, go: `/invoices/${inv.id}` });
+      }
+    }
+  }
+  return out;
+}
 
 /** Builds the feed. Each item: { key, icon, tone, title, sub, when, at, go } — `at` is when it happened (for "new" dots). */
 export function buildFeed({ db, derived, statusOf, today }) {
@@ -113,6 +183,9 @@ export function buildFeed({ db, derived, statusOf, today }) {
   if (trips.length) items.push({ key: 'ttrips', icon: 'car', tone: 'warn', title: `${trips.length} trip${trips.length === 1 ? '' : 's'} marked to bill`, sub: 'Add them to an invoice (Mileage)', todo: true, when: '', go: '/expenses/mileage' });
   const nocat = db.receipts.filter((r) => r.status !== 'review' && !r.category);
   if (nocat.length) items.push({ key: 'tcat', icon: 'receipt', tone: 'muted', title: `${nocat.length} receipt${nocat.length === 1 ? '' : 's'} without a category`, sub: 'Categories put them on the right tax line', todo: true, when: '', go: '/expenses' });
+
+  // Prices that don't match what you usually charge (a typo, a missing zero, an old rate). Tapping one dismisses it.
+  items.push(...priceChecks({ db, derived, today, who }));
 
   // Receipts waiting to be checked
   const review = db.receipts.filter((r) => r.status === 'review');

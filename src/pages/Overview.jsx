@@ -188,18 +188,26 @@ function WhatsNew() {
     setRead(next);
     try { localStorage.setItem('wrap_feed_read', JSON.stringify([...next].slice(-300))); } catch { /* not saved */ }
   };
+  // Price checks go away once you've tapped them (you've had a look).
+  const [gone, setGone] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem('wrap_feed_gone')) || []); } catch { return new Set(); } });
+  const dismiss = (key) => {
+    const next = new Set([...gone, key]);
+    setGone(next);
+    try { localStorage.setItem('wrap_feed_gone', JSON.stringify([...next].slice(-300))); } catch { /* not saved */ }
+  };
   const [all, setAll] = useState(false);
-  if (!items.length) return null;
+  const visible = items.filter((x) => !(x.dismiss && gone.has(x.key)));
+  if (!visible.length) return null;
   const isNew = (x) => x.at && x.at > since && !read.has(x.key);
-  const fresh = items.filter(isNew);
-  const ordered = [...fresh.sort((a, b) => String(b.at).localeCompare(String(a.at))), ...items.filter((x) => !isNew(x))];
+  const fresh = visible.filter(isNew);
+  const ordered = [...fresh.sort((a, b) => String(b.at).localeCompare(String(a.at))), ...visible.filter((x) => !isNew(x))];
   const shown = all ? ordered : ordered.slice(0, Math.max(6, fresh.length));
   return (
     <section className="card feed">
       <div className="card-head"><h2>Heads up{fresh.length > 0 && <button type="button" className="count-badge on" style={{ marginLeft: 8 }} onClick={() => markRead(fresh.map((x) => x.key))} title="Mark all as read" aria-label={`${fresh.length} new — mark all as read`}>{fresh.length}</button>}</h2></div>
       <div className="feed-list">
         {shown.map((x) => (
-          <button key={x.key} type="button" className={`feed-row ${isNew(x) ? 'is-new' : ''}`} onClick={() => { if (isNew(x)) markRead([x.key]); go(x.go); }}>
+          <button key={x.key} type="button" className={`feed-row ${isNew(x) ? 'is-new' : ''}`} onClick={() => { if (isNew(x)) markRead([x.key]); if (x.dismiss) dismiss(x.key); go(x.go); }}>
             <span className={`feed-icon tone-${x.tone}`}><Icon name={x.icon} size={16} /></span>
             <span className="col" style={{ gap: 1, minWidth: 0 }}>
               <b className="ellip">{x.title}</b>
