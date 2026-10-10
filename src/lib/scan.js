@@ -303,6 +303,22 @@ function enhance(canvas, mode = 'clean') {
   return canvas;
 }
 
+/** Mostly dark with light text: average brightness well below the middle. */
+function isDark(canvas) {
+  const g = grayOf(toCanvas(canvas, 200));
+  let sum = 0;
+  for (const v of g) sum += v;
+  return sum / g.length < 100;
+}
+function invert(canvas) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) { d[i] = 255 - d[i]; d[i + 1] = 255 - d[i + 1]; d[i + 2] = 255 - d[i + 2]; }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
 /**
  * Scan a receipt photo. Returns { scan: Blob (JPEG), cropped, width, height }.
  * mode: 'clean' (sharp grayscale, default) or 'bw' (pure black & white).
@@ -315,7 +331,7 @@ export async function scanReceipt(file, { mode = 'clean', crop = true } = {}) {
   if (crop) {
     try {
       const small = toCanvas(full, 480);
-      const corners = findPaper(small);
+      const corners = isDark(small) ? null : findPaper(small);
       if (corners) {
         const s = full.width / small.width;
         // Pull the corners in a touch so no dark table edge sneaks into the scan.
@@ -329,6 +345,9 @@ export async function scanReceipt(file, { mode = 'clean', crop = true } = {}) {
     }
   }
   const sized = toCanvas(page, 2000);
+  // Light text on a dark background (dark-mode e-receipts, screenshots): flip it to dark-on-white first.
+  // The clean-up expects paper to be the brightest thing; on a dark receipt it would smear the text instead.
+  if (isDark(sized)) invert(sized);
   const cleaned = enhance(sized, mode);
   // Read from the sharp version first; what's stored is a lighter copy (still easy to read, a fraction of the size).
   const read = await blobOf(cleaned, 'image/jpeg', 0.85);

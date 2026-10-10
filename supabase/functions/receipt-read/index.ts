@@ -23,6 +23,7 @@ Find the amount that was ACTUALLY PAID. Rules:
 - For hotel folios, use the total charges paid (payments line), not the remaining balance (often 0.00).
 - For parking stubs, use the amount paid.
 - If two totals disagree, choose the one at the payment step and set confidence to "low".
+- Split checks: when the card paid only part of the total ("Amount Applied $40.00", "Card amount", "Payment 1 of 2"), the person paid that part: total_paid = that charged amount + its tip, and put the charged amount (before tip) in "charged".
 - A price with a quantity (e.g. "2x 50.00", "2 @ $50") is a per-item price, not the total: the total is the amount charged (e.g. "USD 100.00").
 - Tickets and airline/baggage receipts: the total is the currency amount line (e.g. "USD 100.00"), not a fee or per-bag price.
 - Copy the date exactly as printed into "date_printed" (e.g. "10/09/2026 8:48 pm"). Don't reorder it; it's worked out afterwards.
@@ -30,7 +31,7 @@ Find the amount that was ACTUALLY PAID. Rules:
 Pick the best tax category for the expense from this list: ${CATEGORIES.join("; ")}.`;
 
 const RECEIPT_JSON = `Reply with ONLY one JSON object, no other text, in exactly this shape (use null when unknown):
-{"is_receipt": true, "vendor": "Business name", "date_printed": "as printed", "date": "YYYY-MM-DD", "country": "US", "total_paid": 0.00, "subtotal": null, "tax": null, "tip": null,
+{"is_receipt": true, "vendor": "Business name", "date_printed": "as printed", "date": "YYYY-MM-DD", "country": "US", "total_paid": 0.00, "charged": null, "subtotal": null, "tax": null, "tip": null,
  "currency": "USD", "reasoning": "one short sentence: which line is the total and why",
  "amounts": [{"label": "Subtotal", "amount": 0.00}], "category": "one of the categories", "confidence": "high|medium|low"}
 "amounts" lists every OTHER money amount someone might confuse with the total (subtotal, tax, tip, items, tendered, change).`;
@@ -127,6 +128,7 @@ function cleanReceipt(r: Record<string, any>) {
     is_receipt: r.is_receipt !== false,
     vendor: r.vendor ? String(r.vendor).slice(0, 120) : null,
     date: receiptDate(r.date_printed, r.date, r.country),
+    split: false,
     total_paid: toNum(r.total_paid ?? r.total),
     subtotal: toNum(r.subtotal),
     tax: toNum(r.tax),
@@ -141,6 +143,15 @@ function cleanReceipt(r: Record<string, any>) {
     confidence: ["high", "medium", "low"].includes(r.confidence) ? r.confidence : "medium",
     check: "unknown" as "ok" | "mismatch" | "unknown",
   };
+  // Split check: the card paid only part of the bill. What you paid = that part + its tip (worked out here, not by the model).
+  const charged = toNum(r.charged);
+  const billTotal = out.subtotal != null ? out.subtotal + (out.tax ?? 0) : null;
+  if (charged != null && charged > 0 && billTotal != null && charged < billTotal - 0.01) {
+    out.split = true;
+    out.total_paid = Math.round((charged + (out.tip ?? 0)) * 100) / 100;
+    out.reasoning = `Split check: your card paid ${charged.toFixed(2)}${out.tip ? ` + ${out.tip.toFixed(2)} tip` : ""} of the ${billTotal.toFixed(2)} bill.`;
+    return out;
+  }
   // Sanity check: subtotal + tax + tip should equal the total. Flag it if not.
   if (out.total_paid != null && out.subtotal != null) {
     const sum = out.subtotal + (out.tax ?? 0) + (out.tip ?? 0);
