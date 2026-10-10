@@ -87,18 +87,26 @@ export function parseReceiptText(text) {
   const order = guessOrder(lines, new Date().toISOString().slice(0, 10));
   const today = new Date().toISOString().slice(0, 10);
   let date = null;
+  let datePrinted = null;
   for (const l of [...lines.filter((x) => /date|ordered|time/i.test(x)), ...lines]) {
     const f = findDates(l, today, order);
     const d = f?.dates[0];
-    if (d && d <= today && d > '2000') { date = d; break; }
+    if (d && d <= today && d > '2000') { date = d; datePrinted = l.slice(f.start, f.end).trim().slice(0, 60); break; }
   }
   // Vendor: the first real name near the top (not "Welcome", an address, a phone number or a date).
   const vendor = lines.slice(0, 6).find((l) => /[a-z]{3}/i.test(l) && !/welcome|receipt|thank|invoice|order|^\d|^tel|phone|www\.|\.com|@|^\(?\d{3}\)?[\s.-]?\d{3}/i.test(l))?.replace(/[^\w\s&'.,-]/g, '').trim().replace(/(\s+\d{1,2})+$/, '').slice(0, 60) || null;
   const all = lines.join(' ');
   const category = (CATEGORY.find(([re]) => re.test(all)) || [null, 'Other'])[1];
-  const amounts = [subtotal != null && { label: 'Subtotal', amount: subtotal }, tax != null && { label: 'Tax', amount: tax }, tip != null && { label: 'Tip', amount: tip }].filter(Boolean);
+  // Every labelled amount on the receipt ("Amount charged 46.59"), so learned rules can pick the right one next time.
+  const labelOf = (l) => l.replace(MONEY, ' ').replace(/[$:*]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+  const totalLabel = total ? labelOf(lines[total.i]) : null;
+  const amounts = lines.flatMap((l) => {
+    const a = amountsIn(l);
+    const label = labelOf(l);
+    return a.length && /[a-z]{2}/i.test(label) ? [{ label, amount: a[a.length - 1] }] : [];
+  }).slice(0, 20);
   return {
-    is_receipt: totalPaid != null, vendor, date, total_paid: totalPaid, subtotal, tax, tip, currency: 'USD', amounts, category,
+    is_receipt: totalPaid != null, vendor, date, date_printed: datePrinted, total_paid: totalPaid, total_label: totalLabel, subtotal, tax, tip, currency: 'USD', amounts, category,
     confidence: 'low', check: 'unknown', reader: 'device',
     reasoning: 'Read on this device. Double-check the total and date.',
   };

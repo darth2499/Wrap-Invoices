@@ -4,6 +4,7 @@ import { scanReceipt, shrinkOriginal, compressPhoto, orientationChoices, turnedF
 import { round2 } from './format.js';
 import { pdfText, pdfFirstPageImage, pdfToJpeg, blobToBase64 } from './pdftext.js';
 import { readOnDevice } from './localRead.js';
+import { applyRules, personalRules } from './scanRules.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -39,6 +40,15 @@ export function looksSame(a, b) {
  * ctx: { api, receipts (existing list), onStep(text) }
  */
 export const BIG_PDF = 5 * 1024 * 1024;
+
+export async function withLearning(api, ai, receipts) {
+  if (!ai || ai.error || !ai.vendor) return ai;
+  let out = ai;
+  if (ai.reader === 'device' && api.scanRules) {
+    try { out = applyRules(out, (await api.scanRules(ai.vendor))?.rules); } catch { /* offline: your own rules still apply */ }
+  }
+  return applyRules(out, personalRules(receipts, ai.vendor));
+}
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
 
 /** A PDF over 5 MB: offer to keep a JPEG of its pages instead. Returns the JPEG blob, or null to keep the PDF. */
@@ -151,6 +161,9 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
         } catch (e) { ai = { error: e.message }; }
       }
     }
+    // What Wrap has learned about this store: from everyone (already applied by the online reader; fetched here for
+    // on-device reads), then your own corrections on top.
+    ai = await withLearning(api, ai, receipts);
     if (!store) mime = null; // nothing kept
     if (!isPdf && store) {
       // Read first (from the sharp copy), then store the compressed copies.

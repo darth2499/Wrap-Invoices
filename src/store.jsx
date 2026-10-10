@@ -1,5 +1,6 @@
 // App-wide data: loads everything once, keeps it in memory, and offers helpers to change it.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { learnFromReceipt } from './lib/learn.js';
 import { api } from './api/index.js';
 import { TABLES } from './api/tables.js';
 import { paidFor } from './lib/calc.js';
@@ -130,6 +131,13 @@ export function StoreProvider({ user, children }) {
       const out = await api.update(table, id, patch);
       const key = table === 'invites' ? 'email' : 'id';
       setDb((d) => ({ ...d, [table]: d[table].map((r) => (r[key] === id ? out : r)) }));
+      // A checked or fixed receipt teaches the scanner (privately; see lib/scanRules.js).
+      if (table === 'receipts') {
+        learnFromReceipt(api, out, async (r, sig) => {
+          const saved = await api.update('receipts', r.id, { ai: { ...r.ai, learned_sig: sig } }).catch(() => null);
+          if (saved) setDb((d) => ({ ...d, receipts: d.receipts.map((x) => (x.id === r.id ? { ...x, ai: saved.ai } : x)) }));
+        });
+      }
       return out;
     },
     async remove(table, id) {

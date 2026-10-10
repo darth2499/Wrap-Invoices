@@ -47,7 +47,7 @@ export default function Overview() {
       );
     }
     const drafts = db.invoices.filter((i) => i.kind === 'invoice' && i.status === 'draft');
-    return { open, overdue, paidYtd, expYtd, unpaidYtd, owed, labels, years, billed, exp, drafts, f: forecastYear(db.invoices, today), fx: forecastExpenses(db.receipts, db.crew_payouts, today) };
+    return { open, overdue, paidYtd, expYtd, unpaidYtd, crewCount: crewYtd.length, owed, labels, years, billed, exp, drafts, f: forecastYear(db.invoices, today), fx: forecastExpenses(db.receipts, db.crew_payouts, today) };
   }, [db, derived, today, year]);
 
   const outstanding = data.open.reduce((s, i) => s + i.due, 0);
@@ -79,7 +79,7 @@ export default function Overview() {
         <Kpi label="Outstanding" value={money(outstanding, { cents: false })} sub={plural(data.open.length, 'unpaid invoice')} onClick={() => go('/invoices?f=unpaid')} />
         <Kpi label="Overdue" value={money(overdueSum, { cents: false })} sub={data.overdue.length ? `${plural(data.overdue.length, 'invoice')} · oldest ${oldest} days` : 'Nothing overdue'} bad={data.overdue.length > 0} onClick={() => go('/invoices?f=overdue')} />
         <Kpi label={`Paid in ${year}`} value={money(data.paidYtd, { cents: false })} sub="Payments received" onClick={() => go('/reports')} />
-        <Kpi label={`Expenses in ${year}`} value={money(data.expYtd, { cents: false })} sub={review.length ? `${review.length} receipts to review` : data.unpaidYtd > 0 ? `Includes ${money(data.unpaidYtd, { cents: false })} still to pay` : 'Receipts and crew'} onClick={() => go('/expenses')} />
+        <Kpi label={`Expenses in ${year}`} value={money(data.expYtd, { cents: false })} sub={review.length ? `${review.length} receipts to review` : data.unpaidYtd > 0 ? `Includes ${money(data.unpaidYtd, { cents: false })} still to pay` : data.crewCount ? 'Receipts and crew' : 'From your receipts'} onClick={() => go('/expenses')} />
       </div>
 
       <WhatsNew />

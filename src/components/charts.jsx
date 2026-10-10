@@ -1,5 +1,5 @@
 // Small, dependency-free charts.
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { money, moneyK } from '../lib/format.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -11,14 +11,6 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
  * labels: ['Nov', …]; years (optional): [2025, …] shown under January and the first month.
  */
 export function MonthBars({ labels: allLabels, years: allYears, series: allSeries, height = 200, currentIndex: cur = null }) {
-  // Phones: the chart is wider than the screen and slides sideways (starts on the latest months).
-  const narrow = useNarrow(560);
-  const scroller = useRef(null);
-  const [atStart, setAtStart] = useState(false);
-  useEffect(() => {
-    const el = scroller.current;
-    if (narrow && el) { el.scrollLeft = el.scrollWidth; setAtStart(el.scrollLeft < 4); }
-  }, [narrow]);
   const labels = allLabels;
   const years = allYears;
   const series = allSeries;
@@ -26,6 +18,7 @@ export function MonthBars({ labels: allLabels, years: allYears, series: allSerie
   // Shown until you hover a month: this month, or else the latest month with numbers.
   const latest = labels.map((_, i) => i).filter((i) => series.some((x) => x.values[i] > 0)).pop() ?? labels.length - 1;
   const [sel, setSel] = useState(null);
+  const scrub = useScrub(labels.length, setSel, 'bars');
   const active = sel ?? currentIndex ?? latest;
   const rawTop = Math.max(1, ...series.flatMap((x) => x.values)) * 1.05;
   const mag = 10 ** Math.floor(Math.log10(rawTop / 4));
@@ -53,13 +46,13 @@ export function MonthBars({ labels: allLabels, years: allYears, series: allSerie
           </span>
         </div>
       </div>
-      <div className="mb-plot" onMouseLeave={() => setSel(null)}>
+      <div className="mb-plot scrub" onMouseLeave={() => setSel(null)}>
         <div className="mb-axis" style={{ height }}>
           {ticks.map((t) => <span key={t} className="num" style={{ bottom: `${(t / top) * 100}%` }}>{moneyK(t)}</span>)}
         </div>
-        <div className={`mb-scroll${narrow && !atStart ? ' more-left' : ''}`} ref={scroller} onScroll={(e) => setAtStart(e.currentTarget.scrollLeft < 4)}>
-        <div style={{ width: narrow ? labels.length * 58 : '100%' }}>
-        <div className="mb-area" style={{ height }}>
+        <div className="mb-scroll">
+        <div style={{ width: '100%' }}>
+        <div className="mb-area" style={{ height }} {...scrub}>
           {ticks.map((t) => <div key={t} className="mb-grid" style={{ bottom: `${(t / top) * 100}%`, borderColor: t === 0 ? 'var(--field)' : undefined }} />)}
           <div className="mb-cols" style={{ gridTemplateColumns: `repeat(${labels.length}, minmax(0, 1fr))` }}>
             {labels.map((l, i) => (
@@ -90,6 +83,7 @@ export function MonthBars({ labels: allLabels, years: allYears, series: allSerie
 /** Compact cumulative-income chart: this year so far (solid), forecast (dashed) with its likely range, last year (gray). */
 export function ForecastChart({ f, height = 140 }) {
   const [hover, setHover] = useState(null);
+  const scrub = useScrub(12, setHover, 'points');
   const cum = (arr) => arr.reduce((acc, v) => [...acc, (acc[acc.length - 1] || 0) + v], []);
   const prevCum = cum(f.prev);
   const curCum = cum(f.cur.slice(0, f.month)); // full months only
@@ -116,7 +110,7 @@ export function ForecastChart({ f, height = 140 }) {
   const QUARTER = [0, 3, 6, 9, 11];
   return (
     <div className="col" style={{ gap: 6, minWidth: 0 }}>
-      <div style={{ position: 'relative' }}>
+      <div className="scrub" style={{ position: 'relative' }} {...scrub}>
         <svg viewBox={`0 0 ${Wd} ${Ht}`} preserveAspectRatio="none" style={{ width: '100%', height: Ht, display: 'block', overflow: 'visible' }} role="img" aria-label={`Income through ${f.year}: ${moneyK(startV)} so far, projected ${moneyK(f.mid)} by December`} onMouseLeave={() => setHover(null)}>
           <line x1="0" x2={Wd} y1={Ht} y2={Ht} stroke="#dadad5" vectorEffect="non-scaling-stroke" />
           <polygon points={band} fill="var(--accent)" fillOpacity="0.1" />
@@ -151,15 +145,21 @@ export function ForecastChart({ f, height = 140 }) {
 
 export { MONTHS };
 
-/** True when the screen is narrower than `px` (updates on resize/rotate). */
-function useNarrow(px) {
-  const q = `(max-width: ${px}px)`;
-  const [m, setM] = useState(() => typeof window !== 'undefined' && window.matchMedia(q).matches);
-  useEffect(() => {
-    const mq = window.matchMedia(q);
-    const on = () => setM(mq.matches);
-    mq.addEventListener('change', on);
-    return () => mq.removeEventListener('change', on);
-  }, [q]);
-  return m;
+/**
+ * Press and slide across a chart (finger or mouse) to move through the months. Vertical swipes still
+ * scroll the page; nothing gets text-selected. kind: 'bars' (equal columns) or 'points' (first/last at the edges).
+ */
+function useScrub(count, set, kind) {
+  const down = useRef(false);
+  const at = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const f = Math.min(0.9999, Math.max(0, (e.clientX - r.left) / r.width));
+    return kind === 'points' ? Math.round(f * (count - 1)) : Math.floor(f * count);
+  };
+  return {
+    onPointerDown: (e) => { down.current = true; e.currentTarget.setPointerCapture?.(e.pointerId); set(at(e)); },
+    onPointerMove: (e) => { if (down.current || e.pointerType === 'mouse') set(at(e)); },
+    onPointerUp: () => { down.current = false; },
+    onPointerCancel: () => { down.current = false; },
+  };
 }

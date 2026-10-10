@@ -4,6 +4,7 @@ import { num, round2, todayISO, addDays, datesCode } from './format.js';
 import { normalizeDates, findDates, guessOrder } from './dateText.js';
 import { totals } from './calc.js';
 import { looksSame } from './receipts.js';
+import { findMatch } from './match.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -94,7 +95,7 @@ export async function importClients(list, { db, api }) {
     const k = norm(c.name);
     if (!k || seen.has(k)) continue;
     seen.add(k);
-    const ex = byName.get(k);
+    const ex = byName.get(k) || sameClient(c, [...byName.values()])?.client;
     if (!ex) { fresh.push(c); continue; }
     const patch = {};
     for (const f of ['email', 'phone', 'address', 'notes']) if (!ex[f] && c[f]) patch[f] = c[f];
@@ -104,6 +105,13 @@ export async function importClients(list, { db, api }) {
     for (const c of await api.insert('clients', fresh.slice(i, i + 200))) byName.set(norm(c.name), c);
   }
   return { created: fresh.length, updated, existing: seen.size - fresh.length, clients: [...byName.values()] };
+}
+
+/** An existing client that's surely the same ({ client }), or only maybe ({ maybe: true }: added as new, offered to merge). */
+function sameClient(rec, list) {
+  const m = findMatch(rec, list);
+  if (!m) return null;
+  return m.level === 'same' ? { client: m.item } : { maybe: true };
 }
 
 /** Groups CSV rows into invoices (one row per invoice, or one row per line item). */
@@ -189,6 +197,7 @@ export async function importInvoices(list, { db, api, onStep = () => {}, fill = 
   const existingNumbers = new Set(db.invoices.filter((i) => i.kind === 'invoice').map((i) => String(i.number)));
   let created = 0;
   let filled = 0;
+  let maybeDupes = 0; // added as new, but might be someone you already have (shown under Clients to merge)
   const skipped = [];
   const ids = []; // every invoice added or filled in, so the app can offer "View invoice"
   for (const [i, inv] of list.entries()) {
@@ -200,10 +209,18 @@ export async function importInvoices(list, { db, api, onStep = () => {}, fill = 
       else skipped.push(`#${inv.number} (${m.reason})`);
       continue;
     }
-    let client = clientsByName.get(norm(inv.client));
-    if (!client && inv.client) {
+    // The same client even if the name is written a little differently (or the email/phone matches).
+    const found = inv.client ? sameClient({ name: inv.client, email: inv.clientEmail, address: inv.clientAddress }, [...clientsByName.values()]) : null;
+    let client = found?.client || null;
+    if (client) {
+      const patch = {};
+      if (!client.email && inv.clientEmail) patch.email = inv.clientEmail;
+      if (!client.address && inv.clientAddress) patch.address = inv.clientAddress;
+      if (Object.keys(patch).length) { client = await api.update('clients', client.id, patch); clientsByName.set(norm(client.name), client); }
+    } else if (inv.client) {
       client = await api.insert('clients', { name: inv.client, email: inv.clientEmail || null, address: inv.clientAddress || null });
       clientsByName.set(norm(inv.client), client);
+      if (found?.maybe) maybeDupes++;
     }
     const t = totals(inv.lines, 'amount', inv.discount || 0);
     const id = await api.rpc('save_invoice', {
@@ -233,7 +250,7 @@ export async function importInvoices(list, { db, api, onStep = () => {}, fill = 
   // Keep the "next invoice #" counter ahead of anything imported.
   const maxNum = Math.max(0, ...[...existingNumbers].filter((n) => /^\d+$/.test(String(n))).map(Number));
   if (maxNum >= (db.profile.next_invoice_number || 1)) await api.updateProfile({ next_invoice_number: maxNum + 1 });
-  return { created, filled, skipped, ids };
+  return { created, filled, skipped, ids, maybeDupes };
 }
 
 /** Brings an invoice in Wrap up to date with its PDF: replace everything, or keep what's there and add the new lines. */

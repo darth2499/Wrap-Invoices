@@ -209,7 +209,7 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
 .mb-labels span { text-align: center; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; line-height: 1.3; }
 .mb-labels span.on { color: var(--ink); font-weight: 600; }
 .mb-labels em { font-style: normal; font-size: 10.5px; color: var(--faint); font-weight: 400; }
-@media (max-width: 560px) { .mb-plot { grid-template-columns: 36px minmax(0, 1fr); } .mb-col { padding: 0 6px; } }
+@media (max-width: 560px) { .mb-plot { grid-template-columns: 34px minmax(0, 1fr); } .mb-col { padding: 0 2px; border-radius: 6px 6px 0 0; } .mb-bars { gap: 1px; } .mb-labels span { font-size: 10.5px; } .mb-labels em { font-size: 9.5px; } }
 .login { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
 .spinner { width: 18px; height: 18px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -324,7 +324,6 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
   .search-wrap { flex: 1 1 160px !important; }
 }
 /* Chart slides on phones: earlier months fade out at the left edge (a cut-off bar shows there's more). */
-.mb-scroll.more-left { -webkit-mask-image: linear-gradient(to right, transparent, #000 56px); mask-image: linear-gradient(to right, transparent, #000 56px); }
 /* invoice list: draggable column headers + client count */
 .drag-th { cursor: grab; user-select: none; position: relative; }
 .drag-th:active { cursor: grabbing; }
@@ -803,3 +802,23 @@ h2 .count-badge { vertical-align: 3px; font-family: var(--font); }
 .attention-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 1240px) { .attention-row.three { grid-template-columns: 1fr 1fr; } .attention-row.three > .to-pay { grid-column: 1 / -1; } }
 @media (max-width: 760px) { .attention-row.three { grid-template-columns: 1fr; } }
+
+/* Charts: press and slide to move through months (vertical swipes still scroll the page) */
+.scrub { touch-action: pan-y; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+.mb, .forecast { -webkit-user-select: none; user-select: none; }
+
+/* Merge two clients / payees */
+.merge-grid { display: flex; flex-direction: column; border: 1px solid var(--line-2); border-radius: 12px; overflow: hidden; }
+.merge-row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line-2); align-items: start; }
+.merge-row:first-child { border-top: 0; }
+.merge-opts { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.merge-opt { all: unset; box-sizing: border-box; display: flex; gap: 8px; align-items: flex-start; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--field); cursor: pointer; font-size: 14px; overflow-wrap: anywhere; }
+.merge-opt.on { border-color: var(--ink); background: var(--hover); }
+.merge-dot { flex: none; width: 16px; height: 16px; margin-top: 1px; border-radius: 50%; border: 1.5px solid var(--field); display: grid; place-items: center; }
+.merge-opt.on .merge-dot { background: var(--ink); border-color: var(--ink); color: var(--surface); }
+.merge-same { font-size: 14px; overflow-wrap: anywhere; }
+@media (max-width: 480px) { .merge-row { grid-template-columns: 1fr; gap: 4px; } }
+
+/* A field the checks flagged */
+.input.is-bad, .is-bad-wrap .input { border-color: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 14%, transparent); }
+.is-bad-wrap { display: block; }

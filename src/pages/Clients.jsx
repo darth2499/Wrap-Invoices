@@ -7,6 +7,7 @@ import { statusOf } from '../lib/calc.js';
 import { money, fmtDate, num, todayISO, plural, greetName } from '../lib/format.js';
 import { go, shareUrl } from '../router.js';
 import EmailPreview from '../components/EmailPreview.jsx';
+import { DuplicatesButton } from '../components/Duplicates.jsx';
 import { buildStatementEmail } from '../lib/emailTemplate.js';
 
 export default function Clients({ id }) {
@@ -43,6 +44,7 @@ function ClientList() {
       <div className="page-head">
         <h1>Clients</h1>
         <div className="row wrap">
+          <DuplicatesButton kind="client" />
           <input className="input search" style={{ width: 220 }} placeholder="Search clients" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search clients" />
           <Button variant="primary" icon="plus" onClick={() => setEdit({})}>New client</Button>
         </div>

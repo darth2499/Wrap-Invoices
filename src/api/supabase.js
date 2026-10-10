@@ -158,6 +158,12 @@ export const api = {
   readReceipt(key, mime, extra = {}) {
     return call('receipt-read', { key, mime, ...extra });
   },
+  /** Receipt learning: what a correction taught (shared privately), the shared rules for a store, the owner's accuracy numbers. */
+  /** An invoice someone sent you (to pay): who it's from, the lines, totals and dates. */
+  readBill(extra) { return call('receipt-read', { mode: 'bill', ...extra }); },
+  scanLearn(payload) { return call('receipt-read', { mode: 'learn', ...payload }); },
+  scanRules(vendor) { return call('receipt-read', { mode: 'rules', vendor }); },
+  scanStats() { return call('receipt-read', { mode: 'stats' }); },
   readInvoicePdf(extra) {
     return call('receipt-read', { mode: 'invoice', ...extra });
   },

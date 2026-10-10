@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const out = 'supabase/functions/_shared/web';
 mkdirSync(out, { recursive: true });
-for (const f of ['pdf.js', 'format.js', 'calc.js', 'emailTemplate.js', 'logos.js']) {
+for (const f of ['pdf.js', 'format.js', 'calc.js', 'emailTemplate.js', 'logos.js', 'match.js', 'dateText.js', 'scanRules.js']) {
   const src = readFileSync(`src/lib/${f}`, 'utf8')
     .replace(/from 'pdf-lib'/g, "from 'npm:pdf-lib@1.17.1'");
   writeFileSync(`${out}/${f}`, `// GENERATED from src/lib/${f} by scripts/sync-shared.mjs. Edit the original, not this copy.\n${src}`);

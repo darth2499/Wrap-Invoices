@@ -12,6 +12,8 @@ import { takeFiles, onFiles } from '../lib/scanQueue.js';
 import { rateFor, followsIrs } from '../lib/mileage.js';
 import { rankInvoicesFor } from '../lib/suggest.js';
 import { canUploadReceipts } from '../lib/plan.js';
+import { DuplicatesButton } from '../components/Duplicates.jsx';
+import BillImport from '../components/BillImport.jsx';
 
 /** "Sony · Apr 27, 2026 · on invoice #123" — where an existing receipt is. */
 function whereIs(r, derived) {
@@ -620,6 +622,11 @@ function Crew({ query = {} }) {
     if (p) { setEdit(p); go('/expenses/crew'); }
   }, [query.payout, db.crew_payouts]); // eslint-disable-line react-hooks/exhaustive-deps
   const [member, setMember] = useState(null);
+  const [bills, setBills] = useState([]); // invoices you picked to import, one at a time
+  const importBills = async () => {
+    const files = await pickFiles({ accept: 'application/pdf,image/*', multiple: true });
+    if (files?.length) setBills([...files]);
+  };
   const pays = db.crew_payouts.filter((p) => (p.paid_on || p.work_date)?.startsWith(year)).sort((a, b) => (a.work_date < b.work_date ? 1 : -1));
   const unpaid = db.crew_payouts.filter((p) => !p.paid_on);
   const byMember = db.crew_members.map((m) => ({ m, paid: db.crew_payouts.filter((p) => p.crew_id === m.id && p.paid_on?.startsWith(year)).reduce((t, p) => t + num(p.amount), 0) })).sort((a, b) => b.paid - a.paid);
@@ -632,7 +639,7 @@ function Crew({ query = {} }) {
       </div>
       <div className="row wrap between">
         <select className="input" style={{ width: 110 }} value={year} onChange={(e) => setYear(e.target.value)} aria-label="Year">{years.map((y) => <option key={y}>{y}</option>)}</select>
-        <div className="row wrap"><Button icon="crew" onClick={() => setMember({})}>Add crew member</Button><Button variant="primary" icon="plus" disabled={!db.crew_members.length} onClick={() => setEdit({})}>Add payout</Button></div>
+        <div className="row wrap"><DuplicatesButton kind="crew" /><Button icon="upload" onClick={importBills}>Import invoice</Button><Button icon="crew" onClick={() => setMember({})}>Add crew member</Button><Button variant="primary" icon="plus" disabled={!db.crew_members.length} onClick={() => setEdit({})}>Add payout</Button></div>
       </div>
       <div className="grid-2">
         <section className="card">
@@ -659,6 +666,7 @@ function Crew({ query = {} }) {
       </div>
       {edit && (edit.source_key || edit.source_token ? <BillModal p={edit} onClose={() => setEdit(null)} /> : <PayoutModal p={edit} onClose={() => setEdit(null)} />)}
       {member && <MemberModal m={member} onClose={() => setMember(null)} />}
+      {bills.length > 0 && <BillImport key={`${bills.length}-${bills[0].name}`} file={bills[0]} onClose={() => setBills((b) => b.slice(1))} />}
     </>
   );
 }

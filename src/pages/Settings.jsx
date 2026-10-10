@@ -9,7 +9,7 @@ import { exportBackup, readBackup, restoreBackup } from '../lib/backup.js';
 import { parseCSV, downloadBlob, pickFiles } from '../lib/files.js';
 import { CLIENT_FIELDS, INVOICE_FIELDS, autoMap, clientsFromCsv, invoicesFromCsv, importInvoices, importExpenses, importClients, invoiceFromPdf, pdfMatch } from '../lib/importer.js';
 import { isWaveAccounting, parseWaveAccounting, readWaveFiles } from '../lib/wave.js';
-import { money, num, todayISO, addDays, plural, fmtDate } from '../lib/format.js';
+import { money, num, todayISO, addDays, plural, fmtDate, DATE_STYLES } from '../lib/format.js';
 import { irsRate, followsIrs } from '../lib/mileage.js';
 import { DEMO } from '../config.js';
 import { canUploadReceipts } from '../lib/plan.js';
@@ -156,7 +156,7 @@ const SAMPLE = {
 
 function Look() {
   const s = useStore();
-  const { f, setF, save, busy, dirty } = useProfileForm(['template', 'logo_mode', 'logo_preset', 'accent', 'payment_instructions', 'footer_note', 'default_terms_days', 'next_invoice_number', 'next_quote_number']);
+  const { f, setF, save, busy, dirty } = useProfileForm(['template', 'date_style', 'logo_mode', 'logo_preset', 'accent', 'payment_instructions', 'footer_note', 'default_terms_days', 'next_invoice_number', 'next_quote_number']);
   const [logo, setLogo] = useState(null);
   return (
     <div className="row wrap" style={{ alignItems: 'flex-start', gap: 16 }}>
@@ -165,6 +165,11 @@ function Look() {
         <LogoPicker mode={f.logo_mode} setMode={(v) => setF({ ...f, logo_mode: v })} onLogo={setLogo} preset={f.logo_preset} setPreset={(v) => setF({ ...f, logo_preset: v })} name={s.db.profile.business_name} accent={f.accent} />
         <h2 style={{ marginTop: 6 }}>Template</h2>
         <Seg value={f.template} onChange={(v) => setF({ ...f, template: v })} label="Template" options={[{ value: 'minimal', label: 'Minimal' }, { value: 'classic', label: 'Classic' }, { value: 'bold', label: 'Bold' }]} />
+        <Field label="Work dates">
+          <select className="input" value={f.date_style || 'mmdd'} onChange={(e) => setF({ ...f, date_style: e.target.value })} style={{ maxWidth: 260 }}>
+            {DATE_STYLES.map((d) => <option key={d.value} value={d.value}>{d.example}</option>)}
+          </select>
+        </Field>
         <Field label="Accent color" hint="(used by Bold and on emails)">
           <div className="row">
             <input type="color" value={f.accent || '#16161A'} onChange={(e) => setF({ ...f, accent: e.target.value })} style={{ width: 48, height: 40, border: '1px solid var(--field)', borderRadius: 10, padding: 3, background: 'var(--surface)' }} aria-label="Accent color" />
@@ -468,7 +473,32 @@ function People() {
           )}
         </div>
       ))}
+      <ScanAccuracy />
     </section>
+  );
+}
+
+/** Owner only: how often scanned receipts needed fixing in the last 30 days (counts only, from everyone). */
+function ScanAccuracy() {
+  const s = useStore();
+  const [st, setSt] = useState(null);
+  useEffect(() => { s.api.scanStats?.().then(setSt).catch(() => {}); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!st?.days?.length) return null;
+  const reads = st.days.reduce((t, d) => t + d.reads, 0);
+  const fixed = st.days.reduce((t, d) => t + d.fixed, 0);
+  if (!reads) return null;
+  const half = Math.floor(st.days.length / 2);
+  const rate = (ds) => { const r = ds.reduce((t, d) => t + d.reads, 0); return r ? 1 - ds.reduce((t, d) => t + d.fixed, 0) / r : null; };
+  const before = rate(st.days.slice(0, half));
+  const after = rate(st.days.slice(half));
+  return (
+    <div className="col" style={{ gap: 4, borderTop: '1px solid var(--line-2)', paddingTop: 12 }}>
+      <strong>Receipt scanning</strong>
+      <span className="small muted">
+        {Math.round((1 - fixed / reads) * 100)}% right the first time · {plural(reads, 'receipt')} checked in the last 30 days
+        {before != null && after != null && half >= 3 ? ` · ${after >= before ? '▲' : '▼'} ${Math.abs(Math.round((after - before) * 100))} pts vs the first half` : ''}
+      </span>
+    </div>
   );
 }
 
@@ -679,7 +709,7 @@ function StorageCard() {
 
 const SETTINGS_DEFAULTS = {
   business_name: null, business_email: null, address: null, phone: null, website: null, logo_key: null,
-  template: 'minimal', accent: '#16161A', payment_instructions: null, footer_note: null,
+  template: 'minimal', date_style: 'mmdd', accent: '#16161A', payment_instructions: null, footer_note: null,
   default_terms_days: 30, ot_base_hours: 10, ot_mult1: 1.5, ot_mult1_hours: 2, ot_mult2: 2,
   reminder_days: [3, 7, 14], auto_remind_default: false, mileage_rate: 0.7, tax_set_aside_pct: 25,
 };
@@ -843,11 +873,12 @@ function ImportModal({ imp, onClose }) {
         const parts = [];
         let action = null;
         if (!wave || withInvoices) {
-          const { created, filled, skipped, ids } = await importInvoices(wave ? w.invoices : preview, { db: s.db, api: s.api, onStep: setStep, fill: imp.type === 'pdfs', choices });
+          const { created, filled, skipped, ids, maybeDupes } = await importInvoices(wave ? w.invoices : preview, { db: s.db, api: s.api, onStep: setStep, fill: imp.type === 'pdfs', choices });
           parts.push(`${created} invoice${created === 1 ? '' : 's'} imported`);
           if (ids.length) action = ids.length === 1 ? { label: 'View invoice', run: () => go(`/invoices/${ids[0]}`) } : { label: 'View invoices', run: () => go('/invoices') };
           if (filled) parts.push(`${filled} existing invoice${filled === 1 ? '' : 's'} updated`);
           if (skipped.length) parts.push(`${skipped.length} skipped: ${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? '…' : ''}`);
+          if (maybeDupes) { parts.push(`${maybeDupes} client${maybeDupes === 1 ? '' : 's'} might already exist`); if (!action) action = { label: 'Review', run: () => go('/clients') }; }
         }
         if (wave && withExpenses && w.expenses.length) {
           const { created, skipped } = await importExpenses(w.expenses, { db: s.db, api: s.api, onStep: setStep });

@@ -8,6 +8,7 @@
 //           storage records, and the invitation itself. Only rows/files with THEIR user id are touched.
 import { admin, appUrl, HttpError, json, r2Delete, r2List, requireUser, serve } from "../_shared/util.ts";
 import { sendGmail } from "../_shared/email.ts";
+import { forgetVoter } from "../_shared/scanVotes.ts";
 // @ts-ignore: plain JS shared with the app (copied by scripts/sync-shared.mjs)
 import { buildInviteEmail as buildInviteJs } from "../_shared/web/emailTemplate.js";
 const buildInviteEmail = buildInviteJs as unknown as (e: Record<string, unknown>) => { subject: string; text: string; html: string };
@@ -102,6 +103,9 @@ serve(async (req) => {
     let files = 0;
     for (const k of keys) { await r2Delete(k); files++; }
     await db.from("stored_files").delete().eq("owner_id", id);
+
+    // What their receipt corrections taught Wrap (stored under a scrambled tag, removed too).
+    await forgetVoter(db, id).catch(() => {});
 
     // 3. Their login: deleting it signs them out everywhere and deletes every row they own (on delete cascade).
     const { error } = await db.auth.admin.deleteUser(id);

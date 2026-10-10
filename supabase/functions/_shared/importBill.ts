@@ -3,6 +3,8 @@
 import { HttpError } from "./util.ts";
 // @ts-ignore: plain JS shared with the app (copied by scripts/sync-shared.mjs)
 import * as shared from "./web/format.js";
+// @ts-ignore: plain JS shared with the app
+import * as matcher from "./web/match.js";
 // Never let the client page fail to start over this: without it, dates are just kept as written.
 // deno-lint-ignore no-explicit-any
 const styleDates: (t: string, style: unknown, iso: unknown) => string = (shared as any).styleDates ?? ((t: string) => t);
@@ -85,10 +87,14 @@ export async function doImport(db: Db, inv: any, token: string, userId: string, 
   }
 
   // The sender as one of their payees: an existing one with the same email or name, otherwise a new one.
-  const { data: crew } = await db.from("crew_members").select("id, name, email").eq("owner_id", userId);
+  const { data: crew } = await db.from("crew_members").select("id, name, email, phone, address").eq("owner_id", userId);
   const email = String(prof?.business_email || "").trim().toLowerCase();
+  // Same person even if written a little differently (same email, same phone, "Bros." vs "Brothers"…). Only a sure
+  // match is reused here; a maybe becomes a new payee and shows up under "possible duplicates" to merge.
   // deno-lint-ignore no-explicit-any
-  let member: any = (crew ?? []).find((c: { email?: string; name?: string }) => email && String(c.email || "").trim().toLowerCase() === email)
+  const m: any = (matcher as any).findMatch?.({ name: from, email, phone: prof?.phone, address: prof?.address }, crew ?? []);
+  // deno-lint-ignore no-explicit-any
+  let member: any = m?.level === "same" ? m.item : (crew ?? []).find((c: { email?: string; name?: string }) => email && String(c.email || "").trim().toLowerCase() === email)
     || (crew ?? []).find((c: { email?: string; name?: string }) => String(c.name || "").trim().toLowerCase() === from.toLowerCase());
   let madeMember = false;
   if (!member) {

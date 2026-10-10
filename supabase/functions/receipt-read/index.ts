@@ -4,7 +4,12 @@
 //   1. Cloudflare Workers AI — FREE (10,000 "neurons"/day ≈ 100+ receipts/day). Needs CF_AI_TOKEN (+ account id).
 //   2. Anthropic Claude — paid, most accurate. Used when ANTHROPIC_API_KEY is set and RECEIPT_PROVIDER isn't "cloudflare".
 // Set RECEIPT_PROVIDER to "cloudflare" or "anthropic" to force one.
-import { bytesToBase64, env, HttpError, json, r2Get, requireUser, serve } from "../_shared/util.ts";
+import { admin, bytesToBase64, env, HttpError, json, r2Get, requireUser, serve } from "../_shared/util.ts";
+import { sharedRules, vote } from "../_shared/scanVotes.ts";
+// @ts-ignore: plain JS shared with the app (copied by scripts/sync-shared.mjs)
+import * as scan from "../_shared/web/scanRules.js";
+// deno-lint-ignore no-explicit-any
+const rulesLib = scan as any; // (if it's ever missing, reading still works, just without learned fixes)
 
 // Keep in sync with src/lib/categories.js
 const CATEGORIES = [
@@ -31,7 +36,7 @@ Find the amount that was ACTUALLY PAID. Rules:
 Pick the best tax category for the expense from this list: ${CATEGORIES.join("; ")}.`;
 
 const RECEIPT_JSON = `Reply with ONLY one JSON object, no other text, in exactly this shape (use null when unknown):
-{"is_receipt": true, "vendor": "Business name", "date_printed": "as printed", "date": "YYYY-MM-DD", "country": "US", "total_paid": 0.00, "charged": null, "subtotal": null, "tax": null, "tip": null,
+{"is_receipt": true, "vendor": "Business name", "date_printed": "as printed", "date": "YYYY-MM-DD", "country": "US", "total_paid": 0.00, "total_label": "the words printed next to that amount", "charged": null, "subtotal": null, "tax": null, "tip": null,
  "currency": "USD", "reasoning": "one short sentence: which line is the total and why",
  "amounts": [{"label": "Subtotal", "amount": 0.00}], "category": "one of the categories", "confidence": "high|medium|low"}
 "amounts" lists every OTHER money amount someone might confuse with the total (subtotal, tax, tip, items, tendered, change).`;
@@ -42,7 +47,28 @@ const UPRIGHT = `This picture shows the same photo four times, each turned a dif
 Look at the printed words and numbers. In which copy does the text read normally: horizontal lines, left to right, right side up?
 Reply with ONLY this JSON: {"upright": "A"} (or "B", "C", "D").`;
 
-const INVOICE_RULES = `This is an invoice the user sent to a client (for example exported from Wave). Read every line item across all pages, keeping each item's description lines.`;
+// What invoices from common apps look like (so any of them reads right).
+const INVOICE_FORMATS = `Invoices come from many apps and templates: Wave, QuickBooks, FreshBooks, Xero, Zoho, Square, PayPal, Stripe, HoneyBook, Invoice2go, Bonsai, Harvest, Word/Google Docs/Excel templates, or handwritten.
+- The invoice number may be labelled "Invoice #", "Invoice No.", "Inv", "Number", "Reference" or "Document #".
+- Dates: "Invoice date", "Date", "Issued", "Date of issue"; due: "Due date", "Payment due", "Due", or terms like "Net 30" (then due = issue date + 30 days).
+- Line items are often a table: Item/Service/Description, Qty/Hours/Units, Rate/Price/Unit price, Amount/Line total. A description may span several lines under the item name: keep them.
+- Totals: "Subtotal", "Discount", "Tax"/"VAT"/"GST"/"Sales tax", "Shipping", "Total"; what's still owed: "Amount due", "Balance due", "Total due", "Amount Due (USD)", "Balance". Payments already made: "Paid", "Payment on <date>", "Amount paid", "Deposit received".
+- Read every page. Ignore page headers/footers repeated on each page, and "Page 1 of 2".
+- Never guess a number: use null for anything not printed.`;
+
+const INVOICE_RULES = `This is an invoice the user sent to a client. Read every line item across all pages, keeping each item's description lines.\n${INVOICE_FORMATS}`;
+
+const BILL_RULES = `This is an invoice someone sent TO the user (a bill the user has to pay), from a freelancer, vendor or company.
+"from" is the business or person who SENT the invoice (usually the name/logo at the top, "From", or "Pay to"), not the "Bill to" customer.
+${INVOICE_FORMATS}`;
+
+const BILL_JSON = `Reply with ONLY one JSON object, no other text, in exactly this shape (use null when unknown):
+{"is_invoice": true, "from_name": "Sender business or person", "from_email": null, "from_phone": null, "from_address": "line 1\\nline 2",
+ "bill_to": "Customer name", "number": "1042", "issue_date": "YYYY-MM-DD", "due_date": "YYYY-MM-DD", "terms": "Net 30",
+ "lines": [{"item": "Camera Operator", "description": "Shoot day (04/06)", "note": null, "qty": 1, "rate": 750.00, "amount": 750.00}],
+ "subtotal": 0.00, "discount": 0.00, "tax": 0.00, "shipping": 0.00, "total": 0.00, "payments": [{"date": "YYYY-MM-DD", "amount": 0.00, "method": null}], "amount_due": 0.00,
+ "currency": "USD", "notes": null}
+"is_invoice" is false if this is not an invoice (a receipt, a letter, a blank page…).`;
 
 const INVOICE_JSON = `Reply with ONLY one JSON object, no other text, in exactly this shape (use null when unknown):
 {"is_invoice": true, "number": "193", "client_name": "Bill-to name", "client_email": null, "client_address": "line 1\\nline 2",
@@ -128,6 +154,9 @@ function cleanReceipt(r: Record<string, any>) {
     is_receipt: r.is_receipt !== false,
     vendor: r.vendor ? String(r.vendor).slice(0, 120) : null,
     date: receiptDate(r.date_printed, r.date, r.country),
+    date_printed: r.date_printed ? String(r.date_printed).slice(0, 60) : null,
+    country: r.country ? String(r.country).slice(0, 2).toUpperCase() : null,
+    total_label: r.total_label ? String(r.total_label).slice(0, 40) : null,
     split: false,
     total_paid: toNum(r.total_paid ?? r.total),
     subtotal: toNum(r.subtotal),
@@ -143,6 +172,8 @@ function cleanReceipt(r: Record<string, any>) {
     confidence: ["high", "medium", "low"].includes(r.confidence) ? r.confidence : "medium",
     check: "unknown" as "ok" | "mismatch" | "unknown",
   };
+  // The total's own line is in the list too (so a learned rule can point at it, e.g. after a split-check fix).
+  if (out.total_label && out.total_paid != null && !out.amounts.some((a: any) => a.amount === out.total_paid)) out.amounts.push({ label: out.total_label, amount: out.total_paid });
   // Split check: the card paid only part of the bill. What you paid = that part + its tip (worked out here, not by the model).
   const charged = toNum(r.charged);
   const billTotal = out.subtotal != null ? out.subtotal + (out.tax ?? 0) : null;
@@ -159,6 +190,18 @@ function cleanReceipt(r: Record<string, any>) {
     if (out.check === "mismatch" && out.confidence === "high") out.confidence = "medium";
   }
   return out;
+}
+
+function cleanBill(r: Record<string, any>) {
+  const base = cleanInvoice(r);
+  const str = (v: unknown, n = 200) => (v == null || v === "" ? null : String(v).slice(0, n));
+  return {
+    ...base,
+    from_name: str(r.from_name, 120), from_email: str(r.from_email, 120), from_phone: str(r.from_phone, 40), from_address: str(r.from_address, 300),
+    bill_to: str(r.bill_to, 120), terms: str(r.terms, 60), shipping: toNum(r.shipping) ?? 0,
+    currency: String(r.currency || "USD").slice(0, 3).toUpperCase(),
+    amount_due: toNum(r.amount_due),
+  };
 }
 
 function cleanInvoice(r: Record<string, any>) {
@@ -186,7 +229,7 @@ function cleanInvoice(r: Record<string, any>) {
 
 // ---------------------------------------------------------------- readers
 interface Input {
-  mode: "receipt" | "invoice" | "upright";
+  mode: "receipt" | "invoice" | "bill" | "upright";
   text?: string; // text pulled from a PDF in the browser
   image?: { mime: string; b64: string };
   pdf?: string; // base64 PDF (Anthropic only)
@@ -196,8 +239,8 @@ async function readWithCloudflare(inp: Input) {
   const account = Deno.env.get("CF_ACCOUNT_ID") || env("R2_ACCOUNT_ID");
   const model = Deno.env.get("CF_AI_MODEL") || "@cf/meta/llama-4-scout-17b-16e-instruct";
   if (!inp.text && !inp.image) throw new HttpError(400, "Nothing to read");
-  const rules = inp.mode === "invoice" ? INVOICE_RULES : RECEIPT_RULES;
-  const shape = inp.mode === "invoice" ? INVOICE_JSON : RECEIPT_JSON;
+  const rules = inp.mode === "bill" ? BILL_RULES : inp.mode === "invoice" ? INVOICE_RULES : RECEIPT_RULES;
+  const shape = inp.mode === "bill" ? BILL_JSON : inp.mode === "invoice" ? INVOICE_JSON : RECEIPT_JSON;
   const content: unknown[] = [{ type: "text", text: inp.mode === "upright" ? UPRIGHT : `${rules}\n\n${shape}${inp.text ? `\n\nDocument text:\n"""\n${inp.text.slice(0, 24000)}\n"""` : ""}` }];
   if (inp.image) content.push({ type: "image_url", image_url: { url: `data:${inp.image.mime};base64,${inp.image.b64}` } });
 
@@ -210,7 +253,7 @@ async function readWithCloudflare(inp: Input) {
           { role: "system", content: "You extract data from documents and reply with JSON only." },
           { role: "user", content },
         ],
-        max_tokens: inp.mode === "invoice" ? 4000 : 1000,
+        max_tokens: inp.mode === "invoice" || inp.mode === "bill" ? 4000 : 1000,
         temperature: 0,
         ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
       }),
@@ -232,15 +275,15 @@ async function readWithAnthropic(inp: Input) {
   const content: unknown[] = [];
   if (inp.pdf) content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: inp.pdf } });
   if (inp.image) content.push({ type: "image", source: { type: "base64", media_type: inp.image.mime, data: inp.image.b64 } });
-  const rules = inp.mode === "invoice" ? INVOICE_RULES : RECEIPT_RULES;
-  const shape = inp.mode === "invoice" ? INVOICE_JSON : RECEIPT_JSON;
+  const rules = inp.mode === "bill" ? BILL_RULES : inp.mode === "invoice" ? INVOICE_RULES : RECEIPT_RULES;
+  const shape = inp.mode === "bill" ? BILL_JSON : inp.mode === "invoice" ? INVOICE_JSON : RECEIPT_JSON;
   content.push({ type: "text", text: inp.mode === "upright" ? UPRIGHT : `${rules}\n\n${shape}${inp.text && !inp.pdf ? `\n\nDocument text:\n"""\n${inp.text.slice(0, 60000)}\n"""` : ""}` });
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": env("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({
       model: Deno.env.get("RECEIPT_MODEL") || "claude-sonnet-4-5",
-      max_tokens: inp.mode === "invoice" ? 8000 : 1200,
+      max_tokens: inp.mode === "invoice" || inp.mode === "bill" ? 8000 : 1200,
       messages: [{ role: "user", content }],
     }),
   });
@@ -261,9 +304,33 @@ function provider(): "cloudflare" | "anthropic" {
 // ---------------------------------------------------------------- handler
 serve(async (req) => {
   const user = await requireUser(req);
-  const { key, mime, mode = "receipt", text, image_b64, image_mime } = await req.json();
+  const body = await req.json();
+  const { key, mime, mode = "receipt", text, image_b64, image_mime } = body;
+
+  // ----- learning from corrections (see _shared/scanVotes.ts and src/lib/scanRules.js) -----
+  if (mode === "learn") {
+    const db = admin();
+    const vk = rulesLib.vendorKey ? rulesLib.vendorKey(body.vendor) : "";
+    if (vk && Array.isArray(body.rules)) await vote(db, user.id, vk, body.rules.slice(0, 8));
+    if (body.first) await db.rpc("scan_stat", { p_fixed: !!body.fixed });
+    return json({ ok: true });
+  }
+  if (mode === "rules") {
+    const vk = rulesLib.vendorKey ? rulesLib.vendorKey(body.vendor) : "";
+    return json({ rules: await sharedRules(admin(), vk) });
+  }
+  if (mode === "stats") {
+    const db = admin();
+    const { data: me } = await db.from("profiles").select("is_admin").eq("id", user.id).single();
+    if (!me?.is_admin) throw new HttpError(403, "Owner only");
+    const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const { data } = await db.from("scan_stats").select("day, reads, fixed").gte("day", since).order("day");
+    const { count } = await db.from("scan_votes").select("*", { count: "exact", head: true });
+    return json({ days: data ?? [], votes: count ?? 0 });
+  }
+
   const p = provider();
-  const inp: Input = { mode: mode === "invoice" ? "invoice" : mode === "upright" ? "upright" : "receipt" };
+  const inp: Input = { mode: mode === "invoice" ? "invoice" : mode === "bill" ? "bill" : mode === "upright" ? "upright" : "receipt" };
 
   if (typeof text === "string" && text.trim().length > 20) {
     inp.text = text;
@@ -292,5 +359,15 @@ serve(async (req) => {
     const pick = String(raw?.upright ?? "A").trim().toUpperCase().charAt(0);
     return json({ upright: "ABCD".includes(pick) && pick ? pick : "A" });
   }
-  return json(inp.mode === "invoice" ? cleanInvoice(raw) : { ...cleanReceipt(raw), reader: p });
+  if (inp.mode === "invoice") return json(cleanInvoice(raw));
+  if (inp.mode === "bill") return json(cleanBill(raw));
+  let out: Record<string, unknown> = { ...cleanReceipt(raw), reader: p };
+  // What everyone has taught Wrap about this store (3+ people agreeing), applied to what was just read.
+  try {
+    if (out.vendor && rulesLib.applyRules) {
+      const shared = await sharedRules(admin(), rulesLib.vendorKey(out.vendor));
+      if (Object.keys(shared).length) out = { ...rulesLib.applyRules(out, shared), shared_rules: shared };
+    }
+  } catch (e) { console.warn("shared rules", e); }
+  return json(out);
 });

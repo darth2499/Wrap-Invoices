@@ -327,6 +327,17 @@ export const api = {
   },
 
   // In demo mode there's no AI: fake a plausible read so the review screen can be tried.
+  async readBill() {
+    // The demo can't read files: a sample invoice shows how importing looks.
+    await delay(600);
+    return { is_invoice: true, from_name: 'Jordan Park Films', from_email: 'billing@jordanpark.co', from_phone: '(415) 555-0101', from_address: '88 Howard St\nSan Francisco, CA 94105',
+      number: '1042', issue_date: '2026-10-02', due_date: null, terms: 'Net 15', currency: 'USD',
+      lines: [{ item: '2nd Camera', description: 'Brand shoot (Oct 1)', qty: 1, rate: 850, amount: 850 }, { item: 'Camera package', description: 'FX6, lenses, media', qty: 1, rate: 350, amount: 350 }],
+      subtotal: 1200, discount: 0, tax: 0, shipping: 0, total: 1200, payments: [], amount_due: 1200 };
+  },
+  async scanLearn() { return { ok: true }; },
+  async scanRules() { return { rules: {} }; },
+  async scanStats() { return { days: [], votes: 0 }; },
   async readReceipt(key, mime, extra = {}) {
     if (extra.mode === 'upright') return { upright: 'A' };
     await delay(700);
