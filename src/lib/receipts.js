@@ -51,7 +51,8 @@ async function maybeShrinkPdf(file, confirm) {
   }
 }
 
-export async function addReceiptFile(file, { api, receipts, onStep = () => {}, invoiceId = null, billable = false, mode = 'clean', confirm = null }) {
+// store=false (User plan): the photo/PDF is read for its details, then thrown away; only the details are saved.
+export async function addReceiptFile(file, { api, receipts, onStep = () => {}, invoiceId = null, billable = false, mode = 'clean', confirm = null, store = true }) {
   const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
   const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp)$/i.test(file.name);
   if (!isPdf && !isImage) return { status: 'error', message: `${file.name}: only photos and PDFs can be added` };
@@ -79,11 +80,13 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
       } catch (e) {
         console.warn('PDF read failed', e);
       }
-      const jpg = await maybeShrinkPdf(file, confirm);
-      onStep('Uploading…');
-      mime = jpg ? 'image/jpeg' : 'application/pdf';
-      fileKey = await api.files.upload(jpg || file, { folder: 'receipts', ext: jpg ? 'jpg' : 'pdf' });
-      uploaded.push(fileKey);
+      if (store) {
+        const jpg = await maybeShrinkPdf(file, confirm);
+        onStep('Uploading…');
+        mime = jpg ? 'image/jpeg' : 'application/pdf';
+        fileKey = await api.files.upload(jpg || file, { folder: 'receipts', ext: jpg ? 'jpg' : 'pdf' });
+        uploaded.push(fileKey);
+      }
     } else {
       onStep('Turning it the right way up…');
       photo = await turnedFile(file, await uprightTurn(api, file)).catch(() => file);
@@ -107,7 +110,8 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
     } catch (e) {
       ai = { error: e.message };
     }
-    if (!isPdf) {
+    if (!store) mime = null; // nothing kept
+    if (!isPdf && store) {
       // Read first (from the sharp copy), then store the compressed copies.
       onStep('Uploading…');
       const original = await shrinkOriginal(photo);
@@ -151,7 +155,9 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
     onStep('Saving…');
     try {
       const saved = await api.insert('receipts', row);
-      return { status: 'added', receipt: saved, message: ai?.error ? `Saved, but couldn't read it automatically: ${ai.error}` : null };
+      // Not stored (User plan): hand back what was scanned, so it can be shown while checking the details.
+      const preview = store ? null : isPdf ? file : scanned?.scan || null;
+      return { status: 'added', receipt: saved, preview, message: ai?.error ? `Saved, but couldn't read it automatically: ${ai.error}` : null };
     } catch (e) {
       if (/file_hash/.test(e.message)) {
         await api.files.remove(uploaded);

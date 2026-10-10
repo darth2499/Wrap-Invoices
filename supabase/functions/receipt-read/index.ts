@@ -4,7 +4,7 @@
 //   1. Cloudflare Workers AI — FREE (10,000 "neurons"/day ≈ 100+ receipts/day). Needs CF_AI_TOKEN (+ account id).
 //   2. Anthropic Claude — paid, most accurate. Used when ANTHROPIC_API_KEY is set and RECEIPT_PROVIDER isn't "cloudflare".
 // Set RECEIPT_PROVIDER to "cloudflare" or "anthropic" to force one.
-import { bytesToBase64, env, HttpError, json, r2Get, requireReceiptPlan, requireUser, serve } from "../_shared/util.ts";
+import { bytesToBase64, env, HttpError, json, r2Get, requireUser, serve } from "../_shared/util.ts";
 
 // Keep in sync with src/lib/categories.js
 const CATEGORIES = [
@@ -264,7 +264,6 @@ serve(async (req) => {
   const { key, mime, mode = "receipt", text, image_b64, image_mime } = await req.json();
   const p = provider();
   const inp: Input = { mode: mode === "invoice" ? "invoice" : mode === "upright" ? "upright" : "receipt" };
-  if (inp.mode !== "invoice") await requireReceiptPlan(user.id); // reading receipts comes with uploading them (Pro)
 
   if (typeof text === "string" && text.trim().length > 20) {
     inp.text = text;

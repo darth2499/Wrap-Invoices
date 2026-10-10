@@ -110,6 +110,8 @@ function Receipts({ query }) {
   const [over, setOver] = useState(false);
   const busy = queue.some((x) => x.status === 'working');
   const uploads = canUploadReceipts(db.profile);
+  // User plan: the scanned photo isn't saved, but it's kept on screen (this visit only) while you check the details.
+  const [previews, setPreviews] = useState({});
   // An expense typed in by hand (no photo): a blank receipt opens to fill in; closed without anything, it's removed.
   const newExpense = async () => {
     try { const r = await s.insert('receipts', { receipt_date: todayISO(), status: 'review', ai: { manual: true } }); setOpen(r.id); } catch (e) { s.toast(e.message, { error: true }); }
@@ -152,8 +154,9 @@ function Receipts({ query }) {
       const id = items[i].id;
       const setItem = (patch) => setQueue((qq) => qq.map((x) => (x.id === id ? { ...x, ...patch } : x)));
       setItem({ status: 'working' });
-      const res = await addReceiptFile(f, { api: s.api, receipts: known, confirm: s.confirm, onStep: (step) => setItem({ step }) });
+      const res = await addReceiptFile(f, { api: s.api, receipts: known, confirm: s.confirm, store: uploads, onStep: (step) => setItem({ step }) });
       if (res.status === 'added') {
+        if (res.preview) setPreviews((m) => ({ ...m, [res.receipt.id]: { url: URL.createObjectURL(res.preview), pdf: res.preview.type === 'application/pdf' } }));
         known.push(res.receipt);
         added.push(res.receipt);
         s.setDb((d) => ({ ...d, receipts: [...d.receipts, res.receipt] }));
@@ -183,7 +186,7 @@ function Receipts({ query }) {
 
   // Photos taken with the phone's bottom Scan button.
   useEffect(() => {
-    const run = () => { const f = takeFiles(); if (f && uploads) addFiles(f); };
+    const run = () => { const f = takeFiles(); if (f) addFiles(f); };
     run();
     return onFiles(run);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -216,11 +219,10 @@ function Receipts({ query }) {
 
   return (
     <>
-      {uploads ? (
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
         <button className="card phone-only" style={{ padding: 22, alignItems: 'center', gap: 14, cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit' }} onClick={() => cameraRef.current?.click()} disabled={busy}>
           <span style={{ width: 46, height: 46, borderRadius: 12, background: 'var(--primary)', color: 'var(--on-primary)', display: 'grid', placeItems: 'center' }}><Icon name="camera" size={22} /></span>
-          <span className="col" style={{ gap: 2 }}><strong>Scan a receipt</strong><span className="small muted">Opens your camera. Auto-crops and sharpens.</span></span>
+          <span className="col" style={{ gap: 2 }}><strong>Scan a receipt</strong><span className="small muted">{uploads ? 'Opens your camera. Auto-crops and sharpens.' : 'Opens your camera and fills in the details.'}</span></span>
         </button>
         <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />
         <div
@@ -232,16 +234,9 @@ function Receipts({ query }) {
         >
           <Icon name="upload" size={24} />
           <strong>Drop photos or PDFs here</strong>
-          <span className="small muted">or click to choose · duplicates are skipped automatically</span>
+          <span className="small muted">{uploads ? 'or click to choose · duplicates are skipped automatically' : 'or click to choose · the details are filled in for you'}</span>
         </div>
       </div>
-      ) : (
-        <button type="button" className="drop" style={{ font: 'inherit', color: 'inherit', width: '100%' }} onClick={newExpense}>
-          <Icon name="plus" size={24} />
-          <strong>New expense</strong>
-          <span className="small muted">Vendor, date and amount</span>
-        </button>
-      )}
 
       {shownQueue.length > 0 && (
         <section className="card">
@@ -279,7 +274,7 @@ function Receipts({ query }) {
         <div className="row wrap">
           {highConf.length > 0 && filter === 'review' && <Button size="sm" icon="check" onClick={async () => { for (const r of highConf) await s.update('receipts', r.id, { status: 'confirmed' }); s.toast(`${highConf.length} confirmed`); }}>Confirm {highConf.length} sure ones</Button>}
           <input className="input search" style={{ width: 220 }} placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search receipts" />
-          {uploads && <Button icon="plus" onClick={newExpense}>New expense</Button>}
+          <Button icon="plus" onClick={newExpense}>New expense</Button>
         </div>
       </div>
 
@@ -318,12 +313,12 @@ function Receipts({ query }) {
         )}
       </section>
 
-      {open && <ReceiptModal id={open} onClose={closeModal} onNext={(nid) => setOpen(nid)} />}
+      {open && <ReceiptModal id={open} preview={previews[open]} onClose={closeModal} onNext={(nid) => setOpen(nid)} />}
     </>
   );
 }
 
-export function ReceiptModal({ id, onClose, onNext }) {
+export function ReceiptModal({ id, preview, onClose, onNext }) {
   const s = useStore();
   const { db, derived } = s;
   const r = derived.receipts[id];
@@ -339,7 +334,7 @@ export function ReceiptModal({ id, onClose, onNext }) {
   }, [r?.file_key]); // eslint-disable-line react-hooks/exhaustive-deps
   // PDFs are drawn as pages inside the app (same look as a photo), not in the browser's PDF viewer.
   useEffect(() => {
-    const u = r?.mime === 'application/pdf' && urls[r.file_key];
+    const u = (r?.mime === 'application/pdf' && urls[r.file_key]) || (!r?.file_key && preview?.pdf && preview.url);
     setPdf(null);
     if (!u) return undefined;
     let made = [];
@@ -353,7 +348,7 @@ export function ReceiptModal({ id, onClose, onNext }) {
       else setPdf({ pages, total, url: made[made.length - 1] });
     })().catch(() => !gone && setPdf({ pages: [], total: 0, url: u }));
     return () => { gone = true; made.forEach((x) => URL.revokeObjectURL(x)); };
-  }, [urls, r?.file_key, r?.mime]);
+  }, [urls, r?.file_key, r?.mime, preview?.url]);
   if (!r) return null;
   const ai = r.ai || {};
   const chips = [];
@@ -368,11 +363,12 @@ export function ReceiptModal({ id, onClose, onNext }) {
   const ranked = rankInvoicesFor({ ...r, ...f, total: f.total === '' ? null : f.total }, invoices, { linesFor: derived.linesFor, clientName: (i) => derived.clients[i.client_id]?.name });
   const likely = ranked.map((x) => x.inv);
   const whyFor = Object.fromEntries(ranked.map((x) => [x.inv.id, x.why]));
-  const url = urls[r.file_key];
-  const isPdf = r.mime === 'application/pdf';
+  const local = !r.file_key && preview; // shown, not saved (User plan)
+  const url = local ? preview.url : urls[r.file_key];
+  const isPdf = local ? preview.pdf : r.mime === 'application/pdf';
   const manual = !!r.ai?.manual && !r.file_key;
   // Without receipt uploads (User plan) there's no photo side at all, unless the receipt already has a file.
-  const showFile = uploads || !!r.file_key;
+  const showFile = uploads || !!r.file_key || !!local;
   // Turn a stored photo a quarter turn clockwise (for the odd one the automatic turn got wrong).
   const rotate = async () => {
     if (fileBusy || !url) return;
@@ -447,8 +443,8 @@ export function ReceiptModal({ id, onClose, onNext }) {
     }>
       <div className="row wrap" style={{ alignItems: 'flex-start', gap: 20 }}>
         {showFile && <div className="col" style={{ flex: '1 1 280px', minWidth: 0, gap: 8 }}>
-          <div className={`receipt-view ${over ? 'over' : ''} ${r.file_key ? 'has-file' : ''}`} {...(uploads ? dropProps : {})}>
-            {!r.file_key
+          <div className={`receipt-view ${over ? 'over' : ''} ${r.file_key || local ? 'has-file' : ''}`} {...(uploads ? dropProps : {})}>
+            {!r.file_key && !local
               ? <button type="button" className="file-drop" onClick={() => attachFile()} disabled={fileBusy}>{fileBusy ? <span className="spinner" /> : <Icon name="upload" size={22} />}<span>Add or drop a receipt image or PDF</span></button>
               : !url || (isPdf && !pdf) ? <span className="spinner" />
               : isPdf ? (

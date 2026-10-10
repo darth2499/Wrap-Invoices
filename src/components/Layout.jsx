@@ -8,7 +8,6 @@ import { useStore } from '../store.jsx';
 import { APP_NAME, DEMO, LIVE_CONFIGURED } from '../config.js';
 import { api } from '../api/index.js';
 import { irsRate, followsIrs } from '../lib/mileage.js';
-import { canUploadReceipts } from '../lib/plan.js';
 
 // Install as an app: Android/Chrome can do it with one tap; on iPhone it's Safari's Share → Add to Home Screen.
 let deferredInstall = null;
@@ -96,7 +95,6 @@ export default function Layout({ route, children }) {
 function MobileNav({ current, review, onSearch }) {
   const [open, setOpen] = useState(false);
   const cam = useRef(null);
-  const uploads = canUploadReceipts(useStore().db.profile);
   const item = (id, label, icon) => (
     <a href={`#/${id}`} className={current === id ? 'on' : ''} aria-current={current === id ? 'page' : undefined} onClick={() => setOpen(false)}>
       <Icon name={icon} size={22} />{label}
@@ -124,21 +122,15 @@ function MobileNav({ current, review, onSearch }) {
       <nav className="mobile-nav" aria-label="Main">
         {item('', 'Home', 'overview')}
         {item('invoices', 'Invoices', 'invoice')}
-        {uploads ? (
-          <button type="button" className="scan" aria-label="Scan a receipt" onClick={() => cam.current?.click()}>
-            <span className="bubble"><Icon name="camera" size={24} /></span>
-          </button>
-        ) : (
-          <button type="button" className="scan" aria-label="New expense" onClick={() => go('/expenses?new=1')}>
-            <span className="bubble"><Icon name="plus" size={24} /></span>
-          </button>
-        )}
+        <button type="button" className="scan" aria-label="Scan a receipt" onClick={() => cam.current?.click()}>
+          <span className="bubble"><Icon name="camera" size={24} /></span>
+        </button>
         <a href="#/expenses" className={current === 'expenses' ? 'on' : ''} onClick={() => setOpen(false)} style={{ position: 'relative' }}>
           <Icon name="receipt" size={22} />Expenses
           {review > 0 && <span className="pill review" style={{ position: 'absolute', top: 2, right: 10, padding: '0 6px', fontSize: 10 }}>{review}</span>}
         </a>
         <button type="button" className={open ? 'on' : ''} aria-expanded={open} onClick={() => setOpen((o) => !o)}><Icon name="more" size={22} />More</button>
-        {uploads && <input ref={cam} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { const f = [...e.target.files]; e.target.value = ''; if (f.length) { queueFiles(f); go('/expenses'); } }} />}
+        <input ref={cam} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { const f = [...e.target.files]; e.target.value = ''; if (f.length) { queueFiles(f); go('/expenses'); } }} />
       </nav>
     </>
   );

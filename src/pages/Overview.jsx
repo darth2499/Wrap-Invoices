@@ -7,7 +7,6 @@ import { statusOf, dueText } from '../lib/calc.js';
 import { money, moneyK, num, todayISO, plural } from '../lib/format.js';
 import { go } from '../router.js';
 import { buildFeed } from '../lib/feed.js';
-import { canUploadReceipts } from '../lib/plan.js';
 
 export default function Overview() {
   const { db, derived } = useStore();
@@ -63,9 +62,7 @@ export default function Overview() {
           <h1>{name ? `Hi, ${name}` : 'Overview'}</h1>
         </div>
         <div className="row wrap ov-actions">
-          {canUploadReceipts(db.profile)
-            ? <Button icon="camera" onClick={() => go('/expenses?add=1')}>Add receipt</Button>
-            : <Button icon="plus" onClick={() => go('/expenses?new=1')}>New expense</Button>}
+          <Button icon="camera" onClick={() => go('/expenses?add=1')}>Add receipt</Button>
           <Button icon="quote" onClick={() => go('/invoices/new?kind=quote')}>New quote</Button>
           <Button variant="primary" icon="plus" onClick={() => go('/invoices/new')}>New invoice</Button>
         </div>
