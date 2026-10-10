@@ -26,7 +26,8 @@ function pill(text, tone) {
 function shell({ business, preheader, body, footer }) {
   const initial = esc((business.name || 'W').trim().charAt(0).toUpperCase());
   return `<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><title>${esc(preheader)}</title></head>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><title>${esc(preheader)}</title>
+<style>summary{list-style:none}summary::-webkit-details-marker{display:none}</style></head>
 <body style="margin:0;padding:0;background:${C.bg};-webkit-text-size-adjust:100%">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.bg}">
@@ -46,6 +47,20 @@ ${body}
 </table>
 </td></tr></table>
 </body></html>`;
+}
+
+/**
+ * The rest of a long list, folded: tap "+ 14 more items" to open it (Apple Mail, iPhone, the preview in Wrap).
+ * Email apps that can't fold (Gmail, Outlook) simply show the whole list under that line.
+ */
+function moreBlock(rowsHtml, count, word, cols) {
+  if (count <= 0) return '';
+  return `<details style="margin:0">
+    <summary style="display:block;cursor:pointer;padding:10px 0;border-top:1px solid ${C.line2};font-size:13px;font-weight:600;color:${C.ink2}">
+      + ${plural(count, word)} &#9662;
+    </summary>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rowsHtml.replace(/colspan="\d"/g, `colspan="${cols}"`)}</table>
+  </details>`;
 }
 
 function messageBlock(message) {
@@ -90,17 +105,18 @@ export function buildInvoiceEmail(e) {
 
   const lines = (e.lines || []).filter((l) => l.item || l.description || n(l.amount));
   const shown = lines.slice(0, 6);
-  const items = shown.length
-    ? `<tr><td style="padding:22px 0 6px;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:${C.faint}">Items</td><td></td></tr>
-      ${shown.map((l) => `<tr>
+  const itemRow = (l) => `<tr>
         <td style="padding:9px 12px 9px 0;border-top:1px solid ${C.line2};vertical-align:top">
           <div style="font-size:14px;font-weight:600;color:${C.ink}">${esc(l.item || 'Item')}</div>
           ${l.description ? `<div style="font-size:13px;line-height:1.5;color:${C.muted};white-space:pre-line">${esc(String(l.description).split('\n').slice(0, 3).join('\n'))}</div>` : ''}
         </td>
         <td align="right" style="padding:9px 0;border-top:1px solid ${C.line2};vertical-align:top;font-size:14px;color:${C.ink};white-space:nowrap">${money(l.amount)}</td>
-      </tr>`).join('')}
-      ${lines.length > shown.length ? `<tr><td colspan="2" style="padding:9px 0;border-top:1px solid ${C.line2};font-size:13px;color:${C.muted}">+ ${plural(lines.length - shown.length, 'more item')} on the ${label.toLowerCase()}</td></tr>` : ''}`
+      </tr>`;
+  const items = shown.length
+    ? `<tr><td style="padding:22px 0 6px;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:${C.faint}">Items</td><td></td></tr>
+      ${shown.map(itemRow).join('')}`
     : '';
+  const moreItems = moreBlock(lines.slice(shown.length).map(itemRow).join(''), lines.length - shown.length, 'more item', 2);
 
   const card = `<tr><td style="background:${C.card};border:1px solid ${C.line};border-radius:14px;padding:26px 26px 24px">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
@@ -122,6 +138,7 @@ export function buildInvoiceEmail(e) {
     ${!isQuote ? metaRow('Amount due', money(due), true) : ''}
     ${items}
   </table>
+  ${moreItems}
 </td></tr>`;
 
   const pay = !isQuote && e.paymentInstructions?.trim()
@@ -165,14 +182,16 @@ export function buildStatementEmail(e) {
   const invs = e.invoices || [];
   const total = invs.reduce((t, i) => t + n(i.due), 0);
   const overdue = invs.filter((i) => i.dueDate && daysPast(i.dueDate, today) > 0);
-  const rows = invs.slice(0, 12).map((i) => {
+  const invRow = (i) => {
     const late = i.dueDate ? daysPast(i.dueDate, today) : 0;
     return `<tr>
       <td style="padding:10px 10px 10px 0;border-top:1px solid ${C.line2};font-size:14px;font-weight:600;color:${C.ink};white-space:nowrap">#${esc(i.number)}</td>
       <td style="padding:10px 10px 10px 0;border-top:1px solid ${C.line2};font-size:13px;color:${late > 0 ? C.bad : C.muted}">${late > 0 ? `${plural(late, 'day')} overdue` : i.dueDate ? `Due ${shortDate(i.dueDate)}` : shortDate(i.issueDate)}</td>
       <td align="right" style="padding:10px 0;border-top:1px solid ${C.line2};font-size:14px;color:${C.ink};white-space:nowrap">${money(i.due)}</td>
     </tr>`;
-  }).join('');
+  };
+  const rows = invs.slice(0, 12).map(invRow).join('');
+  const moreInvs = moreBlock(invs.slice(12).map(invRow).join(''), invs.length - 12, 'more invoice', 3);
   const card = `<tr><td style="background:${C.card};border:1px solid ${C.line};border-radius:14px;padding:26px 26px 22px">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
     <tr>
@@ -185,8 +204,8 @@ export function buildStatementEmail(e) {
   ${button(e.link, 'View statement', e.accent)}
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px">
     ${rows}
-    ${invs.length > 12 ? `<tr><td colspan="3" style="padding:10px 0;border-top:1px solid ${C.line2};font-size:13px;color:${C.muted}">+ ${plural(invs.length - 12, 'more invoice')} on the statement</td></tr>` : ''}
   </table>
+  ${moreInvs}
 </td></tr>`;
   const html = shell({ business: e.business || {}, preheader: `Statement: ${money(total)} due`, body: messageBlock(e.message) + card, footer: e.hasReceipts === false ? 'Each invoice can be opened from the statement.' : 'Each invoice and its receipts can be opened from the statement.' });
   const text = [e.message?.trim(), '', `Statement — ${money(total)} due`, ...invs.map((i) => `#${i.number}  ${money(i.due)}${i.dueDate ? `  (due ${shortDate(i.dueDate)})` : ''}`), '', 'View your statement:', e.link, '', `— ${e.business?.name || ''}`].join('\n');
