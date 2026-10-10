@@ -657,7 +657,7 @@ function Crew({ query = {} }) {
           <p className="small muted" style={{ padding: '10px 20px 16px' }}>If you pay one person {money(NEC_THRESHOLD, { cents: false })} or more in a year for business work, you may need to send them a 1099-NEC. Collect a W-9 when you hire them. Check the current rules with your tax preparer.</p>
         </section>
       </div>
-      {edit && <PayoutModal p={edit} onClose={() => setEdit(null)} />}
+      {edit && (edit.source_key || edit.source_token ? <BillModal p={edit} onClose={() => setEdit(null)} /> : <PayoutModal p={edit} onClose={() => setEdit(null)} />)}
       {member && <MemberModal m={member} onClose={() => setMember(null)} />}
     </>
   );
@@ -669,6 +669,62 @@ function PayDue({ p }) {
   if (!p.due_date) return <span className="pill overdue">Unpaid</span>;
   if (p.due_date < today) return <span className="pill overdue">Overdue · {fmtShort(p.due_date)}</span>;
   return <span className={`pill ${p.due_date === today ? 'partial' : 'sent'}`}>{p.due_date === today ? 'Due today' : `Due ${fmtShort(p.due_date)}`}</span>;
+}
+
+/** One line of their invoice as plain text, for pasting anywhere. */
+const lineText = (l) => [l.item, l.description, l.note, `${num(l.qty) !== 1 ? `${num(l.qty)} × ${money(l.rate)} = ` : ''}${money(l.amount)}`].filter(Boolean).join('\n');
+
+/** An invoice someone sent you (Import to Wrap): every line, easy to read and copy, plus when you paid it. */
+function BillModal({ p, onClose }) {
+  const s = useStore();
+  const d = p.source_detail || null;
+  const from = d?.from || s.derived.crew[p.crew_id]?.name || 'Them';
+  const [f, setF] = useState({ paid_on: p.paid_on || '', method: p.method || '' });
+  const today = todayISO();
+  const copy = async (text, what) => {
+    try { await navigator.clipboard.writeText(text); s.toast(`${what} copied`); } catch { s.toast('Couldn’t copy', { error: true }); }
+  };
+  const all = d ? [`${from} · Invoice #${p.source_number}`, ...d.lines.map(lineText), `Total ${money(d.total)}`].join('\n\n') : '';
+  const save = async () => { await s.update('crew_payouts', p.id, { paid_on: f.paid_on || null, method: f.method || null }); onClose(); };
+  const st = p.paid_on ? ['paid', `Paid ${fmtShort(p.paid_on)}`] : !p.due_date ? ['overdue', 'Unpaid'] : p.due_date < today ? ['overdue', 'Overdue'] : p.due_date === today ? ['partial', 'Due today'] : ['sent', `Due ${fmtShort(p.due_date)}`];
+  return (
+    <Modal title={`${from} · #${p.source_number}`} onClose={onClose} footer={<>
+      <Button variant="ghost" className="danger" icon="trash" style={{ marginRight: 'auto' }} onClick={async () => { if (!window.confirm('Remove this bill from your Wrap?')) return; await s.remove('crew_payouts', p.id); onClose(); }}>Delete</Button>
+      {p.source_token && <Button icon="link" onClick={() => window.open(`#/i/${p.source_token}`, '_blank', 'noopener')}>Their invoice</Button>}
+      <Button variant="primary" onClick={save}>Save</Button>
+    </>}>
+      <div className="row between" style={{ alignItems: 'flex-start', gap: 12 }}>
+        <span className="col" style={{ gap: 2 }}>
+          <span className="num" style={{ fontSize: 26, fontWeight: 500, letterSpacing: '-0.02em' }}>{money(p.amount)}</span>
+          <span className="small muted">{d?.issue_date && `Invoice date ${fmtDate(d.issue_date)}`}</span>
+        </span>
+        <span className={`pill ${st[0]}`}>{st[1]}</span>
+      </div>
+      {d ? (
+        <section className="bill-lines">
+          <div className="bill-head"><span className="small muted">{plural(d.lines.length, 'item')}</span><Button size="sm" icon="copy" onClick={() => copy(all, 'All items')}>Copy all</Button></div>
+          {d.lines.map((l, i) => (
+            <div key={i} className="bill-line">
+              <span className="col" style={{ gap: 2, minWidth: 0 }}>
+                <b style={{ fontWeight: 500 }}>{l.item || 'Item'}</b>
+                {l.description && <span className="small muted" style={{ whiteSpace: 'pre-line' }}>{l.description}</span>}
+                {l.note && <span className="small muted" style={{ whiteSpace: 'pre-line' }}>{l.note}</span>}
+                {num(l.qty) !== 1 && <span className="small muted num">{num(l.qty)} × {money(l.rate)}</span>}
+              </span>
+              <span className="num">{money(l.amount)}</span>
+              <button type="button" className="bill-copy" aria-label={`Copy ${l.item || 'item'}`} onClick={() => copy(lineText(l), l.item || 'Item')}><Icon name="copy" size={15} /></button>
+            </div>
+          ))}
+          <div className="bill-line bill-total"><b>Total</b><span className="num">{money(d.total)}</span><span /></div>
+        </section>
+      ) : p.source_token && <p className="small muted">Open <a href={`#/i/${p.source_token}`} target="_blank" rel="noreferrer">their invoice</a> and tap Update in Wrap to bring the items in here.</p>}
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+        <Field label="Paid on"><DateInput clearable value={f.paid_on} onChange={(v) => setF({ ...f, paid_on: v })} /></Field>
+        <Field label="How"><select className="input" value={f.method} onChange={(e) => setF({ ...f, method: e.target.value })}><option value="">—</option>{['Zelle', 'Venmo', 'Bank transfer', 'Check', 'Cash', 'PayPal', 'Other'].map((m) => <option key={m}>{m}</option>)}</select></Field>
+      </div>
+      {!f.paid_on && <Button size="sm" style={{ alignSelf: 'flex-start' }} onClick={() => setF({ ...f, paid_on: todayISO() })}>Paid today</Button>}
+    </Modal>
+  );
 }
 
 function PayoutModal({ p, onClose }) {

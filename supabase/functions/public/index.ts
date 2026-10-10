@@ -8,6 +8,8 @@
 //   ping:         keeps the free Supabase project awake
 import { admin, cors, HttpError, json, presign, requireUser, serve } from "../_shared/util.ts";
 import { invoicePdf, verifyCode } from "../_shared/invoicePdf.ts";
+// @ts-ignore: plain JS shared with the app (copied by scripts/sync-shared.mjs)
+import { styleDates } from "../_shared/web/format.js";
 
 const TOKEN_RE = /^[a-f0-9]{48,64}$/;
 
@@ -192,8 +194,8 @@ async function importState(db: ReturnType<typeof admin>, inv: any, userId: strin
 
   const [{ data: pays }, { data: lines }, { data: prof }] = await Promise.all([
     db.from("payments").select("amount").eq("invoice_id", inv.id),
-    db.from("invoice_lines").select("item").eq("invoice_id", inv.id).order("position"),
-    db.from("profiles").select("business_name, business_email, phone, address").eq("id", inv.owner_id).single(),
+    db.from("invoice_lines").select("item, description, note, qty, rate, amount").eq("invoice_id", inv.id).order("position"),
+    db.from("profiles").select("business_name, business_email, phone, address, date_style").eq("id", inv.owner_id).single(),
   ]);
   const due = Math.round((Number(inv.total) - (pays ?? []).reduce((t, p) => t + Number(p.amount), 0)) * 100) / 100;
   if (due <= 0) return { state: "none" };
@@ -201,10 +203,10 @@ async function importState(db: ReturnType<typeof admin>, inv: any, userId: strin
   const key = await sha256(`wrap-import:${inv.id}`);
   const version = `${inv.version ?? 1}:${due}:${inv.due_date ?? ""}`;
   // One import per invoice in all of Wrap: once someone has it, anyone else with the link just sees the PDF button.
-  const { data: held } = await db.from("crew_payouts").select("id, owner_id, source_version, paid_on").eq("source_key", key).limit(1);
+  const { data: held } = await db.from("crew_payouts").select("id, owner_id, source_version, paid_on, source_detail").eq("source_key", key).limit(1);
   if (held?.[0] && held[0].owner_id !== userId) return { state: "none" };
   const mine = held?.[0] ?? null;
-  const state = !mine ? "new" : mine.source_version !== version && !mine.paid_on ? "changed" : "imported";
+  const state = !mine ? "new" : (mine.source_version !== version || !mine.source_detail) && !mine.paid_on ? "changed" : "imported";
   return { state, mine, due, key, version, lines, prof };
 }
 
@@ -221,6 +223,14 @@ async function doImport(db: ReturnType<typeof admin>, inv: any, token: string, u
     source_number: String(inv.number),
     source_token: token,
     source_version: version,
+    // A copy of what they billed, so you can read and copy every line without opening the link again.
+    source_detail: {
+      from: from, issue_date: inv.issue_date, due_date: inv.due_date, total: Number(inv.total), due,
+      lines: (lines ?? []).map((l: Record<string, unknown>) => ({
+        item: l.item ?? "", description: styleDates(String(l.description ?? ""), prof?.date_style, inv.issue_date), note: l.note ?? "",
+        qty: Number(l.qty), rate: Number(l.rate), amount: Number(l.amount),
+      })),
+    },
   };
   if (mine) {
     const { error } = await db.from("crew_payouts").update(row).eq("id", mine.id).eq("owner_id", userId);

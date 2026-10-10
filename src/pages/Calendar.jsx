@@ -41,10 +41,12 @@ export default function Calendar() {
       day.push({ ...s, inv, st, items: s.item ? [s.item] : [], labels: [s.label], client: derived.clients[inv.client_id]?.name || '' });
     }
     for (const list of Object.values(map)) for (const x of list) { x.label = x.labels.join(' · '); x.what = x.items.join('/'); }
-    // Bills you need to pay, on their due date (both views), in their own color.
-    for (const p of db.crew_payouts.filter((x) => x.due_date)) {
+    // Bills you need to pay, in their own color: on their invoice date (Invoice dates) or when they're due (Shoot days).
+    for (const p of db.crew_payouts) {
+      const at = view === 'issued' ? (p.source_key || p.source_token ? p.source_detail?.issue_date || p.work_date : p.due_date) : p.due_date;
+      if (!at) continue;
       const name = derived.crew?.[p.crew_id]?.name || 'Crew';
-      (map[p.due_date] ||= []).push({ payout: p, label: `Pay ${name}`, name, st: { key: p.paid_on ? 'paid' : 'pay' } });
+      (map[at] ||= []).push({ payout: p, label: `Pay ${name}`, name, st: { key: p.paid_on ? 'paid' : 'pay' } });
     }
     return map;
   }, [db.invoices, db.crew_payouts, derived, today, view]);

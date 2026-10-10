@@ -298,6 +298,7 @@ create table if not exists public.crew_payouts (
   source_token   text,
   source_key     text,
   source_version text,
+  source_detail  jsonb,
   created_at  timestamptz not null default now(),
   foreign key (crew_id, owner_id) references public.crew_members(id, owner_id) on delete restrict,
   foreign key (client_id, owner_id) references public.clients(id, owner_id) on delete set null (client_id),
