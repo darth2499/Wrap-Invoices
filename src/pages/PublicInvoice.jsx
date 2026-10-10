@@ -1,6 +1,6 @@
 // What your client sees when they open the link (no sign-in).
 import { useEffect, useState } from 'react';
-import { api } from '../api/index.js';
+import { publicApi } from '../api/index.js';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import { Button, Icon, Spinner } from '../components/ui.jsx';
 import { pdfFileName } from '../lib/format.js';
@@ -11,6 +11,7 @@ import { linkToken } from '../lib/publicFast.js';
 
 export default function PublicInvoice({ token: rawToken }) {
   const token = linkToken(rawToken) || rawToken;
+  const api = publicApi(token);
   const route = useRoute();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');

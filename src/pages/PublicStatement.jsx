@@ -1,6 +1,6 @@
 // A client's statement: every open invoice in one place (no sign-in).
 import { useEffect, useState } from 'react';
-import { api } from '../api/index.js';
+import { publicApi } from '../api/index.js';
 import { Spinner } from '../components/ui.jsx';
 import { Center } from './PublicInvoice.jsx';
 import { money, fmtDate, todayISO } from '../lib/format.js';
@@ -9,7 +9,7 @@ export default function PublicStatement({ token }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   useEffect(() => {
-    api.publicCall('statement', { token }).then(setData).catch((e) => setError(e.message));
+    publicApi(token).publicCall('statement', { token }).then(setData).catch((e) => setError(e.message));
   }, [token]);
   if (error) return <Center><h2>Link not found</h2><p className="muted">Ask the sender for a new link.</p></Center>;
   if (!data) return <Center><Spinner label="Loading…" /></Center>;
