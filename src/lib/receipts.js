@@ -38,12 +38,12 @@ const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
 async function maybeShrinkPdf(file, confirm) {
   if (file.size <= BIG_PDF || !confirm) return null;
   try {
-    const { blob, pages, total } = await pdfToJpeg(file);
+    const { blob } = await pdfToJpeg(file);
     if (!blob || blob.size >= file.size * 0.7) return null;
     const ok = await confirm({
-      title: `Save ${file.name} as a picture?`,
-      body: `This PDF is ${mb(file.size)}. As a JPG it's ${mb(blob.size)}${total > pages ? ` (first ${pages} of ${total} pages)` : ''}. It's already been read either way.`,
-      ok: 'Save as JPG', cancel: 'Keep the PDF',
+      title: 'Save a smaller copy?',
+      body: `This PDF is ${mb(file.size)}. Saved as a picture it's ${mb(blob.size)}.`,
+      ok: 'Save smaller copy', cancel: 'Keep PDF',
     });
     return ok ? blob : null;
   } catch {
@@ -132,7 +132,7 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
       status: 'review',
       invoice_id: invoiceId,
       billable,
-      ai: { ...(ai || {}), cropped, file_name: file.name },
+      ai: { ...(ai || {}), cropped, file_name: file.name, compressed: true },
     };
 
     const twin = receipts.find((r) => looksSame(r, row));
@@ -177,17 +177,17 @@ export async function attachToReceipt(s, r, file) {
   const up = (blob, folder, ext) => s.api.files.upload(blob, { folder, ext });
   let patch;
   const twin = s.db.receipts.find((x) => x.id !== r.id && x.file_hash === hash);
-  if (twin) throw new Error(`This file is already on another receipt (${twin.vendor || 'no vendor'}${twin.receipt_date ? `, ${twin.receipt_date}` : ''}).`);
+  if (twin) throw Object.assign(new Error('This file is already saved on another receipt.'), { twin });
   if (isPdf) {
     const jpg = await maybeShrinkPdf(file, s.confirm);
     patch = jpg
-      ? { file_key: await up(jpg, 'receipts', 'jpg'), original_key: null, mime: 'image/jpeg' }
+      ? { file_key: await up(jpg, 'receipts', 'jpg'), original_key: null, mime: 'image/jpeg', ai: { ...(r.ai || {}), compressed: true } }
       : { file_key: await up(file, 'receipts', 'pdf'), original_key: null, mime: 'application/pdf' };
   } else {
     // Kept as the photo (no cleanup), just turned upright and compressed.
     try {
       const blob = await compressPhoto(file, { turn: await uprightTurn(s.api, file) });
-      patch = { file_key: await up(blob, 'receipts', 'jpg'), original_key: null, mime: 'image/jpeg' };
+      patch = { file_key: await up(blob, 'receipts', 'jpg'), original_key: null, mime: 'image/jpeg', ai: { ...(r.ai || {}), compressed: true } };
     } catch {
       // A format this browser can't open (e.g. HEIC outside Safari): store as is.
       patch = { file_key: await up(file, 'receipts', extFor(file.type, 'jpg')), original_key: null, mime: file.type || 'image/jpeg' };

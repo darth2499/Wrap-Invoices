@@ -12,6 +12,12 @@ import { takeFiles, onFiles } from '../lib/scanQueue.js';
 import { rateFor, followsIrs } from '../lib/mileage.js';
 import { suggestContext, receiptScore } from '../lib/suggest.js';
 
+/** "Sony · Apr 27, 2026 · on invoice #123" — where an existing receipt is. */
+function whereIs(r, derived) {
+  const inv = r.invoice_id && derived.invoices[r.invoice_id];
+  return [r.vendor || 'No vendor', fmtDate(r.receipt_date), inv ? `on invoice #${inv.number}` : 'not on an invoice'].filter(Boolean).join(' · ');
+}
+
 /**
  * Click a vendor, date, category or amount in the table to change it right there (Enter or click away saves,
  * Esc cancels). A receipt billed on an invoice updates that invoice's line too.
@@ -35,19 +41,24 @@ function EditCell({ r, field, children }) {
     } catch (e) { s.toast(e.message, { error: true }); }
   };
   const key = (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') setEditing(false); };
-  if (!editing) return <span className="cell-edit" role="button" tabIndex={0} onClick={start} onKeyDown={(e) => e.key === 'Enter' && start(e)}>{children}</span>;
+  const cls = `cell-edit${field === 'total' ? ' right' : ''}${field === 'category' ? ' small' : ''}${field === 'vendor' ? ' strong' : ''}`;
+  if (!editing) return <span className={cls} role="button" tabIndex={0} onClick={start} onKeyDown={(e) => e.key === 'Enter' && start(e)}>{children}</span>;
   return (
-    <span className="cell-editing" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+    <span className={`${cls} editing`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      {/* The text stays (invisible) to hold the cell's size; the field sits right on top, so nothing moves. */}
+      <span className="cell-ghost" aria-hidden="true">{children}</span>
+      <span className="cell-ctl">
       {field === 'category' ? (
-        <select className="input" autoFocus value={v} onChange={(e) => save(e.target.value)} onBlur={() => setEditing(false)} onKeyDown={key} aria-label="Category">
+        <select autoFocus value={v} onChange={(e) => save(e.target.value)} onBlur={() => setEditing(false)} onKeyDown={key} aria-label="Category">
           <option value="">Uncategorized</option>
           {categoryList(s.db.profile).map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
         </select>
       ) : field === 'receipt_date' ? (
         <DateInput value={v} defaultOpen onChange={(d) => save(d)} onDismiss={() => setEditing(false)} aria-label="Date" />
       ) : (
-        <input className={`input${field === 'total' ? ' num right' : ''}`} autoFocus value={v} inputMode={field === 'total' ? 'decimal' : undefined} onChange={(e) => setV(e.target.value)} onBlur={() => save()} onKeyDown={key} onFocus={(e) => e.target.select()} aria-label={field === 'total' ? 'Amount' : 'Vendor'} />
+        <input className={field === 'total' ? 'num' : undefined} autoFocus value={v} inputMode={field === 'total' ? 'decimal' : undefined} onChange={(e) => setV(e.target.value)} onBlur={() => save()} onKeyDown={key} onFocus={(e) => e.target.select()} aria-label={field === 'total' ? 'Amount' : 'Vendor'} />
       )}
+      </span>
     </span>
   );
 }
@@ -109,7 +120,7 @@ function Receipts({ query }) {
       .filter((r) => !t || `${r.vendor} ${r.category} ${r.total} ${r.notes}`.toLowerCase().includes(t))
       .sort((a, b) => (a.status === 'review' ? 0 : 1) - (b.status === 'review' ? 0 : 1) || String(b.receipt_date || b.created_at).localeCompare(String(a.receipt_date || a.created_at)));
   }, [db.receipts, filter, year, q, cat, range]);
-  const shownKeys = list.slice(0, 120).map((r) => r.file_key).filter(Boolean);
+  const shownKeys = list.slice(0, 400).map((r) => r.file_key).filter(Boolean);
 
   useEffect(() => {
     const missing = shownKeys.filter((k) => !urls[k]);
@@ -135,7 +146,7 @@ function Receipts({ query }) {
         setItem({ status: 'done', step: `${res.receipt.vendor || 'Receipt'} · ${res.receipt.total != null ? money(res.receipt.total) : 'amount?'}`, message: res.message, receiptId: res.receipt.id });
       } else if (res.status === 'duplicate') {
         dupes++;
-        setItem({ status: 'dupe', step: 'Duplicate — skipped', message: res.message });
+        setItem({ status: 'dupe', step: 'Already saved — skipped', message: res.existing ? whereIs(res.existing, derived) : res.message, receiptId: res.existing?.id });
         if (res.fuzzy) {
           let kept = false;
           s.toast(res.message, {
@@ -179,12 +190,15 @@ function Receipts({ query }) {
       if (!file || rowBusy) return;
       if (r.file_key && !(await s.confirm({ title: `Replace the file on ${r.vendor || 'this receipt'}?`, body: `${file.name} takes the place of the current file.`, ok: 'Replace' }))) return;
       setRowBusy(r.id);
-      try { s.toast((await attachToReceipt(s, r, file)) === 'replaced' ? 'File replaced' : 'File added'); } catch (err) { s.toast(err.message, { error: true }); }
+      try { s.toast((await attachToReceipt(s, r, file)) === 'replaced' ? 'File replaced' : 'File added'); } catch (err) {
+        if (err.twin) s.toast(`Already saved: ${whereIs(err.twin, derived)}`, { error: true, action: { label: 'Show', run: () => setOpen(err.twin.id) } });
+        else s.toast(err.message, { error: true });
+      }
       setRowBusy(null);
     },
   });
   const rowCls = (r) => (rowOver === r.id ? ' row-drop' : '');
-  const thumb = (r) => (rowBusy === r.id ? <span className="spinner" /> : urls[r.file_key] && r.mime !== 'application/pdf' ? <img src={urls[r.file_key]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : r.mime === 'application/pdf' ? 'PDF' : <Icon name="receipt" size={16} />);
+  const thumb = (r) => (rowBusy === r.id ? <span className="spinner" /> : urls[r.file_key] && r.mime !== 'application/pdf' ? <img src={urls[r.file_key]} alt="" loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : r.mime === 'application/pdf' ? 'PDF' : <Icon name="receipt" size={16} />);
 
   return (
     <>
@@ -217,7 +231,7 @@ function Receipts({ query }) {
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.step}</span>
                 <span className="small muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.message || x.name}</span>
               </span>
-              {x.receiptId && <span className="small" style={{ color: 'var(--accent)' }}>Check</span>}
+              {x.receiptId && <span className="small" style={{ color: 'var(--accent)' }}>{x.status === 'dupe' ? 'Show' : 'Check'}</span>}
             </div>
           ))}
         </section>
@@ -354,7 +368,8 @@ export function ReceiptModal({ id, onClose, onNext }) {
       const how = await attachToReceipt(s, r, file);
       s.toast(how === 'replaced' ? 'File replaced' : 'File added');
     } catch (e) {
-      s.toast(e.message, { error: true });
+      if (e.twin) s.toast(`Already saved: ${whereIs(e.twin, derived)}`, { error: true, action: { label: 'Show', run: () => onNext(e.twin.id) } });
+      else s.toast(e.message, { error: true });
     }
     setFileBusy(false);
   };

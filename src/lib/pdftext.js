@@ -55,33 +55,38 @@ export async function pdfPages(file, { max = 10, width = 1100 } = {}) {
   return { pages: out, total: doc.numPages };
 }
 
-/** The pages stacked into one JPEG (for a PDF too big to keep): up to `max` pages, `width` px wide. */
-export async function pdfToJpeg(file, { max = 4, width = 1400 } = {}) {
+/** Every page stacked into one JPEG (for a PDF too big to keep). PDFs with more than `max` pages stay PDFs. */
+export async function pdfToJpeg(file, { max = 12, width = 1400 } = {}) {
   const doc = await open(file);
-  const canvases = [];
-  for (let n = 1; n <= Math.min(doc.numPages, max); n++) {
-    const page = await doc.getPage(n);
-    const base = page.getViewport({ scale: 1 });
-    const vp = page.getViewport({ scale: Math.min(4, width / base.width) });
-    const c = document.createElement('canvas');
-    c.width = Math.round(vp.width);
-    c.height = Math.round(vp.height);
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, c.width, c.height);
-    await page.render({ canvasContext: ctx, viewport: vp }).promise;
-    canvases.push(c);
-  }
+  if (doc.numPages > max) return { blob: null }; // too many pages for one picture: keep the PDF
+  const pages = [];
+  for (let n = 1; n <= doc.numPages; n++) pages.push(await doc.getPage(n));
+  const sizes = pages.map((p) => p.getViewport({ scale: 1 }));
+  // Phones can't draw a canvas over ~16 million pixels: narrow the pages so all of them fit.
+  const tall = sizes.reduce((t, v) => t + v.height / v.width, 0);
+  const w = Math.min(width, Math.floor(Math.sqrt(15e6 / tall)));
+  const gap = 16;
   const out = document.createElement('canvas');
-  out.width = Math.max(...canvases.map((c) => c.width));
-  out.height = canvases.reduce((h, c) => h + c.height, 0) + 16 * (canvases.length - 1);
+  out.width = w;
+  out.height = Math.round(sizes.reduce((h, v) => h + (v.height * w) / v.width, 0) + gap * (pages.length - 1));
   const ctx = out.getContext('2d');
   ctx.fillStyle = '#ddd';
   ctx.fillRect(0, 0, out.width, out.height);
   let y = 0;
-  for (const c of canvases) { ctx.drawImage(c, 0, y); y += c.height + 16; }
+  for (const [i, page] of pages.entries()) {
+    const vp = page.getViewport({ scale: w / sizes[i].width });
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = Math.round(vp.height);
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#fff';
+    cx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: cx, viewport: vp }).promise;
+    ctx.drawImage(c, 0, y);
+    y += c.height + gap;
+  }
   const blob = await new Promise((r) => out.toBlob(r, 'image/jpeg', 0.82));
-  return { blob, pages: canvases.length, total: doc.numPages };
+  return { blob, pages: pages.length };
 }
 
 /** Page 1 as a JPEG (for PDFs that are just a scanned picture). */

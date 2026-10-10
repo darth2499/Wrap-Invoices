@@ -557,7 +557,7 @@ function CompressStored({ onDone }) {
           } catch (e) { console.warn('compress failed', r.id, e); }
         }
       }
-      s.toast(`Done — ${(saved / 1048576).toFixed(1)} MB freed`);
+      s.toast(saved > 512 * 1024 ? `Done — ${(saved / 1048576).toFixed(1)} MB freed` : 'Done — they were already small');
       onDone();
     } catch (e) { s.toast(e.message, { error: true }); }
     setBusy('');
