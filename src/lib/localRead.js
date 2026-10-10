@@ -4,6 +4,7 @@
 // the online reader, so what it finds is marked to double-check.
 import { findDates, guessOrder } from './dateText.js';
 import { textDirection, turnedFile } from './scan.js';
+import { findOrderNumber, findCard, findItems, isFinanced, fullTotal } from './receiptExtras.js';
 
 let workerP = null;
 function ocrWorker() {
@@ -79,8 +80,11 @@ export function parseReceiptText(text) {
   let totalPaid = total?.amount ?? null;
   if (totalPaid == null) { const all = lines.flatMap(amountsIn); totalPaid = all.length ? Math.max(...all) : null; }
   const bill = subtotal != null ? subtotal + (tax ?? 0) : totalPaid;
-  if (applied != null && bill != null && applied < bill - 0.01) totalPaid = applied + (tip ?? 0); // split check
+  if (applied != null && bill != null && applied < bill - 0.01 && !isFinanced(text)) totalPaid = applied + (tip ?? 0); // split check
   else if (tipHit && total && tipHit.i > total.i && totalPaid != null && !totals.some((t) => t.i > tipHit.i)) totalPaid += tip; // tip added after the total
+  // Paid in installments: what you bought is the order's full total, not today's charge.
+  const financed = isFinanced(text);
+  if (financed) { const full = fullTotal(text); if (full) totalPaid = full; }
   if (totalPaid != null) totalPaid = Math.round(totalPaid * 100) / 100;
 
   // Date: the first date on the receipt (US order unless the receipt shows otherwise), never in the future.
@@ -100,6 +104,7 @@ export function parseReceiptText(text) {
   // Every labelled amount on the receipt ("Amount charged 46.59"), so learned rules can pick the right one next time.
   const labelOf = (l) => l.replace(MONEY, ' ').replace(/[$:*]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
   const totalLabel = total ? labelOf(lines[total.i]) : null;
+  const card = findCard(text);
   const amounts = lines.flatMap((l) => {
     const a = amountsIn(l);
     const label = labelOf(l);
@@ -107,7 +112,8 @@ export function parseReceiptText(text) {
   }).slice(0, 20);
   return {
     is_receipt: totalPaid != null, vendor, date, date_printed: datePrinted, total_paid: totalPaid, total_label: totalLabel, subtotal, tax, tip, currency: 'USD', amounts, category,
-    confidence: 'low', check: 'unknown', reader: 'device',
+    confidence: 'low', check: 'unknown', reader: 'device', financed,
+    order_number: findOrderNumber(text), card_brand: card.brand, card_last4: card.last4, items: findItems(text),
     reasoning: 'Read on this device. Double-check the total and date.',
   };
 }

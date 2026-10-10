@@ -5,6 +5,7 @@ import { round2 } from './format.js';
 import { pdfText, pdfFirstPageImage, pdfToJpeg, blobToBase64 } from './pdftext.js';
 import { readOnDevice } from './localRead.js';
 import { applyRules, personalRules } from './scanRules.js';
+import { refineExtras, itemsNote } from './receiptExtras.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -40,6 +41,19 @@ export function looksSame(a, b) {
  * ctx: { api, receipts (existing list), onStep(text) }
  */
 export const BIG_PDF = 5 * 1024 * 1024;
+
+const NEW_COLUMNS = ['order_number', 'card_brand', 'card_last4'];
+/** Saves a receipt; works before migration 019 is run too (the new details are then kept in `ai` only). */
+export async function insertReceipt(api, row) {
+  try {
+    return await api.insert('receipts', row);
+  } catch (e) {
+    if (!NEW_COLUMNS.some((c) => String(e.message).includes(c))) throw e;
+    const rest = { ...row };
+    for (const c of NEW_COLUMNS) delete rest[c];
+    return api.insert('receipts', rest);
+  }
+}
 
 export async function withLearning(api, ai, receipts) {
   if (!ai || ai.error || !ai.vendor) return ai;
@@ -164,6 +178,12 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
     // What Wrap has learned about this store: from everyone (already applied by the online reader; fetched here for
     // on-device reads), then your own corrections on top.
     ai = await withLearning(api, ai, receipts);
+    // Order #, card (last 4 only) and what was bought, checked against the PDF's own text; the full price for
+    // things paid in installments.
+    const extras = ai && !ai.error ? refineExtras(ai, readWith.text) : null;
+    if (extras?.total && ai.total_paid != null && Math.abs(extras.total - ai.total_paid) > 0.009) {
+      ai = { ...ai, total_paid: extras.total, financed: true, reasoning: 'Paid in installments: this is the full price of the order, not just today’s charge.' };
+    }
     if (!store) mime = null; // nothing kept
     if (!isPdf && store) {
       // Read first (from the sharp copy), then store the compressed copies.
@@ -183,6 +203,10 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
       tax: ai?.tax ?? null,
       tip: ai?.tip ?? null,
       category: ai?.category || null,
+      notes: itemsNote(extras?.items) || null,
+      order_number: extras?.order_number || null,
+      card_brand: extras?.card_brand || null,
+      card_last4: extras?.card_last4 || null,
       file_key: fileKey,
       original_key: originalKey,
       mime,
@@ -190,7 +214,7 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
       status: 'review',
       invoice_id: invoiceId,
       billable,
-      ai: { ...(ai || {}), cropped, file_name: file.name, compressed: true },
+      ai: { ...(ai || {}), ...(extras ? { items: extras.items, order_number: extras.order_number, card_brand: extras.card_brand, card_last4: extras.card_last4 } : {}), cropped, file_name: file.name, compressed: true },
     };
 
     const twin = receipts.find((r) => looksSame(r, row));
@@ -201,14 +225,14 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
         status: 'duplicate', fuzzy: true, row,
         message: `${row.vendor || file.name} on ${row.receipt_date} for $${row.total?.toFixed(2)} looks like one you already saved — skipped.`,
         existing: twin,
-        keep: () => api.insert('receipts', { ...row, ai: { ...row.ai, kept_possible_duplicate: true } }),
+        keep: () => insertReceipt(api, { ...row, ai: { ...row.ai, kept_possible_duplicate: true } }),
         discard: () => api.files.remove(uploaded).catch(() => {}),
       };
     }
 
     onStep('Saving…');
     try {
-      const saved = await api.insert('receipts', row);
+      const saved = await insertReceipt(api, row);
       // Not stored (User plan): hand back what was scanned, so it can be shown while checking the details.
       const preview = store ? null : isPdf ? file : scanned?.scan || null;
       return { status: 'added', receipt: saved, preview, message: ai?.error ? `Saved, but couldn't read it automatically: ${ai.error}` : null };

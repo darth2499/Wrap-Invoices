@@ -33,12 +33,17 @@ Find the amount that was ACTUALLY PAID. Rules:
 - Tickets and airline/baggage receipts: the total is the currency amount line (e.g. "USD 100.00"), not a fee or per-bag price.
 - Copy the date exactly as printed into "date_printed" (e.g. "10/09/2026 8:48 pm"). Don't reorder it; it's worked out afterwards.
 - "country": the 2-letter country of the business, from its address, phone number, currency or language (e.g. "US"), or null.
+- Paid in installments (Apple Card Monthly Installments, Affirm, Klarna, Afterpay, "financed", "monthly payments"): that is NOT a split check. total_paid = the order's full total, and set "financed": true.
+- "order_number": the number labelled Order number / Order # / Order No. / Order ID (for airlines and hotels: the confirmation code / record locator). NOT the invoice number, customer number, account, tracking, phone, auth or transaction id. null if there's no order number.
+- "card_brand": the card or wallet that paid (Visa, Mastercard, Amex, Discover, Debit, Apple Card, PayPal, Apple Pay…), from the payment section only (not "we accept…" signs). "card_last4": ONLY the last 4 digits of the card (e.g. from "XXXXXXXXXXXX2759" → "2759"). Never write more than 4 digits. null if not printed.
+- "items": what was bought, one entry per product line: {"name", "qty", "amount"}. Join a product name that wraps onto the next line. Leave out tax, tips, fees (recycle/service/delivery/booking fees), shipping, discounts, deposits, payments and product codes/SKUs. Keep the name as printed (you may fix obvious OCR typos).
 Pick the best tax category for the expense from this list: ${CATEGORIES.join("; ")}.`;
 
 const RECEIPT_JSON = `Reply with ONLY one JSON object, no other text, in exactly this shape (use null when unknown):
 {"is_receipt": true, "vendor": "Business name", "date_printed": "as printed", "date": "YYYY-MM-DD", "country": "US", "total_paid": 0.00, "total_label": "the words printed next to that amount", "charged": null, "subtotal": null, "tax": null, "tip": null,
  "currency": "USD", "reasoning": "one short sentence: which line is the total and why",
- "amounts": [{"label": "Subtotal", "amount": 0.00}], "category": "one of the categories", "confidence": "high|medium|low"}
+ "amounts": [{"label": "Subtotal", "amount": 0.00}], "category": "one of the categories", "confidence": "high|medium|low",
+ "financed": false, "order_number": null, "card_brand": "Visa", "card_last4": "2759", "items": [{"name": "Tomato Mozz Sdw", "qty": 1, "amount": 6.75}]}
 "amounts" lists every OTHER money amount someone might confuse with the total (subtotal, tax, tip, items, tendered, change).`;
 
 // Which way is up: the browser sends one picture with the receipt shown four ways (each turned a quarter more),
@@ -171,13 +176,21 @@ function cleanReceipt(r: Record<string, any>) {
     category: cat,
     confidence: ["high", "medium", "low"].includes(r.confidence) ? r.confidence : "medium",
     check: "unknown" as "ok" | "mismatch" | "unknown",
+    financed: r.financed === true,
+    order_number: r.order_number ? String(r.order_number).replace(/^#/, "").trim().slice(0, 40) || null : null,
+    card_brand: r.card_brand ? String(r.card_brand).trim().slice(0, 30) || null : null,
+    // Only ever the last 4 digits, whatever the reader returned.
+    card_last4: (() => { const d = String(r.card_last4 ?? "").replace(/\D/g, ""); return d.length >= 4 ? d.slice(-4) : null; })(),
+    items: (Array.isArray(r.items) ? r.items : []).slice(0, 25)
+      .map((x: any) => ({ name: String(x?.name ?? "").replace(/\s+/g, " ").trim().slice(0, 120), qty: toNum(x?.qty) ?? 1, amount: toNum(x?.amount) }))
+      .filter((x: any) => x.name.length > 1),
   };
   // The total's own line is in the list too (so a learned rule can point at it, e.g. after a split-check fix).
   if (out.total_label && out.total_paid != null && !out.amounts.some((a: any) => a.amount === out.total_paid)) out.amounts.push({ label: out.total_label, amount: out.total_paid });
   // Split check: the card paid only part of the bill. What you paid = that part + its tip (worked out here, not by the model).
   const charged = toNum(r.charged);
   const billTotal = out.subtotal != null ? out.subtotal + (out.tax ?? 0) : null;
-  if (charged != null && charged > 0 && billTotal != null && charged < billTotal - 0.01) {
+  if (!out.financed && charged != null && charged > 0 && billTotal != null && charged < billTotal - 0.01) {
     out.split = true;
     out.total_paid = Math.round((charged + (out.tip ?? 0)) * 100) / 100;
     out.reasoning = `Split check: your card paid ${charged.toFixed(2)}${out.tip ? ` + ${out.tip.toFixed(2)} tip` : ""} of the ${billTotal.toFixed(2)} bill.`;
@@ -253,7 +266,7 @@ async function readWithCloudflare(inp: Input) {
           { role: "system", content: "You extract data from documents and reply with JSON only." },
           { role: "user", content },
         ],
-        max_tokens: inp.mode === "invoice" || inp.mode === "bill" ? 4000 : 1000,
+        max_tokens: inp.mode === "invoice" || inp.mode === "bill" ? 4000 : 2000,
         temperature: 0,
         ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
       }),
@@ -283,7 +296,7 @@ async function readWithAnthropic(inp: Input) {
     headers: { "x-api-key": env("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({
       model: Deno.env.get("RECEIPT_MODEL") || "claude-sonnet-4-5",
-      max_tokens: inp.mode === "invoice" || inp.mode === "bill" ? 8000 : 1200,
+      max_tokens: inp.mode === "invoice" || inp.mode === "bill" ? 8000 : 2500,
       messages: [{ role: "user", content }],
     }),
   });

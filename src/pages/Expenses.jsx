@@ -11,6 +11,7 @@ import { go } from '../router.js';
 import { takeFiles, onFiles } from '../lib/scanQueue.js';
 import { rateFor, followsIrs } from '../lib/mileage.js';
 import { rankInvoicesFor } from '../lib/suggest.js';
+import { cardLabel, parseCardLabel } from '../lib/receiptExtras.js';
 import { canUploadReceipts } from '../lib/plan.js';
 import { DuplicatesButton } from '../components/Duplicates.jsx';
 import BillImport from '../components/BillImport.jsx';
@@ -137,7 +138,7 @@ function Receipts({ query }) {
         ? (!range.from || (r.receipt_date && r.receipt_date >= range.from)) && (!range.to || (r.receipt_date && r.receipt_date <= range.to))
         : inPeriod(r.receipt_date, year)))
       .filter((r) => !cat || (cat === '—' ? !r.category : r.category === cat))
-      .filter((r) => !t || `${r.vendor} ${r.category} ${r.total} ${r.notes}`.toLowerCase().includes(t))
+      .filter((r) => !t || `${r.vendor} ${r.category} ${r.total} ${r.notes} ${r.order_number ?? r.ai?.order_number ?? ""} ${r.card_last4 ?? ""}`.toLowerCase().includes(t))
       .sort((a, b) => (a.status === 'review' ? 0 : 1) - (b.status === 'review' ? 0 : 1) || String(b.receipt_date || b.created_at).localeCompare(String(a.receipt_date || a.created_at)));
   }, [db.receipts, filter, year, q, cat, range]);
   const shownKeys = list.slice(0, 400).map((r) => r.file_key).filter(Boolean);
@@ -326,13 +327,22 @@ export function ReceiptModal({ id, preview, onClose, onNext }) {
   const s = useStore();
   const { db, derived } = s;
   const r = derived.receipts[id];
-  const [f, setF] = useState(() => ({ vendor: r?.vendor || '', receipt_date: r?.receipt_date || todayISO(), total: r?.total ?? '', category: r?.category || '', notes: r?.notes || '', invoice_id: r?.invoice_id || null, billable: !!r?.billable }));
+  const [f, setF] = useState(() => ({
+    vendor: r?.vendor || '', receipt_date: r?.receipt_date || todayISO(), total: r?.total ?? '', category: r?.category || '', notes: r?.notes || '', invoice_id: r?.invoice_id || null, billable: !!r?.billable,
+    order_number: r?.order_number ?? r?.ai?.order_number ?? '', card: cardLabel(r?.card_brand ?? r?.ai?.card_brand, r?.card_last4 ?? r?.ai?.card_last4),
+  }));
   const [urls, setUrls] = useState({});
   const [busy, setBusy] = useState(false);
   const [fileBusy, setFileBusy] = useState(false); // (all hooks must sit above the early return below)
   const [over, setOver] = useState(false);
   const uploads = canUploadReceipts(db.profile);
   const [pdf, setPdf] = useState(null); // { pages: [img urls], total, url (the whole PDF, for opening) }
+  // Rotate: shown turned right away; saved once you stop tapping (one new copy, the original photo is kept).
+  const [turn, setTurn] = useState(0);
+  const [aspect, setAspect] = useState(1);
+  const pendingTurn = useRef({ deg: 0, timer: null, save: null });
+  useEffect(() => { setTurn(0); }, [r?.file_key]);
+  useEffect(() => () => { const p = pendingTurn.current; if (p.timer) { clearTimeout(p.timer); p.save?.(p.deg); } }, []);
   useEffect(() => {
     if (r) s.api.files.urls([r.file_key].filter(Boolean)).then(setUrls).catch(() => {});
   }, [r?.file_key]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -344,7 +354,7 @@ export function ReceiptModal({ id, preview, onClose, onNext }) {
     let made = [];
     let gone = false;
     (async () => {
-      const blob = new Blob([await (await fetch(u)).blob()], { type: 'application/pdf' });
+      const blob = new Blob([await (await fetch(u, { cache: 'no-store' })).blob()], { type: 'application/pdf' });
       const { pdfPages } = await import('../lib/pdftext.js');
       const { pages, total } = await pdfPages(blob, { max: 6 });
       made = [...pages, URL.createObjectURL(blob)];
@@ -373,19 +383,37 @@ export function ReceiptModal({ id, preview, onClose, onNext }) {
   const manual = !!r.ai?.manual && !r.file_key;
   // Without receipt uploads (User plan) there's no photo side at all, unless the receipt already has a file.
   const showFile = uploads || !!r.file_key || !!local;
-  // Turn a stored photo a quarter turn clockwise (for the odd one the automatic turn got wrong).
-  const rotate = async () => {
-    if (fileBusy || !url) return;
+  // Turn a photo a quarter turn clockwise (for the odd one the automatic turn got wrong). Each tap turns it on
+  // screen instantly; a moment after the last tap (or when you close it) one turned copy is saved. The original
+  // photo is kept as it was.
+  const saveTurn = async (deg) => {
+    pendingTurn.current = { deg: 0, timer: null, save: null };
+    if (!deg || local || !r.file_key) return; // not stored (User plan): turning on screen is all there is
     setFileBusy(true);
     try {
       const { rotatePhoto } = await import('../lib/scan.js');
-      const blob = await rotatePhoto(await (await fetch(url)).blob(), 90);
+      // A fresh link, fetched without the browser's cache (Safari reuses the copy it showed, which can't be read).
+      const fresh = (await s.api.files.urls([r.file_key]))[r.file_key];
+      const res = await fetch(fresh, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`Couldn’t load the photo to turn it (${res.status})`);
+      const blob = await rotatePhoto(await res.blob(), deg);
       const key = await s.api.files.upload(blob, { folder: 'receipts', ext: 'jpg' });
-      const old = [r.file_key, r.original_key].filter(Boolean);
-      await s.update('receipts', r.id, { file_key: key, original_key: null, mime: 'image/jpeg' });
-      await s.api.files.remove(old).catch(() => {});
-    } catch (e) { s.toast(e.message, { error: true }); }
+      const old = r.file_key;
+      await s.update('receipts', r.id, { file_key: key, mime: 'image/jpeg', ai: { ...(r.ai || {}), turned: ((r.ai?.turned || 0) + deg) % 360 } });
+      await s.api.files.remove([old]).catch(() => {});
+    } catch (e) {
+      setTurn(0);
+      s.toast(`Couldn’t turn it: ${e.message}`, { error: true });
+    }
     setFileBusy(false);
+  };
+  const rotate = () => {
+    if (fileBusy || !url) return;
+    const p = pendingTurn.current;
+    clearTimeout(p.timer);
+    const deg = (p.deg + 90) % 360;
+    setTurn(deg);
+    pendingTurn.current = { deg, save: saveTurn, timer: deg ? setTimeout(() => saveTurn(deg), 1500) : null };
   };
   // Add a file to a receipt that has none (e.g. imported from Wave), or swap in a new one. Pick or drop.
   const attachFile = async (dropped) => {
@@ -410,7 +438,11 @@ export function ReceiptModal({ id, preview, onClose, onNext }) {
   const save = async (next) => {
     setBusy(true);
     try {
-      const patch = { vendor: f.vendor || null, receipt_date: f.receipt_date || null, total: f.total === '' ? null : round2(f.total), category: f.category || null, notes: f.notes || null, status: 'confirmed' };
+      const patch = { vendor: f.vendor || null, receipt_date: f.receipt_date || null, total: f.total === '' ? null : round2(f.total), category: f.category || null, notes: f.notes.trim() || null, status: 'confirmed' };
+      // Order # and card: their own columns (after migration 019), otherwise kept with the scan details.
+      const card = parseCardLabel(f.card);
+      const extra = { order_number: String(f.order_number || '').trim() || null, card_brand: card.brand, card_last4: card.last4 };
+      if ('order_number' in r) Object.assign(patch, extra); else patch.ai = { ...(r.ai || {}), ...extra };
       const prev = r;
       const wasBilled = !!(prev.invoice_id && prev.billable);
       const willBill = !!(f.invoice_id && f.billable);
@@ -458,7 +490,7 @@ export function ReceiptModal({ id, preview, onClose, onNext }) {
                   {pdf.total > pdf.pages.length && <a href={pdf.url} target="_blank" rel="noreferrer" className="small muted">+{pdf.total - pdf.pages.length} more page{pdf.total - pdf.pages.length === 1 ? '' : 's'}</a>}
                 </div>
               )
-              : <div className="rv-pages"><a href={url} target="_blank" rel="noreferrer" className="rv-page"><img src={url} alt="Receipt" /></a></div>}
+              : <div className="rv-pages"><a href={url} target="_blank" rel="noreferrer" className="rv-page" style={turn ? { overflow: 'hidden' } : undefined}><img src={url} alt="Receipt" onLoad={(e) => setAspect(e.currentTarget.naturalWidth / Math.max(1, e.currentTarget.naturalHeight))} style={{ transition: 'transform .2s', transform: turn ? `rotate(${turn}deg) scale(${turn % 180 ? Math.min(aspect, 1 / aspect) : 1})` : undefined }} /></a></div>}
             {fileBusy && r.file_key && <span className="receipt-busy"><span className="spinner" /></span>}
             {r.file_key && url && uploads && (
               <div className="rv-tools">
@@ -513,7 +545,11 @@ export function ReceiptModal({ id, preview, onClose, onNext }) {
               <Switch checked={f.billable} onChange={(v) => setF({ ...f, billable: v })} label="Bill the client" />
             </label>
           )}
-          <Field label="Notes" hint="(optional)"><input className="input" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="e.g. Lunch for crew on set" /></Field>
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+            <Field label="Order #"><input className="input" value={f.order_number} onChange={(e) => setF({ ...f, order_number: e.target.value })} placeholder="—" /></Field>
+            <Field label="Paid with"><input className="input" value={f.card} onChange={(e) => setF({ ...f, card: e.target.value })} placeholder="Visa ••1234" /></Field>
+          </div>
+          <Field label="Notes" hint="(what you bought)"><textarea className="input" rows={Math.min(6, Math.max(2, String(f.notes).split('\n').length))} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="e.g. Lunch for crew on set" /></Field>
         </div>
       </div>
     </Modal>

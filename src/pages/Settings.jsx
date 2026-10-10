@@ -6,7 +6,8 @@ import { LOGO_PRESETS, presetLogoUrl } from '../lib/logos.js';
 import { Button, Empty, Field, Icon, Modal, MoneyInput, Seg, Switch } from '../components/ui.jsx';
 import InvoiceDoc from '../components/InvoiceDoc.jsx';
 import { exportBackup, readBackup, restoreBackup } from '../lib/backup.js';
-import { parseCSV, downloadBlob, pickFiles } from '../lib/files.js';
+import { parseCSV, downloadBlob, pickFiles, toCSV } from '../lib/files.js';
+import { cardLabel } from '../lib/receiptExtras.js';
 import { CLIENT_FIELDS, INVOICE_FIELDS, autoMap, clientsFromCsv, invoicesFromCsv, importInvoices, importExpenses, importClients, invoiceFromPdf, pdfMatch } from '../lib/importer.js';
 import { isWaveAccounting, parseWaveAccounting, readWaveFiles } from '../lib/wave.js';
 import { money, num, todayISO, addDays, plural, fmtDate, DATE_STYLES } from '../lib/format.js';
@@ -503,6 +504,40 @@ function ScanAccuracy() {
 }
 
 /* ------------------------------------------------------------------ */
+/** Receipts as a spreadsheet (no images): date, vendor, description, total, card, category, order #. */
+function ExpensesCsv() {
+  const s = useStore();
+  const years = [...new Set(s.db.receipts.map((r) => String(r.receipt_date || '').slice(0, 4)).filter((y) => /^\d{4}$/.test(y)))].sort().reverse();
+  const [year, setYear] = useState(() => years[0] || todayISO().slice(0, 4));
+  const list = s.db.receipts.filter((r) => year === 'all' || String(r.receipt_date || '').startsWith(year)).sort((a, b) => String(a.receipt_date || '').localeCompare(String(b.receipt_date || '')));
+  const download = () => {
+    const card = (r) => cardLabel(r.card_brand ?? r.ai?.card_brand, r.card_last4 ?? r.ai?.card_last4).replace('••', '');
+    const csv = toCSV(list, [
+      { label: 'Date', get: (r) => r.receipt_date || '' },
+      { label: 'Vendor', get: (r) => r.vendor || '' },
+      { label: 'Description', get: (r) => String(r.notes || '').split('\n').map((x) => x.trim()).filter(Boolean).join('; ') },
+      { label: 'Total', get: (r) => (r.total == null ? '' : num(r.total).toFixed(2)) },
+      { label: 'Card', get: card },
+      { label: 'Category', get: (r) => r.category || '' },
+      { label: 'Order #', get: (r) => r.order_number ?? r.ai?.order_number ?? '' },
+    ]);
+    downloadBlob(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }), `Wrap expenses ${year === 'all' ? 'all years' : year}.csv`);
+  };
+  return (
+    <section className="card card-pad col" style={{ gap: 12 }}>
+      <h2>Export expenses</h2>
+      <p className="muted" style={{ lineHeight: 1.6 }}>Your receipts as a spreadsheet (.csv, no images): date, vendor, description, total, card, category and order number.</p>
+      <div className="row wrap" style={{ gap: 8 }}>
+        <select className="input" style={{ width: 130 }} value={year} onChange={(e) => setYear(e.target.value)} aria-label="Year">
+          {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          <option value="all">All years</option>
+        </select>
+        <Button icon="download" disabled={!list.length} onClick={download}>Download CSV{list.length ? ` (${list.length})` : ''}</Button>
+      </div>
+    </section>
+  );
+}
+
 function Data() {
   const s = useStore();
   const [step, setStep] = useState('');
@@ -543,6 +578,7 @@ function Data() {
           }}>Choose backup file</Button>
         </section>
       </div>
+      <ExpensesCsv />
       <section className="card card-pad col" style={{ gap: 12 }}>
         <h2>Import from Wave or another app</h2>
         <p className="muted" style={{ lineHeight: 1.6 }}>Bring in your clients and past invoices so reports and the year-end forecast have history.</p>

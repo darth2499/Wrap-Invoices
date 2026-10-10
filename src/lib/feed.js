@@ -22,10 +22,10 @@ export function taxDates(today, { quarterly = true, crew = false } = {}) {
   for (const yr of [y - 1, y, y + 1]) {
     out.push({ date: weekday(`${yr}-04-15`), title: `${yr - 1} tax return due`, sub: 'Federal income tax return (Form 1040 with Schedule C)', go: '/taxes', kind: 'return' });
     if (quarterly) {
-      out.push({ date: weekday(`${yr}-04-15`), title: `Q1 estimated tax due`, sub: `For ${yr} income (Jan–Mar)`, go: '/reports/quarterly', kind: 'q' });
-      out.push({ date: weekday(`${yr}-06-15`), title: `Q2 estimated tax due`, sub: `For ${yr} income (Apr–May)`, go: '/reports/quarterly', kind: 'q' });
-      out.push({ date: weekday(`${yr}-09-15`), title: `Q3 estimated tax due`, sub: `For ${yr} income (Jun–Aug)`, go: '/reports/quarterly', kind: 'q' });
-      out.push({ date: weekday(`${yr}-01-15`), title: `Q4 estimated tax due`, sub: `For ${yr - 1} income (Sep–Dec)`, go: '/reports/quarterly', kind: 'q' });
+      out.push({ date: weekday(`${yr}-04-15`), title: `Q1 estimated tax due`, sub: `For ${yr} income (Jan–Mar)`, go: '/taxes/quarterly', kind: 'q' });
+      out.push({ date: weekday(`${yr}-06-15`), title: `Q2 estimated tax due`, sub: `For ${yr} income (Apr–May)`, go: '/taxes/quarterly', kind: 'q' });
+      out.push({ date: weekday(`${yr}-09-15`), title: `Q3 estimated tax due`, sub: `For ${yr} income (Jun–Aug)`, go: '/taxes/quarterly', kind: 'q' });
+      out.push({ date: weekday(`${yr}-01-15`), title: `Q4 estimated tax due`, sub: `For ${yr - 1} income (Sep–Dec)`, go: '/taxes/quarterly', kind: 'q' });
     }
     if (crew) out.push({ date: weekday(`${yr}-01-31`), title: '1099-NEC forms due', sub: `Send them to crew you paid in ${yr - 1}`, go: '/reports/1099', kind: '1099' });
   }

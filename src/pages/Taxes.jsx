@@ -6,6 +6,8 @@ import { useStore } from '../store.jsx';
 import { Button, Icon, Seg } from '../components/ui.jsx';
 import { money, num, todayISO } from '../lib/format.js';
 import { lineFor } from '../lib/categories.js';
+import { Quarterly } from './Reports.jsx';
+import { go } from '../router.js';
 
 const mdy = (iso) => (iso ? `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}` : '');
 const plain = (n) => num(n).toFixed(2); // what tax sites accept: 1234.56
@@ -44,7 +46,7 @@ function useProgress(year) {
   };
 }
 
-export default function Taxes() {
+function Filing({ switcher }) {
   const s = useStore();
   const { db, derived } = s;
   const years = useMemo(() => {
@@ -110,6 +112,7 @@ export default function Taxes() {
           </select>
         </div>
       </div>
+      {switcher}
 
       <div className="tax-sum">
         <div><span>Billed</span><Copy text={plain(incomeTotal)} label="total billed">{money(incomeTotal)}</Copy></div>
@@ -187,5 +190,30 @@ function RowCheck({ done, onClick }) {
     <button type="button" className={`row-check ${done ? 'on' : ''}`} onClick={onClick} aria-pressed={done} aria-label={done ? 'Mark as not done' : 'Mark as done'}>
       <Icon name="check" size={14} />
     </button>
+  );
+}
+
+/** Taxes: what to type into your tax return (Filing), and estimated taxes during the year (Quarterly). */
+export default function Taxes({ view = 'filing' }) {
+  const switcher = <Seg value={view} onChange={(v) => go(v === 'filing' ? '/taxes' : `/taxes/${v}`)} label="Taxes" options={[{ value: 'filing', label: 'Filing' }, { value: 'quarterly', label: 'Quarterly' }]} />;
+  if (view !== 'quarterly') return <Filing switcher={switcher} />;
+  return <QuarterlyPage switcher={switcher} />;
+}
+
+function QuarterlyPage({ switcher }) {
+  const { db } = useStore();
+  const thisYear = Number(todayISO().slice(0, 4));
+  const [year, setYearState] = useState(() => { try { return Number(localStorage.getItem('wrap_q_year')) || thisYear; } catch { return thisYear; } });
+  const setYear = (v) => { setYearState(v); try { localStorage.setItem('wrap_q_year', String(v)); } catch { /* not saved */ } };
+  const years = [...new Set([thisYear, ...db.invoices.map((i) => Number(i.issue_date?.slice(0, 4))), ...db.receipts.map((r) => Number(r.receipt_date?.slice(0, 4)))].filter(Boolean))].sort((a, b) => b - a);
+  return (
+    <div className="page taxes">
+      <div className="page-head">
+        <h1>Taxes</h1>
+        <select className="input" style={{ width: 110 }} value={year} onChange={(e) => setYear(Number(e.target.value))} aria-label="Year">{years.map((v) => <option key={v} value={v}>{v}</option>)}</select>
+      </div>
+      {switcher}
+      <Quarterly year={year} />
+    </div>
   );
 }

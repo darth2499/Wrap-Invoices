@@ -9,7 +9,7 @@ const PAGES = [
   ['Overview', '/', 'overview'], ['Invoices', '/invoices', 'invoice'], ['New invoice', '/invoices/new', 'plus'], ['Quotes', '/quotes', 'quote'],
   ['New quote', '/invoices/new?kind=quote', 'plus'], ['Calendar', '/calendar', 'calendar'], ['Receipts', '/expenses', 'receipt'],
   ['Mileage', '/expenses/mileage', 'car'], ['Crew payouts', '/expenses/crew', 'crew'], ['Clients', '/clients', 'clients'],
-  ['Profit & loss', '/reports/overview', 'reports'], ['Unpaid by client', '/reports/unpaid', 'reports'], ['Quarterly taxes', '/reports/quarterly', 'reports'],
+  ['Profit & loss', '/reports/overview', 'reports'], ['Unpaid by client', '/reports/unpaid', 'reports'], ['Quarterly taxes', '/taxes/quarterly', 'file'],
   ['1099s', '/reports/1099', 'reports'], ['Tax export', '/reports/export', 'reports'], ['Taxes · 1099s & expenses to copy', '/taxes', 'file'], ['Business details', '/settings?section=business', 'settings'],
   ['Invoice look & templates', '/settings?section=look', 'settings'], ['Rates & saved items', '/settings?section=rates', 'settings'],
   ['Email & reminders · Gmail', '/settings?section=email', 'mail'], ['People & invites', '/settings?section=people', 'user'],
@@ -49,7 +49,7 @@ export default function Search({ onClose }) {
       sub: `${fmtDate(inv.issue_date)} · ${money(inv.total)}${inv.notes ? ` · ${inv.notes}` : ''}`, path: `/invoices/${inv.id}`, icon: inv.kind === 'quote' ? 'quote' : 'invoice',
     })), 8);
     take(db.clients.filter((c) => hit(c.name, c.contact_first, c.contact_last, c.email, c.phone, c.address, c.notes)).map((c) => ({ type: 'Clients', label: c.name, sub: c.email || '', path: `/clients/${c.id}`, icon: 'clients' })), 5);
-    take(db.receipts.filter((r) => hit(r.vendor, r.category, r.notes, r.total, money(r.total), r.receipt_date)).sort((a, b) => String(b.receipt_date).localeCompare(String(a.receipt_date))).map((r) => ({
+    take(db.receipts.filter((r) => hit(r.vendor, r.category, r.notes, r.total, money(r.total), r.receipt_date, r.order_number ?? r.ai?.order_number, r.card_last4 ?? r.ai?.card_last4)).sort((a, b) => String(b.receipt_date).localeCompare(String(a.receipt_date))).map((r) => ({
       type: 'Receipts', label: r.vendor || 'Receipt', sub: `${fmtDate(r.receipt_date)} · ${money(r.total)} · ${r.category || ''}`, path: `/expenses?open=${r.id}`, icon: 'receipt',
     })), 6);
     return out;

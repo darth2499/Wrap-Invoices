@@ -99,7 +99,7 @@ function Shell({ route }) {
   else if (a === 'clients') page = <Clients id={b} />;
   else if (a === 'reports') page = <Reports tab={b || 'overview'} />;
   else if (a === 'calendar') page = <Calendar />;
-  else if (a === 'taxes') page = <Taxes />;
+  else if (a === 'taxes') page = <Taxes view={b || 'filing'} />;
   else if (a === 'settings') page = <Settings section={route.query.section} />;
   else page = <div className="page"><h1>Not found</h1><a href="#/">Go to overview</a></div>;
   return <Layout route={route}><Suspense fallback={<div className="page"><Spinner /></div>}>{page}</Suspense></Layout>;

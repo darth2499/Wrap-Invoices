@@ -16,7 +16,6 @@ const TABS = [
   { value: 'overview', label: 'Profit & loss' },
   { value: 'unpaid', label: 'Unpaid' },
   { value: 'clients', label: 'Clients vs last year' },
-  { value: 'quarterly', label: 'Quarterly taxes' },
   { value: '1099', label: '1099s' },
   { value: 'export', label: 'Tax export' },
 ];
@@ -50,6 +49,8 @@ function useYearData(year) {
 }
 
 export default function Reports({ tab }) {
+  // Quarterly taxes moved to the Taxes page; old links still land there.
+  useEffect(() => { if (tab === 'quarterly') go('/taxes/quarterly'); }, [tab]);
   const { db } = useStore();
   const thisYear = Number(todayISO().slice(0, 4));
   const [year, setYearState] = useState(() => { try { return Number(localStorage.getItem('wrap_rep_year')) || thisYear; } catch { return thisYear; } });
@@ -65,7 +66,6 @@ export default function Reports({ tab }) {
       {tab === 'overview' && <ProfitLoss year={year} />}
       {tab === 'unpaid' && <Unpaid />}
       {tab === 'clients' && <ClientsYoY year={year} />}
-      {tab === 'quarterly' && <Quarterly year={year} />}
       {tab === '1099' && <Ten99 year={year} />}
       {tab === 'export' && <TaxExport year={year} />}
     </div>
@@ -151,7 +151,7 @@ function Unpaid() {
   );
 }
 
-function Quarterly({ year }) {
+export function Quarterly({ year }) {
   const s = useStore();
   const d = useYearData(year);
   const pct = num(s.db.profile.tax_set_aside_pct) || 25;
