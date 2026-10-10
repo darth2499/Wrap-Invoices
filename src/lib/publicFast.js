@@ -1,6 +1,6 @@
 // Client links load fast: the invoice is requested the moment the page starts (before React and the page's code
 // have loaded), and the answer is picked up by the page when it's ready.
-import { SUPABASE_URL, SUPABASE_ANON_KEY, DEMO, LIVE_CONFIGURED } from '../config.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, DEMO } from '../config.js';
 
 /** Your sign-in on this browser, read straight from storage (no network, no refresh). */
 export function storedAccessToken() {
@@ -11,22 +11,6 @@ export function storedAccessToken() {
     }
   } catch { /* private mode */ }
   return null;
-}
-
-/**
- * A client link opens from the demo only if it was made inside the demo (in this browser). Anything else, a real
- * link someone sent you, opens from the live server even in a browser where "Try the demo" is switched on.
- */
-export function isDemoLink(token) {
-  if (!DEMO) return false;
-  if (!LIVE_CONFIGURED) return true;
-  try {
-    const key = Object.keys(localStorage).find((k) => /^wrap_demo_v\d+$/.test(k));
-    const st = key && JSON.parse(localStorage.getItem(key));
-    return !!st && ((st.invoices || []).some((i) => i.share_token === token) || (st.clients || []).some((c) => c.statement_token === token));
-  } catch {
-    return false;
-  }
 }
 
 let early = null;
@@ -58,7 +42,7 @@ export function linkToken(raw) {
 export function startEarly() {
   const m = window.location.hash.match(/^#\/i\/(.*)$/);
   const token = m && linkToken(m[1]);
-  if (!token || !SUPABASE_URL || isDemoLink(token)) return;
+  if (!token || DEMO || !SUPABASE_URL) return;
   const preview = /[?&]preview=1/.test(m[1]);
   early = { token, preview, req: publicRequest(token, preview) };
   early.req.catch(() => {}); // handled when the page picks it up
