@@ -44,7 +44,7 @@ const INVOICE_JSON = `Reply with ONLY one JSON object, no other text, in exactly
 {"is_invoice": true, "number": "193", "client_name": "Bill-to name", "client_email": null, "client_address": "line 1\\nline 2",
  "issue_date": "YYYY-MM-DD", "due_date": "YYYY-MM-DD",
  "lines": [{"item": "Camera Operator", "description": "Felicis (04/06)", "note": null, "qty": 1, "rate": 750.00, "amount": 750.00}],
- "total": 0.00, "payments": [{"date": "YYYY-MM-DD", "amount": 0.00, "method": "bank payment"}], "amount_due": 0.00, "notes": "Month of April"}
+ "subtotal": 0.00, "discount": 0.00, "tax": 0.00, "total": 0.00, "payments": [{"date": "YYYY-MM-DD", "amount": 0.00, "method": "bank payment"}], "amount_due": 0.00, "notes": "Month of April"}
 "is_invoice" is false if this is not an invoice (a receipt, a letter, a blank page…). Never guess numbers: use null for anything not printed on it.`;
 
 // ---------------------------------------------------------------- helpers
@@ -115,6 +115,9 @@ function cleanInvoice(r: Record<string, any>) {
       item: String(l?.item ?? "Item"), description: l?.description ?? null, note: l?.note ?? null,
       qty: toNum(l?.qty) ?? 1, rate: toNum(l?.rate), amount: toNum(l?.amount),
     })),
+    subtotal: toNum(r.subtotal),
+    discount: Math.abs(toNum(r.discount) ?? 0),
+    tax: toNum(r.tax) ?? 0,
     total: toNum(r.total),
     payments: (Array.isArray(r.payments) ? r.payments : []).map((p: any) => ({ date: toDate(p?.date), amount: toNum(p?.amount) ?? 0, method: p?.method ?? null })),
     amount_due: toNum(r.amount_due) ?? 0,

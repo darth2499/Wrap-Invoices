@@ -3,13 +3,14 @@
 // Returns null when the PDF doesn't look like a Wave invoice or the lines don't add up to its total,
 // so the caller can fall back to the AI reader.
 
-const MONEY = String.raw`-?\$-?[\d,]+\.\d{2}`;
+// "$1,700.00", "-$100.00", "$-100.00" and "($100.00)" (newer Wave PDFs show discounts in brackets)
+const MONEY = String.raw`\(?-?\$-?[\d,]+\.\d{2}\)?`;
 const ROW = new RegExp(String.raw`^(.+?)\s{2,}(\d+(?:\.\d+)?)\s{2,}(${MONEY})\s{2,}(${MONEY})$`);
 const LABELLED = new RegExp(String.raw`^(.+?):\s+(${MONEY})$`);
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 
 const amt = (s) => {
-  const neg = /-/.test(s);
+  const neg = /-|\(/.test(s);
   const n = Number(String(s).replace(/[^\d.]/g, ''));
   return Math.round((neg ? -n : n) * 100) / 100;
 };
@@ -22,8 +23,12 @@ export function longDate(s) {
   return mi < 0 ? null : `${m[3]}-${String(mi + 1).padStart(2, '0')}-${m[2].padStart(2, '0')}`;
 }
 
+// The right-hand "Label: value" fields sometimes share a text row with the left column
+// ("BILL TO  Invoice Number:  214", "Chad Thomas  Invoice Date:  September 27, 2026"): split those apart.
+const FIELD_AT = /\s{2,}(?=(?:Invoice Number|Invoice Date|Payment Due|Amount Due(?: \(\w+\))?|P\.?O\.?\/?S\.?O\.? Number|Due Date):)/i;
+
 export function parseWaveInvoiceText(text) {
-  const all = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const all = String(text || '').split('\n').flatMap((l) => l.split(FIELD_AT)).map((l) => l.trim()).filter(Boolean);
   const field = (label) => {
     const re = new RegExp(`^${label}:?\\s+(.+)$`, 'i');
     for (const l of all) { const m = l.match(re); if (m) return m[1].trim(); }
