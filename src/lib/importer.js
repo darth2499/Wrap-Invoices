@@ -327,7 +327,22 @@ export function withAddons(l) {
  * A line covering several days, e.g. "Google (10/05-10/07)" at $2,250 × 1, comes in as 3 × $750
  * (only when it divides evenly to the cent). With add-ons, the base price is split instead.
  */
+// Newer Wave PDFs put the dates on their own line, without brackets: "09/26-09/27 (2 Days)".
+const BARE_DATES = /^(\d{2}\/\d{2}(?:\s*-\s*\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:\s*-\s*\d{2}\/\d{2})?)*)(?:\s*\(\s*\d+(?:\.\d+)?\s*days?\s*\))?$/i;
+
 export function withDays(l, issueDate) {
+  // Rewrite those the way Wrap writes dates ("(09/26-09/27)"), so the Calendar and receipt suggestions see them.
+  const fix = (text) => {
+    const rows = String(text || '').split('\n');
+    const m = rows[0].trim().match(BARE_DATES);
+    if (!m) return null;
+    rows[0] = `(${m[1].replace(/\s+/g, '')})`;
+    return rows.join('\n');
+  };
+  const fixed = fix(l.extras ? l.extras.desc : l.description);
+  if (fixed != null) {
+    l = l.extras ? { ...l, extras: { ...l.extras, desc: fixed } } : { ...l, description: fixed };
+  }
   const first = String(l.extras ? l.extras.desc : l.description || '').split('\n')[0];
   const m = first.match(/\((\d{2}\/\d{2}(?:-\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:-\d{2}\/\d{2})?)*)\)/);
   if (!m) return l;
