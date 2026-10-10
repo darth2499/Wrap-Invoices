@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useStore } from '../store.jsx';
 import { Button, Icon, Pill, Empty } from '../components/ui.jsx';
 import { ForecastChart, MonthBars, MONTHS } from '../components/charts.jsx';
-import { forecastYear, forecastExpenses } from '../lib/forecast.js';
+import { forecastYear, forecastExpenses, billDate } from '../lib/forecast.js';
 import { statusOf, dueText } from '../lib/calc.js';
 import { money, moneyK, num, todayISO, plural, fmtShort, daysBetween } from '../lib/format.js';
 import { go } from '../router.js';
@@ -20,7 +20,11 @@ export default function Overview() {
       .map((i) => ({ ...i, due: num(i.total) - derived.paidFor(i.id), st: statusOf(i, derived.paidFor(i.id), today) }));
     const overdue = open.filter((i) => i.st.key === 'overdue');
     const paidYtd = db.payments.filter((p) => p.paid_on?.startsWith(String(year))).reduce((s, p) => s + num(p.amount), 0);
-    const expYtd = db.receipts.filter((r) => r.receipt_date?.startsWith(String(year))).reduce((s, r) => s + num(r.total), 0);
+    // Expenses: receipts plus crew payouts and imported bills, paid or not (on the bill's date, like invoices).
+    const crewYtd = db.crew_payouts.filter((c) => billDate(c)?.startsWith(String(year)));
+    const unpaidYtd = crewYtd.filter((c) => !c.paid_on).reduce((s, c) => s + num(c.amount), 0);
+    const expYtd = db.receipts.filter((r) => r.receipt_date?.startsWith(String(year))).reduce((s, r) => s + num(r.total), 0)
+      + crewYtd.reduce((s, c) => s + num(c.amount), 0);
     const byClient = {};
     for (const i of open) byClient[i.client_id] = (byClient[i.client_id] || 0) + i.due;
     const owed = Object.entries(byClient).map(([id, v]) => ({ name: derived.clients[id]?.name || 'No client', id, v })).sort((a, b) => b.v - a.v);
@@ -39,11 +43,11 @@ export default function Overview() {
       billed.push(sent.filter((i) => i.issue_date?.startsWith(key)).reduce((s, i) => s + num(i.total), 0));
       exp.push(
         db.receipts.filter((r) => r.receipt_date?.startsWith(key)).reduce((s, r) => s + num(r.total), 0)
-        + db.crew_payouts.filter((c) => c.paid_on?.startsWith(key)).reduce((s, c) => s + num(c.amount), 0),
+        + db.crew_payouts.filter((c) => billDate(c)?.startsWith(key)).reduce((s, c) => s + num(c.amount), 0),
       );
     }
     const drafts = db.invoices.filter((i) => i.kind === 'invoice' && i.status === 'draft');
-    return { open, overdue, paidYtd, expYtd, owed, labels, years, billed, exp, drafts, f: forecastYear(db.invoices, today), fx: forecastExpenses(db.receipts, db.crew_payouts, today) };
+    return { open, overdue, paidYtd, expYtd, unpaidYtd, owed, labels, years, billed, exp, drafts, f: forecastYear(db.invoices, today), fx: forecastExpenses(db.receipts, db.crew_payouts, today) };
   }, [db, derived, today, year]);
 
   const outstanding = data.open.reduce((s, i) => s + i.due, 0);
@@ -75,7 +79,7 @@ export default function Overview() {
         <Kpi label="Outstanding" value={money(outstanding, { cents: false })} sub={plural(data.open.length, 'unpaid invoice')} onClick={() => go('/invoices?f=unpaid')} />
         <Kpi label="Overdue" value={money(overdueSum, { cents: false })} sub={data.overdue.length ? `${plural(data.overdue.length, 'invoice')} · oldest ${oldest} days` : 'Nothing overdue'} bad={data.overdue.length > 0} onClick={() => go('/invoices?f=overdue')} />
         <Kpi label={`Paid in ${year}`} value={money(data.paidYtd, { cents: false })} sub="Payments received" onClick={() => go('/reports')} />
-        <Kpi label={`Expenses in ${year}`} value={money(data.expYtd, { cents: false })} sub={review.length ? `${review.length} receipts to review` : 'From your receipts'} onClick={() => go('/expenses')} />
+        <Kpi label={`Expenses in ${year}`} value={money(data.expYtd, { cents: false })} sub={review.length ? `${review.length} receipts to review` : data.unpaidYtd > 0 ? `Includes ${money(data.unpaidYtd, { cents: false })} still to pay` : 'Receipts and crew'} onClick={() => go('/expenses')} />
       </div>
 
       <WhatsNew />
@@ -153,7 +157,7 @@ export default function Overview() {
 
       <div className="grid-2">
         <section className="card" style={{ gridColumn: '1 / -1' }}>
-          <div className="card-head"><div><h2>Money in vs. out</h2><p className="small muted">Last 12 months · invoiced (by invoice date) vs. expenses</p></div></div>
+          <div className="card-head"><div><h2>Money in vs. out</h2><p className="small muted">Last 12 months · invoiced vs. expenses, paid or not (by invoice / bill date)</p></div></div>
           <div style={{ padding: '0 20px 20px' }}>
             <MonthBars labels={data.labels} years={data.years} currentIndex={11} series={[{ name: 'Invoiced', color: 'var(--accent)', values: data.billed }, { name: 'Expenses', color: 'var(--expense)', values: data.exp }]} />
           </div>

@@ -62,6 +62,9 @@ export function forecastYear(invoices, today = todayISO()) {
   return { enough: true, method, year, month, cur, prev, ytd: ytdAll, ytdDone, mid, low, high, cumLow, cumHigh, cumMid, growthPct, prevTotal };
 }
 
+/** When a crew payout / imported bill counts on the Overview: its date (the invoice date for imported ones), paid or not. */
+export const billDate = (c) => c.work_date || c.paid_on || c.due_date;
+
 /** Expenses per month for a year (receipts + crew payouts). */
 export function monthlyExpenses(receipts, crewPayouts, year) {
   const out = Array(12).fill(0);
@@ -70,7 +73,7 @@ export function monthlyExpenses(receipts, crewPayouts, year) {
     out[Number(String(date).slice(5, 7)) - 1] += num(amt);
   };
   for (const r of receipts) add(r.receipt_date, r.total);
-  for (const c of crewPayouts || []) add(c.paid_on, c.amount);
+  for (const c of crewPayouts || []) add(billDate(c), c.amount); // paid or not, on the bill's date (like invoices)
   return out;
 }
 
