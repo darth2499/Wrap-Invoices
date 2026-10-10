@@ -50,6 +50,7 @@ create table if not exists public.profiles (
   tax_set_aside_pct    numeric(5,2) not null default 25,
   logo_mode            text not null default 'logo',
   logo_preset          text,
+  plan                 text not null default 'user' check (plan in ('user', 'pro')),
   gmail_email          text,
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now()
@@ -353,12 +354,13 @@ drop policy if exists profile_update on public.profiles;
 create policy profile_update on public.profiles for update to authenticated
   using (id = auth.uid()) with check (id = auth.uid());
 
--- Users can't promote themselves to admin.
+-- Users can't promote themselves to admin, or change their own plan.
 create or replace function public.protect_admin_flag() returns trigger
 language plpgsql as $$
 begin
-  if new.is_admin is distinct from old.is_admin and coalesce(auth.role(), '') = 'authenticated' then
-    new.is_admin := old.is_admin;
+  if coalesce(auth.role(), '') = 'authenticated' then
+    if new.is_admin is distinct from old.is_admin then new.is_admin := old.is_admin; end if;
+    if new.plan is distinct from old.plan then new.plan := old.plan; end if;  -- plans are set by the owner only
   end if;
   return new;
 end $$;

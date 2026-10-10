@@ -144,3 +144,10 @@ export function escapeHtml(s: string): string {
 export function appUrl(): string {
   return env("APP_URL").replace(/\/+$/, "");
 }
+
+/** Receipt uploads (and reading receipts) are for Pro and the owner. Throws for everyone else. */
+export async function requireReceiptPlan(userId: string) {
+  const { data } = await admin().from("profiles").select("*").eq("id", userId).single();
+  if (data?.is_admin || data?.plan === "pro") return;
+  throw new HttpError(403, "Uploading receipts is part of Pro. Ask the account owner to switch you to Pro.");
+}

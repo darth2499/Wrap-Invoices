@@ -1,6 +1,6 @@
 // files — hands out short-lived upload/download links for the signed-in person's own files in R2.
 // Every file lives under "<user id>/..." so one account can never touch another's files.
-import { admin, HttpError, json, presign, r2Delete, r2List, requireUser, serve } from "../_shared/util.ts";
+import { admin, HttpError, json, presign, r2Delete, r2List, requireReceiptPlan, requireUser, serve } from "../_shared/util.ts";
 
 // Cloudflare R2 is free up to 10 GB. Uploads stop at this limit so you never get billed.
 // Change it with the R2_LIMIT_GB secret (e.g. 9.5). Covers every account in this Wrap, since they share one bucket.
@@ -58,6 +58,8 @@ serve(async (req) => {
         const ext = String(body.ext ?? "bin").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "bin";
         key = `${prefix}${folder}/${crypto.randomUUID()}.${ext}`;
       }
+      // Receipt files (new, or restored from a backup) need Pro.
+      if (/^[^/]+\/(receipts|originals)\//.test(key)) await requireReceiptPlan(user.id);
       // Size of the file about to be uploaded (the browser always sends it).
       const size = Math.max(0, Math.round(Number(body.size) || 0));
       if (size > MAX_FILE) throw new HttpError(413, "That file is over 50 MB. Try a smaller photo or PDF.");

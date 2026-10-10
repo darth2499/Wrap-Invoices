@@ -12,6 +12,7 @@ import { isWaveAccounting, parseWaveAccounting, readWaveFiles } from '../lib/wav
 import { money, num, todayISO, addDays, plural, fmtDate } from '../lib/format.js';
 import { irsRate, followsIrs } from '../lib/mileage.js';
 import { DEMO } from '../config.js';
+import { canUploadReceipts } from '../lib/plan.js';
 import { CATEGORIES, ownCategories } from '../lib/categories.js';
 import { resetDemo } from '../api/demo.js';
 import { go } from '../router.js';
@@ -421,6 +422,10 @@ function People() {
     try { const r = await s.api.people('resend', { email: em }); s.toast(r.sent ? `Invitation sent again to ${em}` : r.error || 'Connect Gmail (Settings → Email) to email invitations.', r.sent ? {} : { error: true }); } catch (err) { s.toast(err.message, { error: true }); }
     setBusy('');
   };
+  const setPlan = async (p, plan) => {
+    setList((l) => l.map((x) => (x.email === p.email ? { ...x, plan } : x)));
+    try { await s.api.people('plan', { email: p.email, plan }); s.toast(`${p.email} is now ${plan === 'pro' ? 'Pro' : 'User'}`); } catch (err) { s.toast(err.message, { error: true }); load(); }
+  };
   const remove = async (p) => {
     const ok = await s.confirm({
       title: `Remove ${p.email}?`,
@@ -442,7 +447,7 @@ function People() {
   return (
     <section className="card card-pad col" style={{ gap: 12, maxWidth: 640 }}>
       <h2>People</h2>
-      <p className="small muted">Wrap is invite-only. Each person signs in with their Google account and gets their own private workspace. Nobody can see anyone else’s data.</p>
+      <p className="small muted">Wrap is invite-only. Each person signs in with their Google account and gets their own private workspace. Nobody can see anyone else’s data. Pro can also upload receipts.</p>
       <form className="row" onSubmit={invite}>
         <input className="input" type="email" placeholder="name@gmail.com" value={email} onChange={(e) => setEmail(e.target.value)} aria-label="Email to invite" />
         <Button type="submit" variant="primary" icon="mail" busy={busy === 'invite'}>Invite</Button>
@@ -456,6 +461,7 @@ function People() {
           </span>
           {!p.is_admin && (
             <span className="row" style={{ gap: 4 }}>
+              {p.joined_at && <Seg value={p.plan || 'user'} onChange={(v) => setPlan(p, v)} label={`Plan for ${p.email}`} options={[{ value: 'user', label: 'User' }, { value: 'pro', label: 'Pro' }]} />}
               {!p.joined_at && <Button size="sm" variant="ghost" busy={busy === `r${p.email}`} onClick={() => resend(p.email)}>Resend</Button>}
               <Button size="sm" variant="ghost" className="danger" busy={busy === `x${p.email}`} onClick={() => remove(p)}>Remove</Button>
             </span>
@@ -526,7 +532,7 @@ function Data() {
           <Button className="danger" style={{ alignSelf: 'flex-start' }} onClick={async () => { if (await s.confirm({ title: 'Reset demo data?', body: 'Puts the sample data back.', ok: 'Reset', danger: true })) { resetDemo(); window.location.reload(); } }}>Reset demo data</Button>
         </section>
       )}
-      <StorageCard />
+      {canUploadReceipts(s.db.profile) && <StorageCard />}
       <ResetSection onBackup={backup} backupBusy={!!step} />
       {restore && <RestoreModal backup={restore} onClose={() => setRestore(null)} />}
       {imp && <ImportModal imp={imp} onClose={() => setImp(null)} />}

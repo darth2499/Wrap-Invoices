@@ -188,7 +188,7 @@ export function buildFeed({ db, derived, statusOf, today }) {
   items.push(...priceChecks({ db, derived, today, who }));
 
   // Receipts waiting to be checked
-  const review = db.receipts.filter((r) => r.status === 'review');
+  const review = db.receipts.filter((r) => r.status === 'review' && !r.ai?.manual);
   if (review.length) {
     const newest = review.map((r) => r.created_at || '').sort().pop() || today;
     items.push({ key: 'review', icon: 'receipt', tone: 'warn', title: `${review.length} receipt${review.length === 1 ? '' : 's'} to check`, sub: 'Confirm what was read automatically', at: newest, when: ago(newest, today), go: '/expenses?status=review' });

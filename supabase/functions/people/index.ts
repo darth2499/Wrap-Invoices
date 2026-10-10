@@ -2,6 +2,7 @@
 //   list:   everyone invited, and whether they've signed up yet
 //   invite: add someone and email them an invitation (from your connected Gmail)
 //   resend: email the invitation again
+//   plan:   switch someone between User and Pro (Pro can upload receipts)
 //   remove: block them and permanently delete everything that belongs to their account:
 //           every row they own (cascades from their login), their receipt/logo files in storage, their
 //           storage records, and the invitation itself. Only rows/files with THEIR user id are touched.
@@ -29,7 +30,7 @@ serve(async (req) => {
   const profileOf = async (em: string) => {
     // Exact match only (ignoring capitals): wildcards in an email like "a_b@…" must never match someone else.
     const pattern = em.replace(/[\\%_]/g, (c) => `\\${c}`);
-    const { data } = await db.from("profiles").select("id, email, is_admin, created_at").ilike("email", pattern).limit(5);
+    const { data } = await db.from("profiles").select("*").ilike("email", pattern).limit(5);
     return (data ?? []).filter((p) => String(p.email ?? "").trim().toLowerCase() === em);
   };
 
@@ -47,7 +48,7 @@ serve(async (req) => {
     const out = [];
     for (const i of invites ?? []) {
       const [p] = await profileOf(i.email);
-      out.push({ email: i.email, is_admin: i.is_admin, invited_at: i.created_at, joined_at: p?.created_at ?? null });
+      out.push({ email: i.email, is_admin: i.is_admin, invited_at: i.created_at, joined_at: p?.created_at ?? null, plan: p?.plan ?? "user" });
     }
     return json({ people: out, gmail: !!me.gmail_email });
   }
@@ -64,6 +65,17 @@ serve(async (req) => {
     let sent = false;
     try { sent = await sendInvite(email); } catch (e) { return json({ ok: true, sent: false, error: e instanceof Error ? e.message : String(e) }); }
     return json({ ok: true, sent });
+  }
+
+  if (body.action === "plan") {
+    // Switch someone between User and Pro (Pro can upload receipts). Applies once they've signed in.
+    const plan = body.plan === "pro" ? "pro" : "user";
+    const [p] = await profileOf(email);
+    if (!p) throw new HttpError(404, "They haven't signed in yet. You can change their plan once they have.");
+    if (p.is_admin) throw new HttpError(400, "The owner always has everything");
+    const { error } = await db.from("profiles").update({ plan }).eq("id", p.id);
+    if (error) throw new HttpError(500, error.message);
+    return json({ ok: true, plan });
   }
 
   if (body.action === "remove") {

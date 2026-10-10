@@ -11,6 +11,7 @@ import { go } from '../router.js';
 import { takeFiles, onFiles } from '../lib/scanQueue.js';
 import { rateFor, followsIrs } from '../lib/mileage.js';
 import { rankInvoicesFor } from '../lib/suggest.js';
+import { canUploadReceipts } from '../lib/plan.js';
 
 /** "Sony · Apr 27, 2026 · on invoice #123" — where an existing receipt is. */
 function whereIs(r, derived) {
@@ -108,6 +109,17 @@ function Receipts({ query }) {
   const [urls, setUrls] = useState({});
   const [over, setOver] = useState(false);
   const busy = queue.some((x) => x.status === 'working');
+  const uploads = canUploadReceipts(db.profile);
+  // An expense typed in by hand (no photo): a blank receipt opens to fill in; closed without anything, it's removed.
+  const newExpense = async () => {
+    try { const r = await s.insert('receipts', { receipt_date: todayISO(), status: 'review', ai: { manual: true } }); setOpen(r.id); } catch (e) { s.toast(e.message, { error: true }); }
+  };
+  const closeModal = () => {
+    const r = derived.receipts[open];
+    if (r?.ai?.manual && r.status === 'review' && !r.vendor && r.total == null && !r.file_key) s.remove('receipts', r.id).catch(() => {});
+    setOpen(null);
+  };
+  useEffect(() => { if (query.new === '1') { go('/expenses'); newExpense(); } }, [query.new]); // eslint-disable-line react-hooks/exhaustive-deps
   // Once a receipt is checked (or deleted) it leaves "Just added"; skipped duplicates and errors stay until cleared.
   const shownQueue = queue.filter((x) => x.status !== 'done' || !x.receiptId || derived.receipts[x.receiptId]?.status === 'review');
 
@@ -171,19 +183,19 @@ function Receipts({ query }) {
 
   // Photos taken with the phone's bottom Scan button.
   useEffect(() => {
-    const run = () => { const f = takeFiles(); if (f) addFiles(f); };
+    const run = () => { const f = takeFiles(); if (f && uploads) addFiles(f); };
     run();
     return onFiles(run);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const reviewCount = db.receipts.filter((r) => r.status === 'review').length;
+  const reviewCount = db.receipts.filter((r) => r.status === 'review' && !r.ai?.manual).length;
   const highConf = db.receipts.filter((r) => r.status === 'review' && r.ai?.confidence === 'high' && r.ai?.check !== 'mismatch' && r.total != null && r.receipt_date);
   const total = list.reduce((t, r) => t + num(r.total), 0);
   const cameraRef = useRef(null);
   // Drop a file straight onto a receipt in the list to attach it (or replace its file).
   const [rowOver, setRowOver] = useState(null);
   const [rowBusy, setRowBusy] = useState(null);
-  const rowDrop = (r) => ({
+  const rowDrop = (r) => (!uploads ? {} : {
     onDragOver: (e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); e.stopPropagation(); setRowOver(r.id); } },
     onDragLeave: () => setRowOver((x) => (x === r.id ? null : x)),
     onDrop: async (e) => {
@@ -204,6 +216,7 @@ function Receipts({ query }) {
 
   return (
     <>
+      {uploads ? (
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
         <button className="card phone-only" style={{ padding: 22, alignItems: 'center', gap: 14, cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit' }} onClick={() => cameraRef.current?.click()} disabled={busy}>
           <span style={{ width: 46, height: 46, borderRadius: 12, background: 'var(--primary)', color: 'var(--on-primary)', display: 'grid', placeItems: 'center' }}><Icon name="camera" size={22} /></span>
@@ -222,6 +235,13 @@ function Receipts({ query }) {
           <span className="small muted">or click to choose · duplicates are skipped automatically</span>
         </div>
       </div>
+      ) : (
+        <button type="button" className="drop" style={{ font: 'inherit', color: 'inherit', width: '100%' }} onClick={newExpense}>
+          <Icon name="plus" size={24} />
+          <strong>New expense</strong>
+          <span className="small muted">Vendor, date and amount</span>
+        </button>
+      )}
 
       {shownQueue.length > 0 && (
         <section className="card">
@@ -259,6 +279,7 @@ function Receipts({ query }) {
         <div className="row wrap">
           {highConf.length > 0 && filter === 'review' && <Button size="sm" icon="check" onClick={async () => { for (const r of highConf) await s.update('receipts', r.id, { status: 'confirmed' }); s.toast(`${highConf.length} confirmed`); }}>Confirm {highConf.length} sure ones</Button>}
           <input className="input search" style={{ width: 220 }} placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search receipts" />
+          {uploads && <Button icon="plus" onClick={newExpense}>New expense</Button>}
         </div>
       </div>
 
@@ -297,7 +318,7 @@ function Receipts({ query }) {
         )}
       </section>
 
-      {open && <ReceiptModal id={open} onClose={() => setOpen(null)} onNext={(nid) => setOpen(nid)} />}
+      {open && <ReceiptModal id={open} onClose={closeModal} onNext={(nid) => setOpen(nid)} />}
     </>
   );
 }
@@ -311,6 +332,7 @@ export function ReceiptModal({ id, onClose, onNext }) {
   const [busy, setBusy] = useState(false);
   const [fileBusy, setFileBusy] = useState(false); // (all hooks must sit above the early return below)
   const [over, setOver] = useState(false);
+  const uploads = canUploadReceipts(db.profile);
   const [pdf, setPdf] = useState(null); // { pages: [img urls], total, url (the whole PDF, for opening) }
   useEffect(() => {
     if (r) s.api.files.urls([r.file_key].filter(Boolean)).then(setUrls).catch(() => {});
@@ -348,6 +370,9 @@ export function ReceiptModal({ id, onClose, onNext }) {
   const whyFor = Object.fromEntries(ranked.map((x) => [x.inv.id, x.why]));
   const url = urls[r.file_key];
   const isPdf = r.mime === 'application/pdf';
+  const manual = !!r.ai?.manual && !r.file_key;
+  // Without receipt uploads (User plan) there's no photo side at all, unless the receipt already has a file.
+  const showFile = uploads || !!r.file_key;
   // Turn a stored photo a quarter turn clockwise (for the odd one the automatic turn got wrong).
   const rotate = async () => {
     if (fileBusy || !url) return;
@@ -413,16 +438,16 @@ export function ReceiptModal({ id, onClose, onNext }) {
   };
 
   return (
-    <Modal wide title={r.status === 'review' ? 'Check this receipt' : 'Receipt'} onClose={fileBusy ? () => {} : onClose} footer={
+    <Modal wide={showFile} title={manual ? 'New expense' : r.status === 'review' ? 'Check this receipt' : 'Receipt'} onClose={fileBusy ? () => {} : onClose} footer={
       <>
         <Button variant="ghost" className="danger" icon="trash" onClick={del} style={{ marginRight: 'auto' }}>Delete</Button>
-        {r.status === 'review' && reviewQueue.length > 0 && <Button busy={busy} disabled={fileBusy} onClick={() => save(true)}>Save &amp; next ({reviewQueue.length})</Button>}
-        <Button variant="primary" busy={busy} disabled={fileBusy} onClick={() => save(false)}>{r.status === 'review' ? 'Looks right — save' : 'Save'}</Button>
+        {r.status === 'review' && !manual && reviewQueue.length > 0 && <Button busy={busy} disabled={fileBusy} onClick={() => save(true)}>Save &amp; next ({reviewQueue.length})</Button>}
+        <Button variant="primary" busy={busy} disabled={fileBusy} onClick={() => save(false)}>{r.status === 'review' && !manual ? 'Looks right — save' : 'Save'}</Button>
       </>
     }>
       <div className="row wrap" style={{ alignItems: 'flex-start', gap: 20 }}>
-        <div className="col" style={{ flex: '1 1 280px', minWidth: 0, gap: 8 }}>
-          <div className={`receipt-view ${over ? 'over' : ''} ${r.file_key ? 'has-file' : ''}`} {...dropProps}>
+        {showFile && <div className="col" style={{ flex: '1 1 280px', minWidth: 0, gap: 8 }}>
+          <div className={`receipt-view ${over ? 'over' : ''} ${r.file_key ? 'has-file' : ''}`} {...(uploads ? dropProps : {})}>
             {!r.file_key
               ? <button type="button" className="file-drop" onClick={() => attachFile()} disabled={fileBusy}>{fileBusy ? <span className="spinner" /> : <Icon name="upload" size={22} />}<span>Add or drop a receipt image or PDF</span></button>
               : !url || (isPdf && !pdf) ? <span className="spinner" />
@@ -435,14 +460,14 @@ export function ReceiptModal({ id, onClose, onNext }) {
               )
               : <div className="rv-pages"><a href={url} target="_blank" rel="noreferrer" className="rv-page"><img src={url} alt="Receipt" /></a></div>}
             {fileBusy && r.file_key && <span className="receipt-busy"><span className="spinner" /></span>}
-            {r.file_key && url && (
+            {r.file_key && url && uploads && (
               <div className="rv-tools">
                 {!isPdf && <button type="button" className="icon-btn" onClick={rotate} disabled={fileBusy} title="Rotate" aria-label="Rotate"><Icon name="rotate" size={16} /></button>}
                 <button type="button" className="icon-btn" onClick={() => attachFile()} disabled={fileBusy} title="Replace file" aria-label="Replace file"><Icon name="upload" size={16} /></button>
               </div>
             )}
           </div>
-        </div>
+        </div>}
         <div className="col" style={{ flex: '1 1 300px', gap: 12 }}>
           {r.status === 'review' && ai.reasoning && (
             <div className={`banner ${ai.error ? 'bad' : ai.check === 'mismatch' || ai.confidence === 'low' ? 'warn' : 'good'}`}>
