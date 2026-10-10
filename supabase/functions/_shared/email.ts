@@ -1,5 +1,5 @@
 // Gmail sending + the invoice email template.
-import { env, HttpError } from "./util.ts";
+import { bytesToBase64, env, HttpError } from "./util.ts";
 
 export async function googleAccessToken(refreshToken: string): Promise<string> {
   const res = await fetch("https://oauth2.googleapis.com/token", {
@@ -53,6 +53,8 @@ export interface Mail {
   fromEmail: string;
   to: string;
   cc?: string;
+  bcc?: string;
+  attachments?: { name: string; type: string; bytes: Uint8Array }[];
   replyTo?: string;
   subject: string;
   text: string;
@@ -62,16 +64,19 @@ export interface Mail {
 export async function sendGmail(refreshToken: string, mail: Mail): Promise<string> {
   const token = await googleAccessToken(refreshToken);
   const boundary = "wrap_" + crypto.randomUUID();
+  const files = mail.attachments ?? [];
+  const mixed = "wrapmix_" + crypto.randomUUID();
   const headers = [
     `From: ${displayName(mail.fromName)} <${mail.fromEmail}>`,
     `To: ${mail.to}`,
     mail.cc ? `Cc: ${mail.cc}` : "",
+    mail.bcc ? `Bcc: ${mail.bcc}` : "",
     mail.replyTo ? `Reply-To: ${mail.replyTo}` : "",
     `Subject: ${encodeHeader(mail.subject)}`,
     "MIME-Version: 1.0",
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    files.length ? `Content-Type: multipart/mixed; boundary="${mixed}"` : `Content-Type: multipart/alternative; boundary="${boundary}"`,
   ].filter(Boolean);
-  const body = [
+  const alternative = [
     `--${boundary}`,
     "Content-Type: text/plain; charset=UTF-8",
     "Content-Transfer-Encoding: base64",
@@ -84,6 +89,24 @@ export async function sendGmail(refreshToken: string, mail: Mail): Promise<strin
     b64Body(mail.html),
     `--${boundary}--`,
   ];
+  // With attachments: the text/HTML versions, then each file (e.g. the invoice PDF).
+  const body = files.length
+    ? [
+      `--${mixed}`,
+      `Content-Type: multipart/alternative; boundary="${boundary}"`,
+      "",
+      ...alternative,
+      ...files.flatMap((f) => [
+        `--${mixed}`,
+        `Content-Type: ${f.type}; name="${f.name.replace(/"/g, "")}"`,
+        `Content-Disposition: attachment; filename="${f.name.replace(/"/g, "")}"`,
+        "Content-Transfer-Encoding: base64",
+        "",
+        (bytesToBase64(f.bytes).match(/.{1,76}/g) ?? []).join("\r\n"),
+      ]),
+      `--${mixed}--`,
+    ]
+    : alternative;
   const raw = b64url(headers.join("\r\n") + "\r\n\r\n" + body.join("\r\n"));
   const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
     method: "POST",

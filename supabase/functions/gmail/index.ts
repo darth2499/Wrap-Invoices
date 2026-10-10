@@ -1,6 +1,7 @@
 // gmail — connect your Gmail and send invoices / reminders / statements from it.
 import { admin, appUrl, HttpError, json, money, requireUser, serve } from "../_shared/util.ts";
 import { buildInvoiceEmail, buildStatementEmail, googleAccessToken, invoiceEmailData, sendGmail, shareLink } from "../_shared/email.ts";
+import { invoicePdf } from "../_shared/invoicePdf.ts";
 
 serve(async (req) => {
   const user = await requireUser(req);
@@ -79,10 +80,16 @@ serve(async (req) => {
       ...data,
       link: shareLink(appUrl(), inv.share_token), message: String(body.message ?? ""), isReminder,
     });
+    // Optional: a copy to yourself (Bcc, so the client doesn't see it) and the PDF attached.
+    const attachments = [];
+    if (body.attach_pdf) {
+      const { bytes, fileName } = await invoicePdf(db, inv);
+      attachments.push({ name: fileName, type: "application/pdf", bytes });
+    }
     await sendGmail(tok.refresh_token, {
-      fromName: business, fromEmail: tok.email, to, cc: body.cc || undefined,
+      fromName: business, fromEmail: tok.email, to, cc: body.cc || undefined, bcc: body.copy_me ? tok.email : undefined,
       subject: String(body.subject ?? `${inv.kind === "quote" ? "Quote" : "Invoice"} #${inv.number} from ${business}`),
-      ...email,
+      ...email, attachments,
     });
     const now = new Date().toISOString();
     const patch: Record<string, unknown> = {};

@@ -4,10 +4,8 @@
 //   accept_quote: client approves a quote
 //   statement:    /#/s/<token>   → every open invoice for one client
 //   ping:         keeps the free Supabase project awake
-import { admin, appUrl, cors, HttpError, json, presign, r2Get, serve } from "../_shared/util.ts";
-// @ts-ignore: plain JS shared with the app (copied by scripts/sync-shared.mjs)
-import { buildInvoicePdf as buildPdfJs, imageBytes, pdfFileName } from "../_shared/web/pdf.js";
-const buildInvoicePdf = buildPdfJs as unknown as (opts: Record<string, unknown>) => Promise<Uint8Array>;
+import { admin, cors, HttpError, json, presign, serve } from "../_shared/util.ts";
+import { invoicePdf, verifyCode } from "../_shared/invoicePdf.ts";
 
 const TOKEN_RE = /^[a-f0-9]{48,64}$/;
 
@@ -45,19 +43,6 @@ function later(p: Promise<unknown>) {
   else return p.catch(() => {});
 }
 
-/**
- * Short code tied to this exact version and balance of the invoice. Signed with a server-only secret,
- * so it can't be made up: the code on a PDF must match the one shown on the live link.
- */
-// deno-lint-ignore no-explicit-any
-async function verifyCode(inv: any, paid: number): Promise<string> {
-  const secret = Deno.env.get("VERIFY_SECRET") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const msg = `${inv.id}|${inv.version}|${Number(inv.total).toFixed(2)}|${paid.toFixed(2)}`;
-  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg)));
-  const hex = [...sig.slice(0, 4)].map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
-  return `${hex.slice(0, 4)}-${hex.slice(4)}`;
-}
 
 serve(async (req) => {
   const body = req.method === "POST" ? await req.json().catch(() => ({})) : Object.fromEntries(new URL(req.url).searchParams);
@@ -105,30 +90,15 @@ serve(async (req) => {
 
   // ----- view an invoice or quote -----
   if (body.action !== "pdf") return view(db, inv, body);
-  const biz = await business(db, inv.owner_id);
   if (inv.status === "void" || inv.status === "paid") throw new HttpError(400, "This invoice is closed");
 
   if (body.action === "pdf") {
-    const [{ data: lines }, { data: client }, { data: pays }, { data: prof }] = await Promise.all([
-      db.from("invoice_lines").select("item, description, note, qty, rate, amount, tax_rate, kind").eq("invoice_id", inv.id).order("position"),
-      inv.client_id ? db.from("clients").select("name, email, address").eq("id", inv.client_id).single() : Promise.resolve({ data: null }),
-      db.from("payments").select("paid_on, amount, method").eq("invoice_id", inv.id).order("paid_on"),
-      db.from("profiles").select("logo_key").eq("id", inv.owner_id).single(),
-    ]);
-    const paid = (pays ?? []).reduce((t, p) => t + Number(p.amount), 0);
-    let logo = null;
-    if (prof?.logo_key) {
-      try { logo = await imageBytes(new Blob([new Uint8Array(await (await r2Get(prof.logo_key)).arrayBuffer())])); } catch { logo = null; }
-    }
-    const bytes = await buildInvoicePdf({
-      business: biz ?? {}, invoice: inv, client, lines: lines ?? [], payments: pays ?? [], logo,
-      verify: { url: `${appUrl()}/#/i/${token}`, code: await verifyCode(inv, paid) },
-    });
+    const { bytes, fileName } = await invoicePdf(db, inv);
     return new Response(new Blob([bytes as unknown as BlobPart]), {
       headers: {
         ...cors,
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${pdfFileName(inv)}"`,
+        "Content-Disposition": `attachment; filename="${fileName}"`,
         "Cache-Control": "no-store",
       },
     });

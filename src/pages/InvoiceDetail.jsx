@@ -279,6 +279,11 @@ function EmailModal({ inv, client, reminder, due, onClose }) {
       : `Hi ${first},\n\nHere's ${isQuote ? 'the quote' : `invoice #${inv.number}`}${inv.notes ? ` (${inv.notes})` : ''}. You can view it and download the PDF${isQuote ? '' : andReceipts} below.\n\nThank you!\n${biz}`,
   );
   const [busy, setBusy] = useState(false);
+  // Remembered between sends.
+  const pref = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v === '1'; } catch { return d; } };
+  const [copyMe, setCopyMe] = useState(() => pref('wrap_send_copy', false));
+  const [attachPdf, setAttachPdf] = useState(() => pref('wrap_send_pdf', false));
+  const keep = (k, v, set) => { set(v); try { localStorage.setItem(k, v ? '1' : '0'); } catch { /* not saved */ } };
   const preview = buildInvoiceEmail({
     kind: inv.kind, number: inv.number, issueDate: inv.issue_date, dueDate: inv.due_date, notes: inv.notes,
     total: num(inv.total), paid: s.derived.paidFor(inv.id), lines: s.derived.linesFor(inv.id),
@@ -297,7 +302,7 @@ function EmailModal({ inv, client, reminder, due, onClose }) {
   const send = async () => {
     setBusy(true);
     try {
-      await s.api.gmail('send', { invoice_id: inv.id, type: reminder ? 'reminder' : 'invoice', to, cc, subject, message });
+      await s.api.gmail('send', { invoice_id: inv.id, type: reminder ? 'reminder' : 'invoice', to, cc, subject, message, copy_me: copyMe, attach_pdf: attachPdf });
       await s.reload('invoices', 'invoice_events');
       s.toast(`${reminder ? 'Reminder sent' : 'Email sent'}${DEMO ? ' (demo: nothing was actually emailed)' : ''}`);
       onClose();
@@ -315,6 +320,10 @@ function EmailModal({ inv, client, reminder, due, onClose }) {
           <Field label="Subject"><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
           <Field label="Message"><textarea className="input" rows={9} value={message} onChange={(e) => setMessage(e.target.value)} /></Field>
           <p className="small muted">The {isQuote ? 'quote' : 'invoice'} details, a “View {isQuote ? 'quote' : 'invoice'}” button{p.payment_instructions && !isQuote ? ' and how to pay' : ''} are added below your message.</p>
+          <div className="col" style={{ gap: 8, paddingTop: 4 }}>
+            <label className="check"><input type="checkbox" checked={copyMe} onChange={(e) => keep('wrap_send_copy', e.target.checked, setCopyMe)} /><span>Send myself a copy at {p.gmail_email || 'my email'}</span></label>
+            <label className="check"><input type="checkbox" checked={attachPdf} onChange={(e) => keep('wrap_send_pdf', e.target.checked, setAttachPdf)} /><span>Attach PDF to email</span></label>
+          </div>
         </div>
         <EmailPreview html={preview} label="What your client sees" />
       </div>

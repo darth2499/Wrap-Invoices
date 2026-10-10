@@ -108,6 +108,8 @@ function Receipts({ query }) {
   const [urls, setUrls] = useState({});
   const [over, setOver] = useState(false);
   const busy = queue.some((x) => x.status === 'working');
+  // Once a receipt is checked (or deleted) it leaves "Just added"; skipped duplicates and errors stay until cleared.
+  const shownQueue = queue.filter((x) => x.status !== 'done' || !x.receiptId || derived.receipts[x.receiptId]?.status === 'review');
 
   const list = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -221,10 +223,10 @@ function Receipts({ query }) {
         </div>
       </div>
 
-      {queue.length > 0 && (
+      {shownQueue.length > 0 && (
         <section className="card">
           <div className="card-head"><h2>{busy ? 'Adding receipts…' : 'Just added'}</h2>{!busy && <Button size="sm" variant="ghost" onClick={() => setQueue([])}>Clear</Button>}</div>
-          {queue.map((x) => (
+          {shownQueue.map((x) => (
             <div key={x.id} className="list-row" style={{ gridTemplateColumns: '22px 1fr auto', cursor: x.receiptId ? 'pointer' : 'default' }} onClick={() => x.receiptId && setOpen(x.receiptId)}>
               {x.status === 'working' ? <span className="spinner" style={{ color: 'var(--accent)' }} /> : <Icon name={x.status === 'done' ? 'check' : x.status === 'dupe' ? 'copy' : x.status === 'error' ? 'x' : 'file'} size={18} style={{ color: x.status === 'done' ? 'var(--good)' : x.status === 'error' ? 'var(--bad)' : 'var(--muted)' }} />}
               <span className="col" style={{ gap: 0, minWidth: 0 }}>
