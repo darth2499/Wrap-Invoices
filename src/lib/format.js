@@ -158,3 +158,43 @@ export function greetName(client, lang = 'en') {
   if (lang === 'ja') return last ? `${last}様` : first ? `${first}様` : 'ご担当者様';
   return first || String(client?.name || '').trim().split(/\s+/)[0] || 'there';
 }
+
+// ---------- how work dates show on invoices ----------
+// Lines always store dates as "(MM/DD)" codes (everything that reads dates relies on that); the business's
+// chosen style is applied only when the invoice is shown, drawn as a PDF or emailed.
+export const DATE_STYLES = [
+  { value: 'mmdd', example: '10/01 · 10/01-10/03', label: '10/01' },
+  { value: 'mon_d', example: 'Oct 1 · Oct 1–3', label: 'Oct 1' },
+  { value: 'mon_dd', example: 'Oct 01 · Oct 01–03', label: 'Oct 01' },
+  { value: 'd_mon', example: '1 Oct · 1–3 Oct', label: '1 Oct' },
+  { value: 'ddmm', example: '01/10 · 01/10-03/10', label: '01/10' },
+  { value: 'iso', example: '2026-10-01', label: '2026-10-01' },
+];
+const MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DATE_CODE = /\((\d{2}\/\d{2}(?:-\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:-\d{2}\/\d{2})?)*)\)/g;
+
+function styleRun(a, b, style, y) {
+  const [am, ad] = a.split('/').map(Number);
+  const [bm, bd] = b ? b.split('/').map(Number) : [];
+  const p2 = (n) => String(n).padStart(2, '0');
+  const one = (m, d, yr) => style === 'mon_d' ? `${MON3[m - 1]} ${d}` : style === 'mon_dd' ? `${MON3[m - 1]} ${p2(d)}`
+    : style === 'd_mon' ? `${d} ${MON3[m - 1]}` : style === 'ddmm' ? `${p2(d)}/${p2(m)}` : style === 'iso' ? `${yr}-${p2(m)}-${p2(d)}` : `${p2(m)}/${p2(d)}`;
+  const ya = am > y.m + 2 ? y.y - 1 : y.y; // late-year work on an early-year invoice
+  if (!b) return one(am, ad, ya);
+  const yb = bm < am ? ya + 1 : ya; // Dec 30 – Jan 2
+  if (am === bm && style === 'mon_d') return `${MON3[am - 1]} ${ad}–${bd}`;
+  if (am === bm && style === 'mon_dd') return `${MON3[am - 1]} ${p2(ad)}–${p2(bd)}`;
+  if (am === bm && style === 'd_mon') return `${ad}–${bd} ${MON3[am - 1]}`;
+  const dash = style === 'mmdd' || style === 'ddmm' ? '-' : style === 'iso' ? ' – ' : '–';
+  return `${one(am, ad, ya)}${dash}${one(bm, bd, yb)}`;
+}
+
+/** A description with its "(MM/DD)" codes written in the chosen style (unchanged for the default). */
+export function styleDates(text, style, issueISO) {
+  if (!text || !style || style === 'mmdd') return text;
+  const y = { y: Number(String(issueISO || '').slice(0, 4)) || new Date().getFullYear(), m: Number(String(issueISO || '').slice(5, 7)) || 12 };
+  return String(text).replace(DATE_CODE, (_, inner) => `(${inner.split(/,\s*/).map((r) => { const [a, b] = r.split('-'); return styleRun(a, b, style, y); }).join(', ')})`);
+}
+
+export const styledLines = (lines, style, issueISO) =>
+  !style || style === 'mmdd' ? lines : (lines || []).map((l) => (l.description ? { ...l, description: styleDates(l.description, style, issueISO) } : l));

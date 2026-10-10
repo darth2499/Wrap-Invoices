@@ -9,7 +9,10 @@
 import { admin, cors, HttpError, json, presign, requireUser, serve } from "../_shared/util.ts";
 import { invoicePdf, verifyCode } from "../_shared/invoicePdf.ts";
 // @ts-ignore: plain JS shared with the app (copied by scripts/sync-shared.mjs)
-import { styleDates } from "../_shared/web/format.js";
+import * as shared from "../_shared/web/format.js";
+// Never let the client page fail to start over this: without it, dates are just kept as written.
+// deno-lint-ignore no-explicit-any
+const styleDates: (t: string, style: unknown, iso: unknown) => string = (shared as any).styleDates ?? ((t: string) => t);
 
 const TOKEN_RE = /^[a-f0-9]{48,64}$/;
 

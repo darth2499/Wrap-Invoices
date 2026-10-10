@@ -1,7 +1,10 @@
 // The emails clients receive (invoice, reminder, quote, statement), styled like Wrap.
-// Plain JS with no imports so the same file runs in the app (live preview) and on the server
+// Plain JS (only importing format.js) so the same file runs in the app (live preview) and on the server
 // (copied into supabase/functions/_shared/web by scripts/sync-shared.mjs).
 // Email apps ignore most modern CSS, so this uses tables and inline styles only.
+import * as fmt from './format.js';
+// (If format.js is ever out of date, dates are just kept as written instead of the email failing.)
+const styleDates = fmt.styleDates || ((t) => t);
 
 const C = {
   bg: '#f6f6f4', card: '#ffffff', ink: '#16161a', ink2: '#45464d', muted: '#5f6168', faint: '#9a9ba1',
@@ -104,7 +107,7 @@ export function buildInvoiceEmail(e) {
     ? 'Quote total'
     : late > 0 ? `Was due ${longDate(e.dueDate)}` : e.dueDate ? `Amount due by ${longDate(e.dueDate)}` : 'Amount due';
 
-  const lines = (e.lines || []).filter((l) => l.item || l.description || n(l.amount));
+  const lines = (e.lines || []).filter((l) => l.item || l.description || n(l.amount)).map((l) => ({ ...l, description: styleDates(l.description, e.dateStyle, e.issueDate) }));
   const shown = lines.slice(0, 6);
   const itemRow = (l) => `<tr>
         <td style="padding:9px 12px 9px 0;border-top:1px solid ${C.line2};vertical-align:top">
