@@ -5,6 +5,11 @@
 //   lists:  09/26, 09/28 · Sep 28 & 30 · 10/05-10/07, 10/09
 //   with or without brackets, and with "(2 Days)" / "2 days" after them.
 // Returns the dates (YYYY-MM-DD) and where they sit in the text, or null.
+//
+// Day/month order: 09/10 is Sept 10 in the US but 9 Oct in most other countries. Month names and
+// 2026-09-10 are never ambiguous. For numbers, `order` ('mdy' or 'dmy') decides; guessOrder() picks it per
+// document from the dates themselves (a 25/09 can only be day-first), then from which reading puts the work
+// near the invoice date, and only then from this device's language settings.
 
 const MON = String.raw`(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?`;
 const ORD = String.raw`(?:st|nd|rd|th)?`;
@@ -12,7 +17,9 @@ const PATTERNS = [
   { kind: 'iso', re: /(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)/iy, get: (m) => ({ y: +m[1], mo: +m[2], d: +m[3] }) },
   { kind: 'mon', re: new RegExp(String.raw`${MON}\s+(\d{1,2})${ORD}(?!\d)(?:,?\s+(\d{4})(?!\d))?`, 'iy'), get: (m) => ({ y: m[3] ? +m[3] : null, mo: monthOf(m[1]), d: +m[2] }) },
   { kind: 'dmon', re: new RegExp(String.raw`(\d{1,2})${ORD}\s+${MON}(?![a-z])(?:,?\s+(\d{4})(?!\d))?`, 'iy'), get: (m) => ({ y: m[3] ? +m[3] : null, mo: monthOf(m[2]), d: +m[1] }) },
-  { kind: 'us', re: /(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\d/])/y, get: (m) => ({ y: m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : null, mo: +m[1], d: +m[2] }) },
+  // 30.09.2026 / 30-09-2026 (always with a year: "30.09" alone could be a price)
+  { kind: 'num', re: /(\d{1,2})[.-](\d{1,2})[.-](\d{4}|\d{2})(?![\d.])/y, get: (m) => ({ y: m[3].length === 2 ? 2000 + +m[3] : +m[3], a: +m[1], b: +m[2] }) },
+  { kind: 'num', re: /(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\d/])/y, get: (m) => ({ y: m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : null, a: +m[1], b: +m[2] }) },
 ];
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 function monthOf(s) { return MONTHS.indexOf(String(s).toLowerCase().slice(0, 3)) + 1; }
@@ -32,16 +39,70 @@ function at(re, s, i) {
 }
 
 /** One date starting exactly at position i. */
-function dateAt(s, i) {
+function dateAt(s, i, order = 'mdy') {
   for (const p of PATTERNS) {
     const r = at(p.re, s, i);
     if (!r) continue;
-    const v = p.get(r.m);
-    // "1/2" (a half) and the like aren't dates: numeric dates need a two-digit part or a year.
-    if (p.kind === 'us' && !r.m[3] && r.m[1].length < 2 && r.m[2].length < 2) continue;
+    let v = p.get(r.m);
+    if (p.kind === 'num') {
+      // "1/2" (a half) and the like aren't dates: numeric dates need a two-digit part or a year.
+      if (!r.m[3] && r.m[1].length < 2 && r.m[2].length < 2) continue;
+      v = order === 'dmy' ? { y: v.y, mo: v.b, d: v.a } : { y: v.y, mo: v.a, d: v.b };
+    }
     if (valid(v)) return { ...v, kind: p.kind, end: r.end };
   }
   return null;
+}
+
+/** This device's usual order for numeric dates (US: month first; most other places: day first). */
+export function localeOrder() {
+  try {
+    const parts = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'numeric' }).formatToParts(new Date(2026, 10, 25));
+    const types = parts.map((x) => x.type);
+    return types.indexOf('day') < types.indexOf('month') ? 'dmy' : 'mdy';
+  } catch {
+    return 'mdy';
+  }
+}
+
+const NUM_DATE = /(?<![\d$.,])(\d{1,2})([/.-])(\d{1,2})(?:\2(\d{4}|\d{2}))?(?![\d.])/g;
+
+/**
+ * Day-first or month-first for one document (an invoice's descriptions, or a CSV's date column):
+ *   1. a number over 12 settles it (25/09 → day first, 09/25 → month first)
+ *   2. otherwise, the reading that puts the dates closest to (mostly just before) the invoice date
+ *   3. otherwise, this device's settings
+ */
+export function guessOrder(texts, issueISO) {
+  let dayFirst = 0;
+  let monthFirst = 0;
+  const pairs = [];
+  for (const t of texts) {
+    for (const m of String(t || '').matchAll(NUM_DATE)) {
+      if (m[2] !== '/' && !m[4]) continue; // 30.09 / 10-12 without a year: not a date
+      const a = +m[1];
+      const b = +m[3];
+      if (a < 1 || b < 1 || a > 31 || b > 31 || (a > 12 && b > 12)) continue;
+      if (a > 12) dayFirst++;
+      else if (b > 12) monthFirst++;
+      pairs.push({ a, b, y: m[4] ? (m[4].length === 2 ? 2000 + +m[4] : +m[4]) : null });
+    }
+  }
+  if (dayFirst && !monthFirst) return 'dmy';
+  if (monthFirst && !dayFirst) return 'mdy';
+  if (issueISO && pairs.length) {
+    const issue = Date.parse(`${issueISO}T00:00:00Z`);
+    const score = (order) => pairs.reduce((t, p) => {
+      const v = withYear(order === 'dmy' ? { y: p.y, mo: p.b, d: p.a } : { y: p.y, mo: p.a, d: p.b }, issueISO);
+      if (!valid(v) || !realDate(v)) return t - 1;
+      const days = (Date.UTC(v.y, v.mo - 1, v.d) - issue) / 86400000;
+      return t + (days <= 14 && days >= -120 ? 1 : 0); // work usually happens in the months before the invoice
+    }, 0);
+    const md = score('mdy');
+    const dm = score('dmy');
+    if (md !== dm) return md > dm ? 'mdy' : 'dmy';
+  }
+  return localeOrder();
 }
 
 /** Year for a date written without one: the invoice's year, or the year before for late-year work on an early invoice. */
@@ -63,11 +124,11 @@ function expand(a, b) {
   return out;
 }
 
-export function findDates(text, issueISO) {
+export function findDates(text, issueISO, order = 'mdy') {
   const s = String(text || '');
   for (let i = 0; i < s.length; i++) {
     if (i > 0 && /[\w$.\/-]/.test(s[i - 1]) && !/[(\s]/.test(s[i - 1])) continue; // inside a number or word
-    const first = dateAt(s, i);
+    const first = dateAt(s, i, order);
     if (!first) continue;
     const dates = [];
     let pos = first.end;
@@ -78,7 +139,7 @@ export function findDates(text, issueISO) {
       // a range: "-", "to", "–" … then a full date or (for month names / numeric) just the day
       const r = at(RANGE, s, pos);
       if (r) {
-        const full = dateAt(s, r.end);
+        const full = dateAt(s, r.end, order);
         const dayOnly = !full && at(DAY_ONLY, s, r.end);
         if (full || dayOnly) {
           let end = full ? { ...full } : { y: cur.y, mo: cur.mo, d: +dayOnly.m[1], end: dayOnly.end };
@@ -91,7 +152,7 @@ export function findDates(text, issueISO) {
       // a list: ", 10/09" or "& 30"
       const l = at(LIST, s, pos);
       if (!l) break;
-      const next = dateAt(s, l.end);
+      const next = dateAt(s, l.end, order);
       const nextDay = !next && (first.kind === 'mon' || first.kind === 'dmon') && at(DAY_ONLY, s, l.end);
       if (next) { cur = withYear(next, issueISO); if (next.y == null && cur.y < last.y) cur = { ...cur, y: last.y }; pos = next.end; continue; }
       if (nextDay && !/^\d{4}/.test(s.slice(l.end))) { cur = { y: last.y, mo: last.mo, d: +nextDay.m[1] }; pos = nextDay.end; continue; }
@@ -113,10 +174,10 @@ export function findDates(text, issueISO) {
  * The first description row with dates, rewritten the way Wrap writes them: "Google (09/26-09/27)".
  * Returns { text, dates } or null when there are no dates.
  */
-export function normalizeDates(text, issueISO, code) {
+export function normalizeDates(text, issueISO, code, order = 'mdy') {
   const rows = String(text || '').split('\n');
   for (const [k, row] of rows.entries()) {
-    const f = findDates(row, issueISO);
+    const f = findDates(row, issueISO, order);
     if (!f) continue;
     const label = (row.slice(0, f.start) + ' ' + row.slice(f.end))
       .replace(/\s{2,}/g, ' ').replace(/^[\s\-–—:,@|]+|[\s\-–—:,@|]+$/g, '').replace(/\s+(?:on|from)$/i, '').trim();

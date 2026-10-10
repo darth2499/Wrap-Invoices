@@ -4,6 +4,8 @@
 // so the caller can fall back to the AI reader.
 
 // "$1,700.00", "-$100.00", "$-100.00" and "($100.00)" (newer Wave PDFs show discounts in brackets)
+import { findDates, guessOrder } from './dateText.js';
+
 const MONEY = String.raw`\(?-?\$-?[\d,]+\.\d{2}\)?`;
 const ROW = new RegExp(String.raw`^(.+?)\s{2,}(\d+(?:\.\d+)?)\s{2,}(${MONEY})\s{2,}(${MONEY})$`);
 const LABELLED = new RegExp(String.raw`^(.+?):\s+(${MONEY})$`);
@@ -15,12 +17,19 @@ const amt = (s) => {
   return Math.round((neg ? -n : n) * 100) / 100;
 };
 
-/** "May 31, 2026" → "2026-05-31" (no time zones involved). */
+/**
+ * "May 31, 2026" → "2026-05-31" (no time zones involved). Also "31 May 2026", "2026-05-31", and numeric dates
+ * (31/05/2026 or 05/31/2026: a number over 12 decides, otherwise this device's usual order).
+ */
 export function longDate(s) {
-  const m = String(s || '').trim().match(/^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})/);
-  if (!m) return null;
-  const mi = MONTHS.findIndex((x) => x.startsWith(m[1].toLowerCase().slice(0, 3)));
-  return mi < 0 ? null : `${m[3]}-${String(mi + 1).padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  const v = String(s || '').trim();
+  const m = v.match(/^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})/);
+  if (m) {
+    const mi = MONTHS.findIndex((x) => x.startsWith(m[1].toLowerCase().slice(0, 3)));
+    if (mi >= 0) return `${m[3]}-${String(mi + 1).padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  }
+  const f = findDates(v, null, guessOrder([v]));
+  return f && f.start === 0 ? f.dates[0] : null;
 }
 
 // The right-hand "Label: value" fields sometimes share a text row with the left column

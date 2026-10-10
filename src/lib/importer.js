@@ -1,7 +1,7 @@
 import { DEMO } from '../config.js';
 // Import clients and past invoices from CSV (e.g. Wave exports) or from Wave invoice PDFs.
 import { num, round2, todayISO, addDays, datesCode } from './format.js';
-import { normalizeDates } from './dateText.js';
+import { normalizeDates, findDates, guessOrder } from './dateText.js';
 import { totals } from './calc.js';
 import { looksSame } from './receipts.js';
 
@@ -53,17 +53,19 @@ export function autoMap(headers, fields) {
 }
 
 /** Parses many date styles into YYYY-MM-DD. */
-export function toDate(s) {
+/**
+ * A date from an import, as YYYY-MM-DD: 2026-09-30, 09/30/2026 (or 30/09/2026 — `order` says which, see
+ * guessOrder), 30.09.2026, Sep 30, 2026, 30 September 2026. Never shifted by time zones.
+ */
+export function toDate(s, order = 'mdy') {
   const v = String(s || '').trim();
   if (!v) return null;
   if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
-  const m = v.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
-  if (m) {
-    const y = m[3].length === 2 ? `20${m[3]}` : m[3];
-    return `${y}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
-  }
+  const f = findDates(v, null, order);
+  if (f && f.dates.length === 1 && f.start <= 1) return f.dates[0];
   const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export function clientsFromCsv(rows, map) {
@@ -114,6 +116,8 @@ export function invoicesFromCsv(rows, map, { assume = 'unpaid' } = {}) {
     if (!groups.has(number)) groups.set(number, []);
     groups.get(number).push(r);
   }
+  // Day-first or month-first, decided once for the whole file from all its dates.
+  const order = guessOrder(rows.flatMap((r) => [get(r, 'date'), get(r, 'due')]));
   return [...groups.entries()].map(([number, rs]) => {
     const first = rs[0];
     const lines = map.item || map.description
@@ -128,8 +132,9 @@ export function invoicesFromCsv(rows, map, { assume = 'unpaid' } = {}) {
     if (!lines.length) lines.push({ kind: 'labor', item: 'Imported invoice', description: 'Imported from previous invoicing app', qty: 1, rate: total, amount: total });
     // No "amount due" column: use what the person chose (unpaid by default, so nothing is wrongly marked paid).
     const amountDue = map.amount_due ? num(get(first, 'amount_due')) : assume === 'paid' ? 0 : total;
-    const date = toDate(get(first, 'date')) || todayISO();
-    return { number, client: get(first, 'client'), date, due: toDate(get(first, 'due')) || addDays(date, 30), total, amountDue, lines };
+    const date = toDate(get(first, 'date'), order) || todayISO();
+    const due = toDate(get(first, 'due'), order) || addDays(date, 30);
+    return { number, client: get(first, 'client'), date, due, total, amountDue, lines: lines.map((l) => withDays(l, date, order)) };
   });
 }
 
@@ -332,9 +337,9 @@ export function withAddons(l) {
  * "(2 Days)" …: see dateText.js), and writes them the way Wrap does, "Google (09/30)", so the Calendar,
  * receipt suggestions and price checks all see them.
  */
-export function withDays(l, issueDate) {
+export function withDays(l, issueDate, order = 'mdy') {
   const desc = l.extras ? l.extras.desc : l.description;
-  const found = normalizeDates(desc, issueDate, datesCode);
+  const found = normalizeDates(desc, issueDate, datesCode, order);
   if (!found) return l;
   const dates = found.dates;
   const n = dates.length;
@@ -408,6 +413,9 @@ export async function invoiceFromPdf(file, api) {
   }
   const problem = invoiceProblem(r, text);
   if (problem) throw new Error(`Not imported — ${problem.charAt(0).toLowerCase()}${problem.slice(1)}.`);
+  // Day-first or month-first for this invoice's descriptions (e.g. 05/04: May 4 or 5 April?), from the dates themselves.
+  const issue = toDate(r.issue_date) || todayISO();
+  const order = guessOrder((r.lines || []).flatMap((l) => [l.description, l.note]), issue);
   return {
     number: String(r.number || '').replace(/^#/, ''),
     client: r.client_name,
@@ -420,7 +428,7 @@ export async function invoiceFromPdf(file, api) {
     discount: num(r.discount),
     notes: r.notes || null,
     payments: (r.payments || []).map((p) => ({ date: p.date, amount: num(p.amount), method: p.method })),
-    lines: (r.lines || []).map((l) => withDays(withAddons({ kind: 'labor', item: l.item, description: l.description || '', note: l.note || '', qty: num(l.qty) || 1, rate: num(l.rate), amount: num(l.amount) }), toDate(r.issue_date) || todayISO())),
+    lines: (r.lines || []).map((l) => withDays(withAddons({ kind: 'labor', item: l.item, description: l.description || '', note: l.note || '', qty: num(l.qty) || 1, rate: num(l.rate), amount: num(l.amount) }), issue, order)),
     fileName: file.name,
   };
 }

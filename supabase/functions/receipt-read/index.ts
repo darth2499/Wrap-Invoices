@@ -23,7 +23,7 @@ Find the amount that was ACTUALLY PAID. Rules:
 - For hotel folios, use the total charges paid (payments line), not the remaining balance (often 0.00).
 - For parking stubs, use the amount paid.
 - If two totals disagree, choose the one at the payment step and set confidence to "low".
-- Convert US dates like MM/DD/YY to YYYY-MM-DD.
+- Write the date as YYYY-MM-DD. US receipts write MM/DD/YY; most other countries write DD/MM/YY. Decide from the receipt's country, address, currency or language (a number over 12 is always the day); if nothing tells you, assume US.
 Pick the best tax category for the expense from this list: ${CATEGORIES.join("; ")}.`;
 
 const RECEIPT_JSON = `Reply with ONLY one JSON object, no other text, in exactly this shape (use null when unknown):
