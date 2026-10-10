@@ -9,7 +9,7 @@ import { exportBackup, readBackup, restoreBackup } from '../lib/backup.js';
 import { parseCSV, downloadBlob, pickFiles } from '../lib/files.js';
 import { CLIENT_FIELDS, INVOICE_FIELDS, autoMap, clientsFromCsv, invoicesFromCsv, importInvoices, importExpenses, importClients, invoiceFromPdf, pdfMatch } from '../lib/importer.js';
 import { isWaveAccounting, parseWaveAccounting, readWaveFiles } from '../lib/wave.js';
-import { money, num, todayISO, addDays, plural } from '../lib/format.js';
+import { money, num, todayISO, addDays, plural, fmtDate } from '../lib/format.js';
 import { irsRate, followsIrs } from '../lib/mileage.js';
 import { DEMO } from '../config.js';
 import { CATEGORIES, ownCategories } from '../lib/categories.js';
@@ -395,22 +395,73 @@ function Email() {
 function People() {
   const s = useStore();
   const [email, setEmail] = useState('');
+  const [list, setList] = useState(null);
+  const [gmail, setGmail] = useState(true);
+  const [busy, setBusy] = useState('');
+  const load = () => s.api.people?.('list').then((r) => { setList(r.people); setGmail(r.gmail); }).catch((e) => s.toast(e.message, { error: true }));
+  useEffect(() => { if (!DEMO && s.db.profile.is_admin) load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (!s.db.profile.is_admin) return <Empty title="Only the account owner can invite people" />;
+  if (DEMO) return <section className="card card-pad col" style={{ gap: 12, maxWidth: 640 }}><h2>People</h2><p className="small muted">Inviting people is turned off in the demo.</p></section>;
+
+  const invite = async (e) => {
+    e.preventDefault();
+    const em = email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(em)) return s.toast('Enter an email', { error: true });
+    setBusy('invite');
+    try {
+      const r = await s.api.people('invite', { email: em });
+      setEmail('');
+      s.toast(r.sent ? `Invitation sent to ${em}` : r.error ? `${em} can sign in, but the email didn’t send: ${r.error}` : `${em} can sign in. Connect Gmail (Settings → Email) to email invitations.`, r.error ? { error: true } : {});
+      load();
+    } catch (err) { s.toast(err.message, { error: true }); }
+    setBusy('');
+  };
+  const resend = async (em) => {
+    setBusy(`r${em}`);
+    try { const r = await s.api.people('resend', { email: em }); s.toast(r.sent ? `Invitation sent again to ${em}` : r.error || 'Connect Gmail (Settings → Email) to email invitations.', r.sent ? {} : { error: true }); } catch (err) { s.toast(err.message, { error: true }); }
+    setBusy('');
+  };
+  const remove = async (p) => {
+    const ok = await s.confirm({
+      title: `Remove ${p.email}?`,
+      body: p.joined_at
+        ? 'They’re signed out and blocked, and everything in their Wrap is permanently deleted: invoices, clients, receipts and their files. This can’t be undone. Your own data isn’t touched.'
+        : 'Their invitation is cancelled, so they can’t sign up.',
+      ok: p.joined_at ? 'Remove and delete everything' : 'Remove', danger: true,
+    });
+    if (!ok) return;
+    setBusy(`x${p.email}`);
+    try {
+      const r = await s.api.people('remove', { email: p.email });
+      s.toast(r.left?.length ? `Removed, but some data couldn’t be deleted: ${r.left.join(', ')}` : r.deleted ? `${p.email} removed and their data deleted` : `${p.email} removed`, r.left?.length ? { error: true } : {});
+      load();
+    } catch (err) { s.toast(err.message, { error: true }); }
+    setBusy('');
+  };
+
   return (
     <section className="card card-pad col" style={{ gap: 12, maxWidth: 640 }}>
-      <h2>Invite people</h2>
-      <p className="small muted">Wrap is invite-only. Each person signs in with their Google account and gets their own private workspace — nobody can see anyone else’s invoices unless a link is shared.</p>
-      <form className="row" onSubmit={async (e) => { e.preventDefault(); const em = email.trim().toLowerCase(); if (!/^\S+@\S+\.\S+$/.test(em)) return s.toast('Enter an email', { error: true }); try { await s.insert('invites', { email: em }); setEmail(''); s.toast(`${em} can now sign in`); } catch (err) { s.toast(err.message, { error: true }); } }}>
+      <h2>People</h2>
+      <p className="small muted">Wrap is invite-only. Each person signs in with their Google account and gets their own private workspace. Nobody can see anyone else’s data.</p>
+      <form className="row" onSubmit={invite}>
         <input className="input" type="email" placeholder="name@gmail.com" value={email} onChange={(e) => setEmail(e.target.value)} aria-label="Email to invite" />
-        <Button type="submit" variant="primary">Invite</Button>
+        <Button type="submit" variant="primary" icon="mail" busy={busy === 'invite'}>Invite</Button>
       </form>
-      {s.db.invites.map((i) => (
-        <div key={i.email} className="row between" style={{ borderTop: '1px solid var(--line-2)', paddingTop: 8 }}>
-          <span>{i.email} {i.is_admin && <span className="pill draft">Owner</span>}</span>
-          {!i.is_admin && <Button size="sm" variant="ghost" onClick={async () => { if (await s.confirm({ title: `Remove ${i.email}?`, body: 'They won’t be able to create a new account. If they already signed up, their data stays until you delete their user in Supabase.', ok: 'Remove' })) await s.remove('invites', i.email); }}>Remove</Button>}
+      {!gmail && <div className="banner warn"><Icon name="mail" /><span>Connect Gmail in <a href="#/settings?section=email">Email</a> so invitations are emailed for you.</span></div>}
+      {list === null ? <span className="row muted"><span className="spinner" />Loading…</span> : list.map((p) => (
+        <div key={p.email} className="row between wrap" style={{ borderTop: '1px solid var(--line-2)', paddingTop: 10, gap: 8 }}>
+          <span className="col" style={{ gap: 2, minWidth: 0 }}>
+            <span className="ellip">{p.email} {p.is_admin && <span className="pill draft">Owner</span>}</span>
+            <span className="small muted">{p.is_admin ? 'You' : p.joined_at ? `Joined ${fmtDate(p.joined_at.slice(0, 10))}` : `Invited ${fmtDate(p.invited_at.slice(0, 10))} · hasn’t signed in yet`}</span>
+          </span>
+          {!p.is_admin && (
+            <span className="row" style={{ gap: 4 }}>
+              {!p.joined_at && <Button size="sm" variant="ghost" busy={busy === `r${p.email}`} onClick={() => resend(p.email)}>Resend</Button>}
+              <Button size="sm" variant="ghost" className="danger" busy={busy === `x${p.email}`} onClick={() => remove(p)}>Remove</Button>
+            </span>
+          )}
         </div>
       ))}
-      <p className="small muted">After inviting, send them your Wrap address so they can sign in.</p>
     </section>
   );
 }

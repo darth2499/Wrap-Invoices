@@ -7,8 +7,10 @@ import { pdfFileName } from '../lib/format.js';
 import { buildInvoiceZip, downloadBlob } from '../lib/files.js';
 import { money, fmtLong, fmtShort, fmtTsDate, num } from '../lib/format.js';
 import { useRoute } from '../router.js';
+import { linkToken } from '../lib/publicFast.js';
 
-export default function PublicInvoice({ token }) {
+export default function PublicInvoice({ token: rawToken }) {
+  const token = linkToken(rawToken) || rawToken;
   const route = useRoute();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -16,15 +18,24 @@ export default function PublicInvoice({ token }) {
   const [accepted, setAccepted] = useState(false);
   const [name, setName] = useState('');
 
+  const [tries, setTries] = useState(0);
   useEffect(() => {
-    api.publicCall('invoice', { token, preview: route.query.preview === '1' }).then(setData).catch((e) => setError(e.message));
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+    // A hiccup (the server waking up, a bad connection) is retried once by itself before showing anything.
+    const get = (again) => api.publicCall('invoice', { token, preview: route.query.preview === '1' }).then(setData).catch((e) => {
+      const missing = e.status === 404 || /not found/i.test(e.message || '');
+      if (missing || again) setError(missing ? 'missing' : e.message || 'failed');
+      else setTimeout(() => get(true), 1500);
+    });
+    setError('');
+    get(false);
+  }, [token, tries]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (data?.business?.business_name) document.title = `${data.kind === 'quote' ? 'Quote' : 'Invoice'} #${data.number} · ${data.business.business_name}`;
   }, [data]);
 
-  if (error) return <Center><h2>Link not found</h2><p className="muted">This link may be mistyped or no longer active. Ask the sender for a new one.</p></Center>;
+  if (error === 'missing') return <Center><h2>Link not found</h2><p className="muted">This link may be mistyped or no longer active. Ask the sender for a new one.</p></Center>;
+  if (error) return <Center><h2>Couldn’t open this right now</h2><p className="muted">Check your connection and try again.</p><Button variant="primary" onClick={() => { setError(''); setData(null); setTries((n) => n + 1); }}>Try again</Button></Center>;
   if (!data) return <Center><Spinner label="Loading…" /></Center>;
   const biz = data.business || {};
   const label = data.kind === 'quote' ? 'Quote' : 'Invoice';

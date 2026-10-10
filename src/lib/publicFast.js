@@ -25,17 +25,26 @@ export function publicRequest(token, preview) {
     body: JSON.stringify({ action: 'invoice', token, preview: !!preview, viewer_token: storedAccessToken() || undefined }),
   }).then(async (res) => {
     const out = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(out.error || `Request failed (${res.status})`);
+    if (!res.ok) throw Object.assign(new Error(out.error || `Request failed (${res.status})`), { status: res.status });
     return out;
   });
 }
 
 /** Called first thing in main.jsx. */
+/**
+ * The link's code from the address, even if something was stuck on the end when it was pasted or tapped
+ * ("…a1b2).", "…a1b2%20", a line break, a tracking parameter).
+ */
+export function linkToken(raw) {
+  return (String(raw || '').match(/[a-f0-9]{48,64}/i)?.[0] || '').toLowerCase();
+}
+
 export function startEarly() {
-  const m = window.location.hash.match(/^#\/i\/([a-f0-9]{48,64})(\?.*)?$/);
-  if (!m || DEMO || !SUPABASE_URL) return;
-  const preview = /[?&]preview=1/.test(m[2] || '');
-  early = { token: m[1], preview, req: publicRequest(m[1], preview) };
+  const m = window.location.hash.match(/^#\/i\/(.*)$/);
+  const token = m && linkToken(m[1]);
+  if (!token || DEMO || !SUPABASE_URL) return;
+  const preview = /[?&]preview=1/.test(m[1]);
+  early = { token, preview, req: publicRequest(token, preview) };
   early.req.catch(() => {}); // handled when the page picks it up
 }
 

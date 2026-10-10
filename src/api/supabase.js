@@ -161,6 +161,10 @@ export const api = {
   readInvoicePdf(extra) {
     return call('receipt-read', { mode: 'invoice', ...extra });
   },
+  /** Owner only: the invite list (list / invite / resend / remove). */
+  people(action, payload = {}) {
+    return call('people', { action, ...payload });
+  },
   gmail(action, payload = {}) {
     return call('gmail', { action, ...payload });
   },

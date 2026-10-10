@@ -1,4 +1,4 @@
-import { startEarly } from './lib/publicFast.js';
+import { startEarly, linkToken } from './lib/publicFast.js';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { applyTheme, initialTheme } from './components/ThemeToggle.jsx';
@@ -39,7 +39,7 @@ const loaded = (p) => p.then((m) => { sessionStorage.removeItem('wrap_reloaded')
 });
 if (pub) {
   const load = pub[1] === 'i' ? import('./pages/PublicInvoice.jsx') : import('./pages/PublicStatement.jsx');
-  loaded(load).then(({ default: Page }) => root.render(<Page token={pub[2]} />));
+  loaded(load).then(({ default: Page }) => root.render(<Page token={linkToken(pub[2]) || pub[2]} />));
   // Leaving the client page for the app itself: load the app.
   window.addEventListener('hashchange', () => { if (!/^#\/(i|s)\//.test(window.location.hash)) window.location.reload(); });
 } else {

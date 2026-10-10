@@ -15,3 +15,6 @@ verify_jwt = true
 
 [functions.gmail]
 verify_jwt = true
+
+[functions.people]
+verify_jwt = true

@@ -193,3 +193,36 @@ export function buildStatementEmail(e) {
   const text = [e.message?.trim(), '', `Statement — ${money(total)} due`, ...invs.map((i) => `#${i.number}  ${money(i.due)}${i.dueDate ? `  (due ${shortDate(i.dueDate)})` : ''}`), '', 'View your statement:', e.link, '', `— ${e.business?.name || ''}`].join('\n');
   return { html, text };
 }
+
+/**
+ * Invitation to Wrap, sent from the owner's Gmail.
+ * e: { inviter, inviterEmail, to, link }
+ */
+export function buildInviteEmail(e) {
+  const inviter = String(e.inviter || 'Someone').trim();
+  const subject = `${inviter} invited you to Wrap`;
+  const point = (title, text) => `<tr>
+    <td style="width:22px;vertical-align:top;padding:9px 0 0"><div style="width:8px;height:8px;border-radius:50%;background:${C.ink};margin-top:5px"></div></td>
+    <td style="padding:6px 0;font-size:14px;line-height:1.55;color:${C.ink2}"><b style="color:${C.ink}">${esc(title)}</b> — ${esc(text)}</td>
+  </tr>`;
+  const body = `<tr><td style="background:${C.card};border:1px solid ${C.line};border-radius:16px;padding:30px 28px">
+    <div style="font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:${C.muted}">Invitation</div>
+    <h1 style="margin:10px 0 0;font-size:24px;line-height:1.3;font-weight:600;letter-spacing:-0.01em;color:${C.ink}">You’re invited to Wrap</h1>
+    <p style="margin:12px 0 0;font-size:15px;line-height:1.65;color:${C.ink2}">${esc(inviter)} has invited you to Wrap: simple, private invoicing and expense tracking for freelancers.</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:16px">
+      ${point('Invoices and quotes', 'send them from your own Gmail, with a private link your clients can open')}
+      ${point('Receipts', 'snap or drop them in; they’re read and filed for taxes automatically')}
+      ${point('Private', 'your own workspace. Nobody else, including whoever invited you, can see your data')}
+    </table>
+    ${button(e.link, 'Get started', C.ink)}
+    <p style="margin:18px 0 0;font-size:13px;line-height:1.6;color:${C.muted}">Sign in with the Google account for <b style="color:${C.ink2}">${esc(e.to)}</b>. It’s the only account this invitation works for.</p>
+  </td></tr>`;
+  const html = shell({
+    business: { name: 'Wrap' },
+    preheader: `${inviter} invited you to Wrap`,
+    body,
+    footer: `You received this because ${esc(inviter)}${e.inviterEmail ? ` (${esc(e.inviterEmail)})` : ''} invited ${esc(e.to)}. Not expecting it? You can ignore this email.`,
+  });
+  const text = `You're invited to Wrap\n\n${inviter} has invited you to Wrap: simple, private invoicing and expense tracking for freelancers.\n\nGet started: ${e.link}\n\nSign in with the Google account for ${e.to}. It's the only account this invitation works for.\n\nNot expecting this? You can ignore this email.`;
+  return { subject, text, html };
+}
