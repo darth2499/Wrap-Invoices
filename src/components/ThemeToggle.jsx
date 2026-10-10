@@ -68,7 +68,7 @@ export default function ThemeToggle({ className = '', label }) {
       setAuto(true);
       setTheme(document.documentElement.dataset.theme);
       navigator.vibrate?.(15);
-      toast?.('Automatic theme: light by day, dark by night, changing slowly around sunset and sunrise. Tap to pick one yourself.');
+      toast?.('Automatic theme: light by day, dark after sunset. Tap to pick one yourself.');
     }, 600);
   };
   const pressEnd = () => { clearTimeout(hold.current.timer); setHolding(false); };

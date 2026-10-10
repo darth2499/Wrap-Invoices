@@ -71,8 +71,6 @@ export default function App() {
     };
   }, [isPublic]);
 
-  useEffect(() => { if (user && !DEMO) api.rememberNetwork?.(); }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const loading = <div className="login"><Spinner label="Loading…" /></div>;
   if (route.parts[0] === 'i') return <Suspense fallback={loading}><PublicInvoice token={route.parts[1]} /></Suspense>;
   if (route.parts[0] === 's') return <Suspense fallback={loading}><PublicStatement token={route.parts[1]} /></Suspense>;

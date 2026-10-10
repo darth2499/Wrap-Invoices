@@ -1,5 +1,6 @@
 // public — what clients see through a shared link (no sign-in).
-//   invoice:      /#/i/<token>   → invoice/quote, its lines and attached receipts
+//   invoice:      /#/i/<token>   → invoice/quote, its lines and attached receipts (fallback; the page reads the database directly)
+//   files:        links for the logo and receipts, plus the verification code (the slow part, loaded alongside)
 //   pdf:          the invoice PDF, made here from the saved invoice (never from what's on the client's screen)
 //   accept_quote: client approves a quote
 //   statement:    /#/s/<token>   → every open invoice for one client
@@ -29,28 +30,13 @@ async function business(db: ReturnType<typeof admin>, ownerId: string) {
   return bizFrom(p);
 }
 
-// ----- "is this you?" — so your own visits to a client link don't count as the client opening it -----
-// The sign-in on this browser (whose account it is), or a network you've used Wrap from (013_own_ips).
-// Networks are stored only as a hash, and forgotten after 60 days.
-const DAY = 86400_000;
+// Your own visits (signed in to this account on this browser) don't count as the client opening the link.
 function userIdOf(jwt: unknown): string | null {
   try {
     const part = String(jwt).split(".")[1];
     const json = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/")));
     return typeof json.sub === "string" ? json.sub : null;
   } catch { return null; }
-}
-async function ipHash(req: Request, ownerId: string) {
-  const ip = (req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for")?.split(",")[0] || "").trim();
-  if (!ip) return null;
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${ownerId}|${ip}`));
-  return [...new Uint8Array(buf).slice(0, 12)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-type Seen = { h: string; at: string };
-const fresh = (list: unknown): Seen[] => (Array.isArray(list) ? list as Seen[] : []).filter((x) => x?.h && Date.now() - Date.parse(x.at) < 60 * DAY);
-async function rememberNetwork(db: ReturnType<typeof admin>, ownerId: string, hash: string, list: unknown) {
-  const next = [{ h: hash, at: new Date().toISOString() }, ...fresh(list).filter((x) => x.h !== hash)].slice(0, 12);
-  await db.from("profiles").update({ own_ips: next }).eq("id", ownerId); // fails quietly before 013 runs
 }
 /** Runs after the reply is sent when the runtime allows it (so the client's page isn't kept waiting). */
 function later(p: Promise<unknown>) {
@@ -81,16 +67,6 @@ serve(async (req) => {
   if (body.action === "ping") {
     await db.from("profiles").select("id", { count: "exact", head: true });
     return json({ ok: true, at: new Date().toISOString() });
-  }
-
-  if (body.action === "me") {
-    // The app calls this (about once a day) while you're signed in, so links you open from this network don't count.
-    const { data } = await db.auth.getUser(String(body.viewer_token ?? ""));
-    if (!data?.user) throw new HttpError(401, "Not signed in");
-    const hash = await ipHash(req, data.user.id);
-    const { data: p } = await db.from("profiles").select("*").eq("id", data.user.id).single();
-    if (hash && p && !fresh(p.own_ips).some((x) => x.h === hash && Date.now() - Date.parse(x.at) < DAY)) await rememberNetwork(db, data.user.id, hash, p.own_ips);
-    return json({ ok: true });
   }
 
   const token = String(body.token ?? "");
@@ -128,8 +104,24 @@ serve(async (req) => {
     return json({ ok: true });
   }
 
+  if (body.action === "files") {
+    if (inv.status === "void" || inv.status === "paid") return json({});
+    const [{ data: prof }, { data: receipts }, { data: pays }] = await Promise.all([
+      db.from("profiles").select("logo_key").eq("id", inv.owner_id).single(),
+      db.from("receipts").select("id, file_key").eq("invoice_id", inv.id),
+      db.from("payments").select("amount").eq("invoice_id", inv.id),
+    ]);
+    const urls: Record<string, string | null> = {};
+    await Promise.all((receipts ?? []).map(async (r) => { urls[r.id] = r.file_key ? await presign(r.file_key, "GET", 3600) : null; }));
+    return json({
+      logo_url: prof?.logo_key ? await presign(prof.logo_key, "GET", 3600) : null,
+      receipt_urls: urls,
+      verify_code: await verifyCode(inv, (pays ?? []).reduce((t, p) => t + Number(p.amount), 0)),
+    });
+  }
+
   // ----- view an invoice or quote -----
-  if (body.action !== "pdf") return view(req, db, inv, body);
+  if (body.action !== "pdf") return view(db, inv, body);
   const biz = await business(db, inv.owner_id);
   if (inv.status === "void" || inv.status === "paid") throw new HttpError(400, "This invoice is closed");
 
@@ -163,25 +155,21 @@ serve(async (req) => {
 
 /** The client page: everything in one round of parallel queries; the view is counted after the reply. */
 // deno-lint-ignore no-explicit-any
-async function view(req: Request, db: ReturnType<typeof admin>, inv: any, body: any) {
-  const [{ data: prof }, { data: lines }, { data: client }, { data: pays }, { data: receipts }, hash] = await Promise.all([
+async function view(db: ReturnType<typeof admin>, inv: any, body: any) {
+  const [{ data: prof }, { data: lines }, { data: client }, { data: pays }, { data: receipts }] = await Promise.all([
     db.from("profiles").select("*").eq("id", inv.owner_id).single(),
     db.from("invoice_lines").select("item, description, note, qty, rate, amount, tax_rate, kind, receipt_id, extras").eq("invoice_id", inv.id).order("position"),
     inv.client_id ? db.from("clients").select("name, email, address").eq("id", inv.client_id).single() : Promise.resolve({ data: null }),
     db.from("payments").select("paid_on, amount, method").eq("invoice_id", inv.id).order("paid_on"),
     db.from("receipts").select("id, vendor, receipt_date, total, file_key, mime, billable").eq("invoice_id", inv.id).order("receipt_date"),
-    ipHash(req, inv.owner_id),
   ]);
   const biz = await bizFrom(prof);
   const base = { business: biz, kind: inv.kind, number: inv.number };
   if (inv.status === "void") return json({ ...base, state: "void" });
   if (inv.status === "paid") return json({ ...base, state: "paid", total: inv.total });
 
-  // You, not the client: signed in to this account on this browser, or on a network you use Wrap from.
   const you = userIdOf(body.viewer_token) === inv.owner_id;
-  const known = !!hash && fresh(prof?.own_ips).some((x) => x.h === hash);
-  if (you && hash && !known) later(rememberNetwork(db, inv.owner_id, hash, prof?.own_ips));
-  if (!body.preview && !you && !known) {
+  if (!body.preview && !you) {
     const now = new Date().toISOString();
     const last = inv.last_viewed_at ? new Date(inv.last_viewed_at).getTime() : 0;
     later(Promise.all([

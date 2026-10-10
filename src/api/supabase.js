@@ -158,17 +158,6 @@ export const api = {
   readReceipt(key, mime, extra = {}) {
     return call('receipt-read', { key, mime, ...extra });
   },
-  /** About once a day while signed in: lets the server know this network is yours (so your own link visits don't count). */
-  async rememberNetwork() {
-    try {
-      const day = new Date().toISOString().slice(0, 10);
-      if (localStorage.getItem('wrap_net_day') === day) return;
-      const { data } = await sb().auth.getSession();
-      if (!data.session) return;
-      await call('public', { action: 'me', viewer_token: data.session.access_token }, { auth: false });
-      localStorage.setItem('wrap_net_day', day);
-    } catch { /* not important */ }
-  },
   readInvoicePdf(extra) {
     return call('receipt-read', { mode: 'invoice', ...extra });
   },
@@ -176,6 +165,7 @@ export const api = {
     return call('gmail', { action, ...payload });
   },
   async publicCall(action, payload = {}) {
+    // Client page: { page, files } promises (see publicFast.js).
     if (action === 'invoice') return takeEarly(payload.token, !!payload.preview) || publicRequest(payload.token, !!payload.preview);
     return call('public', { action, ...payload }, { auth: false });
   },

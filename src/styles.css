@@ -757,7 +757,6 @@ h2 .count-badge { vertical-align: 3px; font-family: var(--font); }
 .theme-toggle.holding, .theme-row.holding .theme-toggle { box-shadow: inset 0 0 0 2px var(--accent); transition: box-shadow .6s linear; }
 .theme-toggle.auto::after, .theme-row.auto .theme-toggle::after { content: ''; position: absolute; right: 4px; bottom: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
 .theme-toggle, .theme-row { -webkit-touch-callout: none; user-select: none; touch-action: manipulation; }
-html.theme-slow *, html.theme-slow *::before, html.theme-slow *::after { transition: background-color 4s ease, color 4s ease, border-color 4s ease, fill 4s ease, stroke 4s ease !important; }
 /* iPhone: a solid strip behind the status bar. iOS blurs whatever scrolls under the clock/battery;
    with only the page color there, the blur has nothing to show. */
 @media (max-width: 800px) {
