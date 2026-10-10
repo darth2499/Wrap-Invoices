@@ -315,6 +315,12 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
   .page-head { flex-wrap: wrap; gap: 12px; }
   .row.wrap > .row.wrap { min-width: 0; flex: 1 1 100%; }
   .input.search { flex: 1 1 160px; width: auto !important; }
+  /* a page's action buttons (3 or more) share one row evenly instead of leaving one on its own line */
+  .page-head > .row.wrap:has(> :nth-child(3)) { width: 100%; flex-wrap: nowrap; gap: 8px; }
+  .page-head > .row.wrap:has(> :nth-child(3)) > * { flex: 1 1 auto; min-width: 0; }
+  .page-head > .row.wrap:has(> :nth-child(3)) .btn { justify-content: center; padding-left: 10px; padding-right: 10px; white-space: nowrap; }
+  .page-head > .row.wrap:has(> :nth-child(3)) > :not(.btn) { display: flex; }
+  .page-head > .row.wrap:has(> :nth-child(3)) > :not(.btn) > .btn { flex: 1 1 auto; }
   .search-wrap { flex: 1 1 160px !important; }
 }
 /* Chart slides on phones: earlier months fade out at the left edge (a cut-off bar shows there's more). */
@@ -606,7 +612,8 @@ html.vt-wipe::view-transition-old(wrap-orb) { display: none; }
 .ed-opt.on { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
 
 .ed-bar { display: none; }
-@media (max-width: 1180px) {
+/* below 1360px the live preview moves behind the sticky bar, so the lines get the full width */
+@media (max-width: 1360px) {
   .ed-split { grid-template-columns: 1fr; }
   .ed-side { display: none; }
   .ed-bar { display: flex; position: sticky; bottom: 12px; z-index: 35; gap: 8px; align-items: center; margin-top: 16px; padding: 10px 12px 10px 18px; background: var(--glass); backdrop-filter: blur(12px); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 8px 28px rgba(0,0,0,.1); }

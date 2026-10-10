@@ -271,7 +271,7 @@ function Receipts({ query }) {
             <option value="—">Uncategorized</option>
           </select>
         </div>
-        <div className="row wrap">
+        <div className="row wrap" style={{ marginLeft: 'auto' }}>
           {highConf.length > 0 && filter === 'review' && <Button size="sm" icon="check" onClick={async () => { for (const r of highConf) await s.update('receipts', r.id, { status: 'confirmed' }); s.toast(`${highConf.length} confirmed`); }}>Confirm {highConf.length} sure ones</Button>}
           <input className="input search" style={{ width: 220 }} placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search receipts" />
           <Button icon="plus" onClick={newExpense}>New expense</Button>

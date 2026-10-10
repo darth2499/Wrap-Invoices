@@ -189,6 +189,18 @@ function Quarterly({ year }) {
         {next && <div className="card card-pad" style={{ padding: '12px 16px' }}><span className="muted small">Next federal due date</span><div style={{ fontWeight: 600 }}>{fmtLong(next.due)} · {next.label} ({next.months}) · set aside {money(next.setAside, { cents: false })}</div></div>}
       </div>
       <section className="card">
+        {/* Phones: one card per quarter (the six-column table doesn't fit). */}
+        <div className="m-list">
+          {rows.map((r) => (
+            <div key={r.label} className="m-card" style={{ background: next?.label === r.label ? 'var(--accent-bg)' : undefined, cursor: 'default' }}>
+              <span className="who">{r.label} <span className="small muted">{r.months}</span></span>
+              <span className="amt num">{money(r.setAside, { cents: false })}</span>
+              <span className="meta">Due {fmtDate(r.due)} · {basis === 'billed' ? 'billed' : 'received'} {money(r.income, { cents: false })} · profit {money(r.net, { cents: false })}</span>
+            </div>
+          ))}
+          <div className="row between small" style={{ padding: '10px 16px', borderTop: '1px solid var(--line)' }}><span className="muted">Set aside for the year ({pct}%)</span><strong className="num">{money(rows.reduce((t, r) => t + r.setAside, 0), { cents: false })}</strong></div>
+        </div>
+        <div className="table-wrap d-only">
         <table className="table">
           <thead><tr><th>Period</th><th>Federal due</th><th className="right">{basis === 'billed' ? 'Billed' : 'Received'}</th><th className="right">Expenses</th><th className="right">Profit</th><th className="right">Set aside ({pct}%)</th></tr></thead>
           <tbody>
@@ -205,6 +217,7 @@ function Quarterly({ year }) {
           </tbody>
           <tfoot><tr><td colSpan={2} style={{ fontWeight: 600, borderTop: '1px solid var(--line)' }}>Year</td><td className="right num" style={{ borderTop: '1px solid var(--line)' }}>{money(rows.reduce((t, r) => t + r.income, 0), { cents: false })}</td><td className="right num" style={{ borderTop: '1px solid var(--line)' }}>{money(rows.reduce((t, r) => t + r.exp, 0), { cents: false })}</td><td className="right num" style={{ borderTop: '1px solid var(--line)' }}>{money(rows.reduce((t, r) => t + r.net, 0), { cents: false })}</td><td className="right num" style={{ fontWeight: 600, borderTop: '1px solid var(--line)' }}>{money(rows.reduce((t, r) => t + r.setAside, 0), { cents: false })}</td></tr></tfoot>
         </table>
+        </div>
       </section>
       <p className="small muted">California estimated payments follow their own schedule (April, June and January — no September payment). Self-employment tax applies on top of income tax.</p>
     </>

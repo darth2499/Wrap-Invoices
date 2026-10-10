@@ -81,8 +81,8 @@ function useProfileForm(fields) {
 function Business() {
   const { f, setF, save, busy, dirty } = useProfileForm(['business_name', 'business_email', 'phone', 'website', 'address']);
   return (
-    <div className="grid-2">
-      <section className="card card-pad col" style={{ gap: 14 }}>
+    <div>
+      <section className="card card-pad col" style={{ gap: 14, maxWidth: 640 }}>
         <h2>Your business</h2>
         <p className="small muted">Shown at the top of every invoice.</p>
         <Field label="Business or your name"><input className="input" value={f.business_name} onChange={(e) => setF({ ...f, business_name: e.target.value })} /></Field>
