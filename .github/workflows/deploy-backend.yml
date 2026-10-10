@@ -23,6 +23,6 @@ jobs:
         run: node scripts/sync-shared.mjs
       - name: Deploy functions
         run: |
-          for fn in files receipt-read public gmail reminders; do
+          for fn in files receipt-read public gmail reminders people; do
             supabase functions deploy "$fn" --project-ref "$PROJECT_REF"
           done
