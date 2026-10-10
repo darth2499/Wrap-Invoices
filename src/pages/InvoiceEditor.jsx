@@ -910,7 +910,7 @@ function ReceiptPicker({ db, exclude, onPick, onClose, title, ctx }) {
   const list = db.receipts
     .filter((r) => !exclude?.has(r.id))
     .filter((r) => !q || `${r.vendor} ${r.category} ${r.total}`.toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => (a.invoice_id ? 1 : 0) - (b.invoice_id ? 1 : 0) || String(b.receipt_date).localeCompare(String(a.receipt_date)));
+    .sort((a, b) => String(b.receipt_date || '').localeCompare(String(a.receipt_date || '')));
   const { suggested, rest } = q ? { suggested: [], rest: list } : rankReceipts(list, ctx);
   return (
     <Modal title={title || 'Choose receipts'} onClose={onClose} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!sel.size} onClick={() => onPick(db.receipts.filter((r) => sel.has(r.id)))}>Add {sel.size || ''}</Button></>}>

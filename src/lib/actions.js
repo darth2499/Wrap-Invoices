@@ -244,6 +244,6 @@ export async function downloadZip(s, inv) {
   const { buildInvoicePdf, imageBytes } = await pdfLib();
   const logo = b.logoUrl ? await imageBytes(b.logoUrl) : null;
   const bytes = await buildInvoicePdf({ ...b, invoice: inv, logo });
-  const zip = await buildInvoiceZip(bytes, pdfFileName(inv), b.receipts);
+  const zip = await buildInvoiceZip(bytes, pdfFileName(inv), b.receipts, b.lines);
   downloadBlob(zip, pdfFileName(inv).replace(/\.pdf$/, '_with_receipts.zip'));
 }

@@ -11,7 +11,7 @@ export async function uprightTurn(api, file) {
   try {
     const { options, picture } = await orientationChoices(file);
     const res = await api.readReceipt(null, 'image/jpeg', { mode: 'upright', image_b64: await blobToBase64(picture), image_mime: 'image/jpeg' });
-    return res?.upright === 'B' ? options[1] : options[0];
+    return options['ABCD'.indexOf(res?.upright)] || 0;
   } catch {
     return 0;
   }

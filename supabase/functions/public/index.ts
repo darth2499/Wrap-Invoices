@@ -113,7 +113,12 @@ serve(async (req) => {
     });
   }
 
-  if (!body.preview) {
+  // Anyone signed in to Wrap opening the link is you (or someone you invited), not the client: don't count it.
+  let insider = false;
+  if (!body.preview && typeof body.viewer_token === "string" && body.viewer_token.length > 20) {
+    try { insider = !!(await db.auth.getUser(body.viewer_token)).data?.user; } catch { insider = false; }
+  }
+  if (!body.preview && !insider) {
     const now = new Date().toISOString();
     await db.from("invoices").update({
       first_viewed_at: inv.first_viewed_at ?? now,
@@ -128,7 +133,7 @@ serve(async (req) => {
   }
 
   const [{ data: lines }, { data: client }, { data: pays }, { data: receipts }] = await Promise.all([
-    db.from("invoice_lines").select("item, description, note, qty, rate, amount, tax_rate, kind, receipt_id").eq("invoice_id", inv.id).order("position"),
+    db.from("invoice_lines").select("item, description, note, qty, rate, amount, tax_rate, kind, receipt_id, extras").eq("invoice_id", inv.id).order("position"),
     inv.client_id ? db.from("clients").select("name, email, address").eq("id", inv.client_id).single() : Promise.resolve({ data: null }),
     db.from("payments").select("paid_on, amount, method").eq("invoice_id", inv.id).order("paid_on"),
     db.from("receipts").select("id, vendor, receipt_date, total, file_key, original_key, mime, billable").eq("invoice_id", inv.id).order("receipt_date"),

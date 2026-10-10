@@ -34,6 +34,7 @@ export function receiptNames(list) {
   const out = new Map();
   for (const r of [...list].sort((a, b) => String(a.receipt_date || a.date || '').localeCompare(String(b.receipt_date || b.date || '')) || String(a.id || '').localeCompare(String(b.id || '')))) {
     let name = receiptFileName({ ...r, receipt_date: r.receipt_date || r.date }, extFor(r.mime, 'jpg'));
+    if (r.work) name = name.replace(/(\.\w+)$/, ` - ${r.work}$1`);
     for (let i = 2; used.has(name.toLowerCase()); i++) name = name.replace(/( \(\d+\))?(\.\w+)$/, ` (${i})$2`);
     used.add(name.toLowerCase());
     out.set(r, name);
@@ -41,11 +42,19 @@ export function receiptNames(list) {
   return out;
 }
 
-/** Zip of the invoice PDF plus every attached receipt. receipts: [{ url, vendor, receipt_date|date, total, mime }] */
-export async function buildInvoiceZip(pdfBytes, pdfName, receipts) {
+/**
+ * Zip of the invoice PDF plus every attached receipt. receipts: [{ url, vendor, receipt_date|date, total, mime }]
+ * A receipt that's an add-on under a line also gets that line's work name: "2026-10-06-McDonalds - Sound Mixer.jpg".
+ */
+export async function buildInvoiceZip(pdfBytes, pdfName, receipts, lines = []) {
   const zip = new (await loadZip())();
   zip.file(pdfName, pdfBytes);
-  const withFiles = receipts.filter((r) => r.url);
+  const work = {};
+  for (const l of lines) {
+    const name = String(l.item || l.extras?.desc || '').split('\n')[0].replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+    for (const a of l.extras?.items || []) if (a.receipt_id && name) work[a.receipt_id] = name;
+  }
+  const withFiles = receipts.filter((r) => r.url).map((r) => (work[r.id] ? { ...r, work: work[r.id] } : r));
   const names = receiptNames(withFiles);
   const folder = withFiles.length ? zip.folder('Receipts') : null;
   for (const r of withFiles) folder.file(names.get(r), await (await fetch(r.url)).blob());

@@ -8,13 +8,20 @@ import { datesFromCode } from './shoots.js';
 const CODE = /\((\d{2}\/\d{2}(?:-\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:-\d{2}\/\d{2})?)*)\)/;
 const CAT_FOR_ITEM = [[/park|toll/i, 'Parking & tolls'], [/meal|lunch|dinner|food|craft|per diem/i, 'Meals'], [/travel|flight|hotel|uber|lyft|train|airfare|bag/i, 'Travel'], [/mileage|gas|fuel/i, 'Car & truck'], [/rental|gear/i, 'Equipment rental']];
 const DAY = 86400000;
+// Words on an invoice line that say nothing about which receipt goes with it.
+const STOP = new Set(['the', 'and', 'for', 'with', 'day', 'days', 'rate', 'half', 'full', 'base', 'other', 'per', 'fee', 'fees', 'total', 'item', 'items', 'misc', 'service', 'services', 'work', 'hours', 'hrs']);
 const dayDiff = (a, b) => Math.round(Math.abs(Date.parse(a) - Date.parse(b)) / DAY);
 
 export function suggestContext({ lines = [], jobs, issueDate, clientName }) {
   const dates = new Set();
   const amounts = new Set();
   const cats = new Set();
+  const words = new Set();
+  const addWords = (t) => String(t || '').toLowerCase().replace(/\([^)]*\)/g, ' ').split(/[^a-z0-9]+/).forEach((w) => { if (w.length >= 3 && !STOP.has(w) && !/^\d+$/.test(w)) words.add(w); });
   for (const l of lines) {
+    addWords(l.item);
+    addWords(l.extras?.desc ?? l.description);
+    for (const a of l.extras?.items || l.addons || []) addWords(a.label);
     if (Array.isArray(l.dates)) l.dates.forEach((d) => dates.add(d));
     const m = String(l.extras?.desc ?? l.description ?? '').match(CODE);
     if (m) datesFromCode(m[1], issueDate).forEach((d) => dates.add(d));
@@ -29,7 +36,7 @@ export function suggestContext({ lines = [], jobs, issueDate, clientName }) {
     for (const e of j.expenses || []) { if (num(e.amount) > 0) amounts.add(num(e.amount).toFixed(2)); for (const [re, cat] of CAT_FOR_ITEM) if (re.test(e.type || '')) cats.add(cat); }
   }
   const names = String(clientName || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3 && !['pictures', 'productions', 'studios', 'media', 'group', 'company'].includes(w));
-  return { dates: [...dates].sort(), amounts, cats, names, issueDate };
+  return { dates: [...dates].sort(), amounts, cats, names, words, issueDate };
 }
 
 export function receiptScore(r, ctx) {
@@ -37,25 +44,30 @@ export function receiptScore(r, ctx) {
   const d = r.receipt_date;
   let near = Infinity;
   for (const x of ctx.dates) near = Math.min(near, dayDiff(x, d));
-  // No shoot dates picked yet: the 5 weeks before the invoice date is the best guess.
-  const dateScore = ctx.dates.length
-    ? near === 0 ? 10 : near === 1 ? 7 : near <= 3 ? 4 : 0
-    : ctx.issueDate && d <= ctx.issueDate && dayDiff(ctx.issueDate, d) <= 35 ? 3 : 0;
+  // Shoot dates are the best clue; the invoice date is the next best (same day counts almost as much).
+  const issue = ctx.issueDate ? dayDiff(ctx.issueDate, d) : Infinity;
+  const fromShoot = near === 0 ? 10 : near === 1 ? 7 : near <= 3 ? 4 : 0;
+  const fromIssue = issue === 0 ? 8 : issue === 1 ? 5 : issue <= 3 ? 3 : ctx.issueDate && d <= ctx.issueDate && issue <= 35 && !ctx.dates.length ? 2 : 0;
+  const dateScore = Math.max(fromShoot, fromIssue);
   let s = dateScore;
   if (ctx.amounts.has(num(r.total).toFixed(2))) s += 8;
+  // The receipt's vendor, notes or category names an item on the invoice ("Parking" ↔ "SFMTA Parking").
+  const text = `${r.vendor || ''} ${r.notes || ''} ${r.category || ''}`.toLowerCase();
+  const itemHit = [...(ctx.words || [])].some((w) => text.includes(w));
+  if (itemHit) s += dateScore > 0 ? 6 : 2;
   if (dateScore > 0) {
     if (r.category && ctx.cats.has(r.category)) s += 3;
-    const text = `${r.vendor || ''} ${r.notes || ''}`.toLowerCase();
     if (ctx.names.some((w) => text.includes(w))) s += 2;
   }
   return s;
 }
 
-/** Splits receipts into likely matches (best first) and the rest (newest first). */
+/** Splits receipts into likely matches and the rest, both newest first. */
 export function rankReceipts(list, ctx) {
   const scored = list.map((r) => ({ r, s: receiptScore(r, ctx) }));
-  const min = ctx?.dates.length ? 7 : 6;
-  const top = scored.filter((x) => x.s >= min).sort((a, b) => b.s - a.s || String(b.r.receipt_date).localeCompare(String(a.r.receipt_date))).slice(0, 8).map((x) => x.r);
+  // The best 8 matches, shown by date like the rest of the list.
+  const top = scored.filter((x) => x.s >= 7).sort((a, b) => b.s - a.s).slice(0, 8)
+    .sort((a, b) => String(b.r.receipt_date).localeCompare(String(a.r.receipt_date))).map((x) => x.r);
   const ids = new Set(top.map((r) => r.id));
   return { suggested: top, rest: list.filter((r) => !ids.has(r.id)) };
 }

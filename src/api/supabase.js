@@ -163,7 +163,11 @@ export const api = {
   gmail(action, payload = {}) {
     return call('gmail', { action, ...payload });
   },
-  publicCall(action, payload = {}) {
+  async publicCall(action, payload = {}) {
+    // Opening a client link while signed in to Wrap (it's you, not the client): sent along so it isn't counted as a view.
+    if (action === 'invoice') {
+      try { const { data } = await sb().auth.getSession(); if (data.session) payload = { ...payload, viewer_token: data.session.access_token }; } catch { /* not signed in */ }
+    }
     return call('public', { action, ...payload }, { auth: false });
   },
   /** The invoice PDF, made on the server from the saved invoice. */

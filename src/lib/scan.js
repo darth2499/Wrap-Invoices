@@ -369,55 +369,30 @@ function turned(src, deg) {
 }
 
 /**
- * True when the text in a photo runs up/down (the photo is sideways). Printed lines make the ink very uneven
- * from row to row (line, gap, line…) and much smoother across; sideways, it's the other way round.
- */
-function looksSideways(src) {
-  const c = toCanvas(src, 360);
-  const { width: w, height: h } = c;
-  const px = c.getContext('2d').getImageData(0, 0, w, h).data;
-  const g = new Float32Array(w * h);
-  let mean = 0;
-  for (let i = 0; i < w * h; i++) { g[i] = px[i * 4] * 0.3 + px[i * 4 + 1] * 0.59 + px[i * 4 + 2] * 0.11; mean += g[i]; }
-  mean /= w * h;
-  const rows = new Float32Array(h);
-  const cols = new Float32Array(w);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { if (g[y * w + x] < mean - 40) { rows[y]++; cols[x]++; } }
-  // Gaps between printed lines are rows with (almost) no ink running the whole width; sideways, they're columns.
-  const gaps = (a) => {
-    let lo = 0; let hi = a.length - 1;
-    while (lo < hi && a[lo] === 0) lo++;
-    while (hi > lo && a[hi] === 0) hi--;
-    let peak = 0; for (let i = lo; i <= hi; i++) peak = Math.max(peak, a[i]);
-    let n = 0; for (let i = lo; i <= hi; i++) if (a[i] <= peak * 0.04) n++;
-    return hi > lo ? n / (hi - lo + 1) : 0;
-  };
-  const r = gaps(rows);
-  const k = gaps(cols);
-  return k > r * 1.5 + 0.04;
-}
-
-/**
- * Which way is up, step 1 (in the browser): printed lines show whether the photo is sideways, which leaves two
- * possible turns (0 or 180, or 90 or 270). Both are drawn side by side, labeled A and B, for the reader to pick from.
+ * Which way is up, step 1 (in the browser): the photo drawn four ways (as is, and turned a quarter, half and
+ * three quarters), labeled A–D in a 2×2 grid, for the reader to pick the one that reads normally.
+ * Picking from four is far more reliable than asking a model how many degrees a photo is off.
  */
 export async function orientationChoices(file) {
   const bmp = await decode(file);
-  const options = looksSideways(bmp) ? [90, 270] : [0, 180];
-  const [a, b] = options.map((d) => turned(toCanvas(bmp, 640), d));
-  const band = 56;
+  const options = [0, 90, 180, 270];
+  const cell = 440;
+  const band = 44;
   const c = document.createElement('canvas');
-  c.width = a.width + b.width + 24;
-  c.height = Math.max(a.height, b.height) + band;
+  c.width = cell * 2 + 16;
+  c.height = (cell + band) * 2 + 16;
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, c.width, c.height);
-  ctx.drawImage(a, 0, band);
-  ctx.drawImage(b, a.width + 24, band);
-  ctx.fillStyle = '#000';
-  ctx.font = 'bold 40px sans-serif';
-  ctx.fillText('A', 12, 44);
-  ctx.fillText('B', a.width + 36, 44);
+  ctx.font = 'bold 34px sans-serif';
+  options.forEach((deg, i) => {
+    const t = turned(toCanvas(bmp, cell), deg);
+    const x = (i % 2) * (cell + 16);
+    const y = Math.floor(i / 2) * (cell + band + 16);
+    ctx.fillStyle = '#000';
+    ctx.fillText('ABCD'[i], x + 6, y + 34);
+    ctx.drawImage(t, x + (cell - t.width) / 2, y + band + (cell - t.height) / 2);
+  });
   return { options, picture: await blobOf(c, 'image/jpeg', 0.8) };
 }
 

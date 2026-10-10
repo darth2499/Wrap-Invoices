@@ -32,10 +32,11 @@ const RECEIPT_JSON = `Reply with ONLY one JSON object, no other text, in exactly
  "amounts": [{"label": "Subtotal", "amount": 0.00}], "category": "one of the categories", "confidence": "high|medium|low"}
 "amounts" lists every OTHER money amount someone might confuse with the total (subtotal, tax, tip, items, tendered, change).`;
 
-// Which way is up: the browser sends one picture with the receipt shown twice, turned opposite ways, labeled A and B.
-const UPRIGHT = `This picture shows the same document twice, side by side: on the left labeled A, on the right labeled B. One copy is turned 180 degrees from the other.
-Look at the printed words and numbers. In which copy can the text be read normally, right side up (not upside down)?
-Reply with ONLY this JSON: {"upright": "A"} or {"upright": "B"}`;
+// Which way is up: the browser sends one picture with the receipt shown four ways (each turned a quarter more),
+// labeled A, B, C and D.
+const UPRIGHT = `This picture shows the same photo four times, each turned a different way, labeled A (top left), B (top right), C (bottom left) and D (bottom right).
+Look at the printed words and numbers. In which copy does the text read normally: horizontal lines, left to right, right side up?
+Reply with ONLY this JSON: {"upright": "A"} (or "B", "C", "D").`;
 
 const INVOICE_RULES = `This is an invoice the user sent to a client (for example exported from Wave). Read every line item across all pages, keeping each item's description lines.`;
 
@@ -223,6 +224,9 @@ serve(async (req) => {
   if (!inp.text && !inp.image && !inp.pdf) throw new HttpError(400, "This PDF has no readable text. Upload a photo or screenshot of it instead.");
 
   const raw = p === "cloudflare" ? await readWithCloudflare(inp) : await readWithAnthropic(inp);
-  if (inp.mode === "upright") return json({ upright: String(raw?.upright ?? "A").trim().toUpperCase().startsWith("B") ? "B" : "A" });
+  if (inp.mode === "upright") {
+    const pick = String(raw?.upright ?? "A").trim().toUpperCase().charAt(0);
+    return json({ upright: "ABCD".includes(pick) && pick ? pick : "A" });
+  }
   return json(inp.mode === "invoice" ? cleanInvoice(raw) : { ...cleanReceipt(raw), reader: p });
 });
