@@ -8,6 +8,9 @@ import { findDates, guessOrder } from './dateText.js';
 
 const MONEY = String.raw`\(?-?\$-?[\d,]+\.\d{2}\)?`;
 const ROW = new RegExp(String.raw`^(.+?)\s{2,}(\d+(?:\.\d+)?)\s{2,}(${MONEY})\s{2,}(${MONEY})$`);
+// Older Wave invoices have only "Items  Amount" columns (each line is 1 × its amount).
+const ROW_AMOUNT_ONLY = new RegExp(String.raw`^(.+?)\s{2,}(${MONEY})$`);
+const HEADER = /^Items(\s{2,}Quantity\s{2,}(?:Price|Rate))?\s{2,}Amount$/i;
 const LABELLED = new RegExp(String.raw`^(.+?):\s+(${MONEY})$`);
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 
@@ -44,7 +47,7 @@ export function parseWaveInvoiceText(text) {
     return null;
   };
   const number = field('Invoice Number')?.replace(/^#/, '');
-  if (!number || !all.some((l) => /^Items\s{2,}Quantity\s{2,}Price\s{2,}Amount$/i.test(l))) return null;
+  if (!number || !all.some((l) => HEADER.test(l))) return null;
 
   // ----- client (the "BILL TO" block; the right-hand column's "Label: value" lines are mixed in) -----
   const isLabel = (l) => /^(Invoice Number|Invoice Date|Payment Due|Amount Due|P\.?O\.?\/?S\.?O\.? Number)\b.*:/i.test(l);
@@ -54,7 +57,7 @@ export function parseWaveInvoiceText(text) {
   const bt = all.findIndex((l) => /^BILL TO$/i.test(l));
   if (bt >= 0) {
     for (const l of all.slice(bt + 1)) {
-      if (/^Items\s{2,}Quantity/i.test(l)) break;
+      if (HEADER.test(l)) break;
       if (isLabel(l)) continue;
       if (/^\S+@\S+\.\S+$/.test(l)) { email = email || l; continue; }
       if (/^[\d\s()+.-]{7,}$/.test(l)) continue; // phone number
@@ -69,16 +72,23 @@ export function parseWaveInvoiceText(text) {
   let inItems = false;
   let cur = null;
   const totalsAt = [];
+  let amountOnly = false;
   for (const [i, l] of all.entries()) {
     // The item list can continue on the next page, even partway through one item's description lines
     // ("Uber to EWR ($127.98)" at the top of page 2 still belongs to the item above it), so the current item
     // carries over the page break and the next page's header.
-    if (/^Items\s{2,}Quantity\s{2,}Price\s{2,}Amount$/i.test(l)) { inItems = true; continue; }
+    if (HEADER.test(l)) { inItems = true; amountOnly = !/Quantity/i.test(l); continue; }
     if (!inItems) continue;
     if (/^Page \d+ of \d+/i.test(l) || l.startsWith('--- page break')) { inItems = false; continue; }
-    const row = l.match(ROW);
+    const row = !amountOnly && l.match(ROW);
     if (row) {
       cur = { kind: 'labor', item: row[1].trim(), qty: Number(row[2]), rate: amt(row[3]), amount: amt(row[4]), extra: [] };
+      lines.push(cur);
+      continue;
+    }
+    const row2 = amountOnly && !LABELLED.test(l) && l.match(ROW_AMOUNT_ONLY);
+    if (row2) {
+      cur = { kind: 'labor', item: row2[1].trim(), qty: 1, rate: amt(row2[2]), amount: amt(row2[2]), extra: [] };
       lines.push(cur);
       continue;
     }

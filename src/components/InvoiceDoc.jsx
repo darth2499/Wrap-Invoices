@@ -19,7 +19,9 @@ export default function InvoiceDoc({ business = {}, invoice, client, lines, paym
       : template === 'bold' ? { background: accent, color: '#fff' }
         : { borderBottom: '1.5px solid #16161A', color: '#5f6168' };
   const hasTax = lines.some((l) => num(l.tax_rate) > 0);
-  if (template === 'bold') return <BoldDoc {...{ business, invoice, client, lines, payments, logoUrl, accent, isQuote, paid, due, deposit, hasTax }} />;
+  // Quantity and price only matter when something isn't 1 × (2 days at $750). Otherwise the amount says it all.
+  const showQty = lines.some((l) => num(l.qty) !== 1);
+  if (template === 'bold') return <BoldDoc {...{ business, invoice, client, lines, payments, logoUrl, accent, isQuote, paid, due, deposit, hasTax, showQty }} />;
 
   return (
     <article className="doc" style={template === 'bold' ? { paddingTop: 0, overflow: 'hidden' } : null}>
@@ -69,8 +71,8 @@ export default function InvoiceDoc({ business = {}, invoice, client, lines, paym
           <thead>
             <tr style={headStyle}>
               <th>Items</th>
-              <th className="r">Quantity</th>
-              <th className="r">Price</th>
+              {showQty && <th className="r">Quantity</th>}
+              {showQty && <th className="r">Price</th>}
               {hasTax && <th className="r">Tax</th>}
               <th className="r">Amount</th>
             </tr>
@@ -83,8 +85,8 @@ export default function InvoiceDoc({ business = {}, invoice, client, lines, paym
                   {l.description && <div style={{ color: '#5f6168', whiteSpace: 'pre-line' }}>{l.description}</div>}
                   {l.note && <div style={{ color: '#5f6168', fontSize: 12, marginTop: 2, whiteSpace: 'pre-line' }}>{l.note}</div>}
                 </td>
-                <td className="r num">{Number(l.qty).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
-                <td className="r num">{money(l.rate)}</td>
+                {showQty && <td className="r num">{Number(l.qty).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>}
+                {showQty && <td className="r num">{money(l.rate)}</td>}
                 {hasTax && <td className="r num">{num(l.tax_rate) ? `${num(l.tax_rate)}%` : '—'}</td>}
                 <td className="r num">{money(l.amount)}</td>
               </tr>
@@ -154,7 +156,7 @@ function MobileLine({ l }) {
 }
 
 /** "Bold" template: big title, company + contact columns, gray details band, open table with a Description column. */
-function BoldDoc({ business, invoice, client, lines, payments, logoUrl, accent, isQuote, paid, due, deposit, hasTax }) {
+function BoldDoc({ business, invoice, client, lines, payments, logoUrl, accent, isQuote, paid, due, deposit, hasTax, showQty }) {
   const label = isQuote ? 'Quote' : 'Invoice';
   const msg = [invoice.terms, invoice.notes].filter(Boolean).join('\n');
   return (
@@ -195,14 +197,14 @@ function BoldDoc({ business, invoice, client, lines, payments, logoUrl, accent, 
       <div className="doc-mlines">{lines.map((l, i) => <MobileLine key={l.id || i} l={l} />)}</div>
       <div className="table-wrap doc-table">
         <table className="bd-lines">
-          <thead><tr><th>Product / service</th><th>Description</th><th className="r">Qty</th><th className="r">Rate</th>{hasTax && <th className="r">Tax</th>}<th className="r">Amount</th></tr></thead>
+          <thead><tr><th>Product / service</th><th>Description</th>{showQty && <th className="r">Qty</th>}{showQty && <th className="r">Rate</th>}{hasTax && <th className="r">Tax</th>}<th className="r">Amount</th></tr></thead>
           <tbody>
             {lines.map((l, i) => (
               <tr key={l.id || i}>
                 <td>{l.item}</td>
                 <td className="bd-desc">{[l.description, l.note].filter(Boolean).join('\n')}</td>
-                <td className="r num">{Number(l.qty).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>
-                <td className="r num">{money(l.rate)}</td>
+                {showQty && <td className="r num">{Number(l.qty).toLocaleString('en-US', { maximumFractionDigits: 3 })}</td>}
+                {showQty && <td className="r num">{money(l.rate)}</td>}
                 {hasTax && <td className="r num">{num(l.tax_rate) ? `${num(l.tax_rate)}%` : '—'}</td>}
                 <td className="r num">{money(l.amount)}</td>
               </tr>

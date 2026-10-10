@@ -230,13 +230,17 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
 
   // ---------- items table ----------
   const hasTax = lines.some((l) => num(l.tax_rate) > 0);
-  const cols = isBold
+  // Quantity and price columns only when some line isn't 1 × (e.g. 2 days at $750); otherwise the amount says it all.
+  const showQty = lines.some((l) => num(l.qty) !== 1);
+  const baseCols = isBold
     ? (hasTax
       ? { item: M + 8, itemW: 100, desc: M + 120, descW: 180, qty: 380, price: 440, tax: 495, amount: W - M - 8 }
       : { item: M + 8, itemW: 110, desc: M + 130, descW: 210, qty: 400, price: 470, amount: W - M - 8 })
     : hasTax
       ? { item: M + 12, itemW: 250, qty: 380, price: 450, tax: 505, amount: W - M - 12 }
       : { item: M + 12, itemW: 300, qty: 400, price: 482, amount: W - M - 12 };
+  // Without those two columns the item text gets their room.
+  const cols = showQty ? baseCols : { ...baseCols, itemW: baseCols.itemW + (isBold ? 0 : 110), descW: baseCols.descW ? baseCols.descW + 100 : undefined };
 
   const tableHeader = () => {
     const h = 24;
@@ -245,8 +249,8 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
     const ty = y - 8;
     text(isBold ? 'Product / service' : 'Items', cols.item, ty, { size: 9, f: bold, color: c });
     if (isBold) text('Description', cols.desc, ty, { size: 9, f: bold, color: c });
-    text(isBold ? 'Qty' : 'Quantity', cols.qty, ty, { size: 9, f: bold, color: c, align: 'right' });
-    text(isBold ? 'Rate' : 'Price', cols.price, ty, { size: 9, f: bold, color: c, align: 'right' });
+    if (showQty) text(isBold ? 'Qty' : 'Quantity', cols.qty, ty, { size: 9, f: bold, color: c, align: 'right' });
+    if (showQty) text(isBold ? 'Rate' : 'Price', cols.price, ty, { size: 9, f: bold, color: c, align: 'right' });
     if (hasTax) text('Tax', cols.tax, ty, { size: 9, f: bold, color: c, align: 'right' });
     text('Amount', cols.amount, ty, { size: 9, f: bold, color: c, align: 'right' });
     if (template === 'minimal') page.drawLine({ start: { x: M, y: y - h + 8 }, end: { x: W - M, y: y - h + 8 }, thickness: 1.2, color: INK });
@@ -281,8 +285,8 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
       for (const t of itemLines) { text(t, cols.item, a, { size: 9.5 }); a -= 12; }
       let d = y;
       for (const t of [...desc, ...note]) { text(t, cols.desc, d, { size: 9, color: GRAY }); d -= 11.5; }
-      text(Number(l.qty).toLocaleString('en-US', { maximumFractionDigits: 3 }), cols.qty, y, { size: 9.5, align: 'right' });
-      text(money(l.rate), cols.price, y, { size: 9.5, align: 'right' });
+      if (showQty) text(Number(l.qty).toLocaleString('en-US', { maximumFractionDigits: 3 }), cols.qty, y, { size: 9.5, align: 'right' });
+      if (showQty) text(money(l.rate), cols.price, y, { size: 9.5, align: 'right' });
       if (hasTax) text(num(l.tax_rate) ? `${num(l.tax_rate)}%` : '-', cols.tax, y, { size: 9.5, align: 'right' });
       text(money(l.amount), cols.amount, y, { size: 9.5, align: 'right' });
       y = Math.min(a, d) - 4;
@@ -290,8 +294,8 @@ export async function buildInvoicePdf({ business = {}, invoice, client, lines, p
       continue;
     }
     text(l.item, cols.item, iy, { size: 10, f: bold });
-    text(Number(l.qty).toLocaleString('en-US', { maximumFractionDigits: 3 }), cols.qty, iy, { size: 10, align: 'right' });
-    text(money(l.rate), cols.price, iy, { size: 10, align: 'right' });
+    if (showQty) text(Number(l.qty).toLocaleString('en-US', { maximumFractionDigits: 3 }), cols.qty, iy, { size: 10, align: 'right' });
+    if (showQty) text(money(l.rate), cols.price, iy, { size: 10, align: 'right' });
     if (hasTax) text(num(l.tax_rate) ? `${num(l.tax_rate)}%` : '-', cols.tax, iy, { size: 10, align: 'right' });
     text(money(l.amount), cols.amount, iy, { size: 10, align: 'right' });
     iy -= 13;

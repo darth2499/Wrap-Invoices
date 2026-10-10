@@ -4,6 +4,7 @@
 // Category and the client's name only help a receipt that's already close in date.
 import { num } from './format.js';
 import { datesFromCode } from './shoots.js';
+import { findDates } from './dateText.js';
 
 const CODE = /\((\d{2}\/\d{2}(?:-\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:-\d{2}\/\d{2})?)*)\)/;
 const CAT_FOR_ITEM = [[/park|toll/i, 'Parking & tolls'], [/meal|lunch|dinner|food|craft|per diem/i, 'Meals'], [/travel|flight|hotel|uber|lyft|train|airfare|bag/i, 'Travel'], [/mileage|gas|fuel/i, 'Car & truck'], [/rental|gear/i, 'Equipment rental']];
@@ -19,6 +20,13 @@ export function suggestContext({ lines = [], jobs, issueDate, clientName }) {
   const words = new Set();
   const addWords = (t) => String(t || '').toLowerCase().replace(/\([^)]*\)/g, ' ').split(/[^a-z0-9]+/).forEach((w) => { if (w.length >= 3 && !STOP.has(w) && !/^\d+$/.test(w)) words.add(w); });
   for (const l of lines) {
+    // Work dates written anywhere in the line (any format: 09/30, Sep 30, 2026-09-30 …), on every row.
+    for (const t of [l.extras?.desc, l.description, l.note]) {
+      for (const row of String(t || '').split('\n')) {
+        const f = row && findDates(row, issueDate);
+        if (f) f.dates.forEach((d) => dates.add(d));
+      }
+    }
     addWords(l.item);
     addWords(l.extras?.desc ?? l.description);
     for (const a of l.extras?.items || l.addons || []) addWords(a.label);
@@ -70,4 +78,35 @@ export function rankReceipts(list, ctx) {
     .sort((a, b) => String(b.r.receipt_date).localeCompare(String(a.r.receipt_date))).map((x) => x.r);
   const ids = new Set(top.map((r) => r.id));
   return { suggested: top, rest: list.filter((r) => !ids.has(r.id)) };
+}
+
+/**
+ * For one receipt: the invoices it most likely belongs on, best first, with the reason.
+ * The deciding clue is the date: a work day on the invoice that's the receipt's day (or the day before/after,
+ * for travel), then the invoice's own date. A matching amount or item ("Parking") adds to it.
+ * Returns [{ inv, score, why }] for the strong matches only (never a guess from the name alone).
+ */
+const ctxCache = new WeakMap(); // an invoice's clues, worked out once per version of its lines (typing stays fast)
+export function rankInvoicesFor(receipt, invoices, { linesFor, clientName }) {
+  if (!receipt?.receipt_date) return [];
+  const out = [];
+  for (const inv of invoices) {
+    const lines = linesFor(inv.id);
+    const key = `${inv.issue_date}|${clientName(inv) || ''}|${inv.updated_at || ''}`;
+    let byKey = ctxCache.get(lines);
+    if (!byKey) { byKey = new Map(); ctxCache.set(lines, byKey); }
+    let ctx = byKey.get(key);
+    if (!ctx) { ctx = suggestContext({ lines, jobs: inv.jobs, issueDate: inv.issue_date, clientName: clientName(inv) }); byKey.set(key, ctx); }
+    const score = receiptScore({ ...receipt, invoice_id: null }, ctx);
+    if (score < 7) continue;
+    const d = receipt.receipt_date;
+    let near = Infinity;
+    for (const x of ctx.dates) near = Math.min(near, dayDiff(x, d));
+    const why = near === 0 ? 'work that day' : near === 1 ? 'work the day before/after' : near <= 3 ? 'work that week'
+      : inv.issue_date === d ? 'invoice dated that day' : ctx.amounts.has(num(receipt.total).toFixed(2)) ? 'same amount' : 'close match';
+    // Date first: work on that very day beats everything, then the day before/after, then an invoice dated that day.
+    const tier = near === 0 ? 0 : near === 1 ? 1 : inv.issue_date === d ? 2 : 3;
+    out.push({ inv, score, near, tier, why });
+  }
+  return out.sort((a, b) => a.tier - b.tier || b.score - a.score || String(b.inv.issue_date).localeCompare(String(a.inv.issue_date))).slice(0, 5);
 }

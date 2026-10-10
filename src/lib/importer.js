@@ -366,6 +366,49 @@ export function withDays(l, issueDate, order = 'mdy') {
   return per ? { ...out, qty: n, rate: per } : out;
 }
 
+// Expenses that ride along with a day of work (parking, meals, rides …).
+const EXPENSE = /\b(parking|park|meals?|lunch|dinner|breakfast|food|craft|per ?diem|uber|lyft|taxi|cab|tolls?|gas|fuel|mileage|hotel|lodging|flight|airfare|baggage|bags?|train|transit|bart|caltrain|subway|metro|rental car|misc)\b/i;
+const GENERIC = /^(misc|miscellaneous|expenses?|other|reimbursements?|reimburse(?:ment)?)$/i;
+const CODE_IN = /\s*\((?:\d{2}\/\d{2}[-–,\s\d/]*)\)\s*/g;
+const shortMoney = (n) => `$${num(n).toLocaleString('en-US', { minimumFractionDigits: num(n) % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
+
+/**
+ * Old invoices often list an expense as its own line right next to the work it belongs to:
+ *   Camera Operator · Felicis (04/06)   $750
+ *   Parking         · Felicis (04/06)   $26
+ * On import, an expense line on the same day(s) as the work line before it becomes an add-on of that line
+ * ("Camera Operator · Felicis (04/06) + Parking ($26)"), the way Wrap writes them. Totals don't change.
+ */
+export function mergeSameDayExpenses(lines) {
+  const out = [];
+  const isExpense = (l) => !l.extras && EXPENSE.test(`${l.item || ''} ${String(l.description || '').split('\n')[0]}`);
+  const sameDays = (a, b) => Array.isArray(a.dates) && Array.isArray(b.dates) && a.dates.length > 0 && a.dates.join() === b.dates.join();
+  for (const l of lines) {
+    // the nearest work line before it, on exactly the same day(s)
+    const host = isExpense(l) ? [...out].reverse().find((x) => !isExpense(x) && sameDays(x, l)) : null;
+    if (!host || num(l.amount) <= 0) { out.push(l); continue; }
+    const fromDesc = String(l.description || '').split('\n')[0].replace(CODE_IN, ' ').replace(/\s{2,}/g, ' ').trim();
+    let label = (GENERIC.test(String(l.item || '').trim()) ? fromDesc : String(l.item || '').trim()) || fromDesc || 'Expense';
+    // "Parking LSVP" under "LSVP TIM (05/11)" is just "Parking": drop words the work line already says.
+    const hostWords = new Set(String(host.extras?.desc ?? host.description ?? '').split('\n')[0].toLowerCase().match(/[a-z0-9]+/g) || []);
+    const kept = label.split(/\s+/).filter((w) => !hostWords.has(w.toLowerCase().replace(/[^a-z0-9]/g, '')));
+    if (kept.length && kept.length < label.split(/\s+/).length) label = kept.join(' ').replace(/^[-–:,\s]+|[-–:,\s]+$/g, '');
+    const ex = host.extras || { desc: host.description || '', qty: num(host.qty) || 1, rate: num(host.rate), base_rate: num(host.rate), items: [] };
+    const qty = num(l.qty) || 1;
+    const items = [...ex.items, { label, qty, rate: qty === 1 ? num(l.amount) : num(l.rate) }];
+    const extras = { ...ex, items };
+    const description = [
+      extras.desc,
+      extras.qty !== 1 ? `${host.item || 'Base'} (${shortMoney(extras.rate)} x${extras.qty})` : '',
+      ...items.map((a) => `${a.label} (${shortMoney(a.rate)}${a.qty !== 1 ? ` x${a.qty}` : ''})`),
+    ].filter(Boolean).join('\n');
+    const merged = { ...host, extras, description, qty: 1, amount: round2(num(host.amount) + num(l.amount)) };
+    merged.rate = merged.amount;
+    out[out.indexOf(host)] = merged;
+  }
+  return out;
+}
+
 /**
  * Rejects anything that isn't clearly a real invoice before it's imported. Each check names what was wrong.
  *   - an invoice number, an invoice date, a total above $0
@@ -439,7 +482,7 @@ export async function invoiceFromPdf(file, api) {
     discount: num(r.discount),
     notes: r.notes || null,
     payments: (r.payments || []).map((p) => ({ date: p.date, amount: num(p.amount), method: p.method })),
-    lines: (r.lines || []).map((l) => withDays(withAddons({ kind: 'labor', item: l.item, description: l.description || '', note: l.note || '', qty: num(l.qty) || 1, rate: num(l.rate), amount: num(l.amount) }), issue, order)),
+    lines: mergeSameDayExpenses((r.lines || []).map((l) => withDays(withAddons({ kind: 'labor', item: l.item, description: l.description || '', note: l.note || '', qty: num(l.qty) || 1, rate: num(l.rate), amount: num(l.amount) }), issue, order))),
     fileName: file.name,
   };
 }

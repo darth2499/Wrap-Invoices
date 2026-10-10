@@ -28,11 +28,19 @@ export function StoreProvider({ user, children }) {
     load();
   }, [load]);
 
-  const toast = useCallback((text, opts = {}) => {
-    const id = Math.random().toString(36).slice(2);
-    setToasts((t) => [...t, { id, text, ...opts }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), opts.ms || (opts.action ? 7000 : 4000));
+  // opts.onDone runs once when a toast goes away without its action being tapped (timed out or closed with ×).
+  const settled = useRef(new Set());
+  const finish = useCallback((t, acted) => {
+    if (settled.current.has(t.id)) return;
+    settled.current.add(t.id);
+    setToasts((x) => x.filter((y) => y.id !== t.id));
+    if (!acted) t.onDone?.();
   }, []);
+  const toast = useCallback((text, opts = {}) => {
+    const t = { id: Math.random().toString(36).slice(2), text, ...opts };
+    setToasts((x) => [...x, t]);
+    setTimeout(() => finish(t, false), opts.ms || (opts.action ? 7000 : 4000));
+  }, [finish]);
 
   /** Shows a confirm dialog; resolves true/false. */
   const confirm = useCallback(
@@ -166,9 +174,9 @@ export function StoreProvider({ user, children }) {
           <div key={t.id} className={`toast ${t.error ? 'err' : ''}`}>
             <span className="grow">{t.text}</span>
             {t.action && (
-              <button className="toast-act" onClick={() => { t.action.run(); setToasts((x) => x.filter((y) => y.id !== t.id)); }}>{t.action.label}</button>
+              <button className="toast-act" onClick={() => { t.action.run(); finish(t, true); }}>{t.action.label}</button>
             )}
-            <button className="toast-x" aria-label="Dismiss" onClick={() => setToasts((x) => x.filter((y) => y.id !== t.id))}>
+            <button className="toast-x" aria-label="Dismiss" onClick={() => finish(t, false)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
             </button>
           </div>

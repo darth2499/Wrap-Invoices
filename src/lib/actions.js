@@ -112,17 +112,38 @@ export async function unvoidInvoice(s, inv) {
   await s.reload('invoices');
 }
 
-/** Asks first (saying what goes with it), then deletes. Returns true when deleted. */
+/**
+ * Deletes with an Undo instead of asking first: the invoice disappears right away, and the toast says what goes
+ * with it. Tap Undo and it's back untouched. When the toast goes away (or you close the page), it's deleted for good.
+ * Returns true (it's gone from view).
+ */
 export async function confirmDelete(s, inv) {
   const pays = s.db.payments.filter((p) => p.invoice_id === inv.id).length;
-  const body = [
-    'This can’t be undone. Attached receipts and mileage are kept.',
-    inv.share_token && 'The client link stops working.',
-    pays && `Its ${pays === 1 ? 'payment is' : `${pays} payments are`} deleted too.`,
-  ].filter(Boolean).join(' ');
-  if (!(await s.confirm({ title: `Delete #${inv.number}?`, body, ok: 'Delete', danger: true }))) return false;
-  await deleteInvoice(s, inv);
-  s.toast('Deleted');
+  let snapshot = null;
+  s.setDb((d) => {
+    snapshot = { index: d.invoices.findIndex((i) => i.id === inv.id), row: d.invoices.find((i) => i.id === inv.id) };
+    return { ...d, invoices: d.invoices.filter((i) => i.id !== inv.id) };
+  });
+  let done = false;
+  const commit = async () => {
+    if (done) return;
+    done = true;
+    window.removeEventListener('pagehide', commit);
+    try { await deleteInvoice(s, inv); } catch (e) { restore(); s.toast(`Couldn’t delete #${inv.number}: ${e.message}`, { error: true }); }
+  };
+  const restore = () => s.setDb((d) => {
+    if (!snapshot?.row || d.invoices.some((i) => i.id === inv.id)) return d;
+    const list = [...d.invoices];
+    list.splice(Math.max(0, Math.min(snapshot.index, list.length)), 0, snapshot.row);
+    return { ...d, invoices: list };
+  });
+  window.addEventListener('pagehide', commit); // leaving the page counts as letting the toast go
+  const extra = [pays && `${pays === 1 ? 'its payment' : `${pays} payments`}`, inv.share_token && 'its client link'].filter(Boolean);
+  s.toast(`#${inv.number} deleted${extra.length ? ` with ${extra.join(' and ')}` : ''}`, {
+    ms: 8000,
+    action: { label: 'Undo', run: () => { done = true; window.removeEventListener('pagehide', commit); restore(); } },
+    onDone: commit,
+  });
   return true;
 }
 

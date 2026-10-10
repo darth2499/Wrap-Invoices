@@ -10,7 +10,7 @@ import { pickFiles } from '../lib/files.js';
 import { go } from '../router.js';
 import { takeFiles, onFiles } from '../lib/scanQueue.js';
 import { rateFor, followsIrs } from '../lib/mileage.js';
-import { suggestContext, receiptScore } from '../lib/suggest.js';
+import { rankInvoicesFor } from '../lib/suggest.js';
 
 /** "Sony · Apr 27, 2026 · on invoice #123" — where an existing receipt is. */
 function whereIs(r, derived) {
@@ -339,10 +339,11 @@ export function ReceiptModal({ id, onClose, onNext }) {
   const reviewQueue = db.receipts.filter((x) => x.status === 'review' && x.id !== id);
   const invoices = db.invoices.filter((i) => i.kind === 'invoice' && i.status !== 'void').sort((a, b) => String(b.issue_date).localeCompare(String(a.issue_date)));
   const invLabel = (i) => `#${i.number} · ${derived.clients[i.client_id]?.name || 'No client'} · ${fmtShort(i.issue_date)}${i.status === 'draft' ? ' (draft)' : ''}`;
-  // Invoices this receipt most likely belongs to: same shoot day (or the day before/after), an amount on the invoice, etc.
-  const likely = f.receipt_date ? invoices
-    .map((i) => ({ i, sc: receiptScore({ ...f, invoice_id: null }, suggestContext({ lines: derived.linesFor(i.id), jobs: i.jobs, issueDate: i.issue_date, clientName: derived.clients[i.client_id]?.name })) }))
-    .filter((x) => x.sc >= 7).sort((a, b) => b.sc - a.sc).slice(0, 4).map((x) => x.i) : [];
+  // Invoices this receipt most likely belongs to: a work day on the invoice is the receipt's day (or next to it),
+  // or the invoice is dated that day; a matching amount or item helps. Best first, with the reason.
+  const ranked = rankInvoicesFor({ ...r, ...f, total: f.total === '' ? null : f.total }, invoices, { linesFor: derived.linesFor, clientName: (i) => derived.clients[i.client_id]?.name });
+  const likely = ranked.map((x) => x.inv);
+  const whyFor = Object.fromEntries(ranked.map((x) => [x.inv.id, x.why]));
   const url = urls[r.file_key];
   const isPdf = r.mime === 'application/pdf';
   // Turn a stored photo a quarter turn clockwise (for the odd one the automatic turn got wrong).
@@ -475,7 +476,7 @@ export function ReceiptModal({ id, onClose, onNext }) {
           <Field label="Attach to invoice" hint={likely.length ? '(best matches first)' : '(optional)'}>
             <select className="input" value={f.invoice_id || ''} onChange={(e) => setF({ ...f, invoice_id: e.target.value || null, billable: e.target.value ? f.billable : false })}>
               <option value="">Not attached</option>
-              {likely.length > 0 && <optgroup label="Suggested">{likely.map((i) => <option key={`s${i.id}`} value={i.id}>{invLabel(i)}</option>)}</optgroup>}
+              {likely.length > 0 && <optgroup label="Suggested">{likely.map((i) => <option key={`s${i.id}`} value={i.id}>{invLabel(i)} — {whyFor[i.id]}</option>)}</optgroup>}
               <optgroup label={likely.length ? 'All invoices' : 'Invoices'}>{invoices.filter((i) => !likely.includes(i)).map((i) => <option key={i.id} value={i.id}>{invLabel(i)}</option>)}</optgroup>
             </select>
           </Field>
