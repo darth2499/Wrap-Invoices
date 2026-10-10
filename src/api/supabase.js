@@ -29,7 +29,7 @@ async function call(fn, body, { auth = true } = {}) {
   }
   const res = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, { method: 'POST', headers, body: JSON.stringify(body) });
   const out = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(out.error || `Request failed (${res.status})`);
+  if (!res.ok) throw Object.assign(new Error(out.error || `Request failed (${res.status})`), { status: res.status });
   return out;
 }
 

@@ -7,7 +7,7 @@ function securityHeaders(env) {
   const supa = (env.VITE_SUPABASE_URL || '').replace(/\/+$/, '');
   const csp = [
     "default-src 'self'",
-    "script-src 'self'",
+    "script-src 'self' 'wasm-unsafe-eval'",
     "worker-src 'self' blob:",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",

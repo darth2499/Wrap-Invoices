@@ -16,7 +16,8 @@ const ORD = String.raw`(?:st|nd|rd|th)?`;
 const PATTERNS = [
   { kind: 'iso', re: /(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)/iy, get: (m) => ({ y: +m[1], mo: +m[2], d: +m[3] }) },
   { kind: 'mon', re: new RegExp(String.raw`${MON}\s+(\d{1,2})${ORD}(?!\d)(?:,?\s+(\d{4})(?!\d))?`, 'iy'), get: (m) => ({ y: m[3] ? +m[3] : null, mo: monthOf(m[1]), d: +m[2] }) },
-  { kind: 'dmon', re: new RegExp(String.raw`(\d{1,2})${ORD}\s+${MON}(?![a-z])(?:,?\s+(\d{4})(?!\d))?`, 'iy'), get: (m) => ({ y: m[3] ? +m[3] : null, mo: monthOf(m[2]), d: +m[1] }) },
+  // also airline/ticket style "16Sep26" / "16SEP2026" (no spaces)
+  { kind: 'dmon', re: new RegExp(String.raw`(\d{1,2})${ORD}\s*${MON}(?![a-z])(?:,?\s+(\d{4})(?!\d)|(\d{4}|\d{2})(?![\d:]))?`, 'iy'), get: (m) => ({ y: m[3] ? +m[3] : m[4] ? (m[4].length === 2 ? 2000 + +m[4] : +m[4]) : null, mo: monthOf(m[2]), d: +m[1] }) },
   // 30.09.2026 / 30-09-2026 (always with a year: "30.09" alone could be a price)
   { kind: 'num', re: /(\d{1,2})[.-](\d{1,2})[.-](\d{4}|\d{2})(?![\d.])/y, get: (m) => ({ y: m[3].length === 2 ? 2000 + +m[3] : +m[3], a: +m[1], b: +m[2] }) },
   { kind: 'num', re: /(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\d/])/y, get: (m) => ({ y: m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : null, a: +m[1], b: +m[2] }) },

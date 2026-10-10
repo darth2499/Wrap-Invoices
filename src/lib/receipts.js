@@ -3,6 +3,7 @@ import { sha256, extFor } from './files.js';
 import { scanReceipt, shrinkOriginal, compressPhoto, orientationChoices, turnedFile, textDirection } from './scan.js';
 import { round2 } from './format.js';
 import { pdfText, pdfFirstPageImage, pdfToJpeg, blobToBase64 } from './pdftext.js';
+import { readOnDevice } from './localRead.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -116,11 +117,28 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
     try {
       ai = await api.readReceipt(fileKey, mime, readWith);
     } catch (e) {
-      ai = { error: e.message };
+      ai = { error: e.message, status: e.status };
+    }
+    // The online reader is used up for the day, or can't be reached: read it on this device instead.
+    if (ai?.error && (!ai.status || ai.status === 429 || ai.status >= 500)) {
+      onStep('Reading on this device…');
+      try {
+        const local = await readOnDevice(isPdf
+          ? { pdfText: readWith.text, photo: readWith.text ? null : await pdfFirstPageImage(file) }
+          : { photo: file });
+        if (!isPdf && local.turn) { // it found the right way up: keep the photo that way too
+          photo = await turnedFile(file, local.turn).catch(() => file);
+          scanned = await scanReceipt(photo, { mode }).catch(() => scanned);
+        }
+        turn = -1; // (don't ask the online reader about rotation below)
+        ai = local;
+      } catch (e) {
+        console.warn('On-device reading failed', e);
+      }
     }
     // Nothing readable on a photo the free check called upright: it may be upside down. Ask which way is up
     // (only now, so most receipts cost one reader call), and if it should turn, read it again.
-    if (!isPdf && !ai?.error && turn === 0 && (ai?.total_paid == null || ai?.is_receipt === false)) {
+    if (!isPdf && !ai?.error && turn === 0 && ai?.reader !== 'device' && (ai?.total_paid == null || ai?.is_receipt === false)) {
       const again = await uprightTurn(api, file, { force: true });
       if (again) {
         onStep('Turning it the right way up…');
