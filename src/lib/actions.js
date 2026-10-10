@@ -113,12 +113,17 @@ export async function unvoidInvoice(s, inv) {
 }
 
 /**
- * Deletes with an Undo instead of asking first: the invoice disappears right away, and the toast says what goes
- * with it. Tap Undo and it's back untouched. When the toast goes away (or you close the page), it's deleted for good.
- * Returns true (it's gone from view).
+ * Asks first, then the invoice disappears with an Undo in the toast: tap it and it's back untouched.
+ * When the toast goes away (or you close the page), it's deleted for good. Returns true when it's gone from view.
  */
 export async function confirmDelete(s, inv) {
   const pays = s.db.payments.filter((p) => p.invoice_id === inv.id).length;
+  const body = [
+    'Attached receipts and mileage are kept.',
+    inv.share_token && 'The client link stops working.',
+    pays && `Its ${pays === 1 ? 'payment is' : `${pays} payments are`} deleted too.`,
+  ].filter(Boolean).join(' ');
+  if (!(await s.confirm({ title: `Delete #${inv.number}?`, body, ok: 'Delete', danger: true }))) return false;
   let snapshot = null;
   s.setDb((d) => {
     snapshot = { index: d.invoices.findIndex((i) => i.id === inv.id), row: d.invoices.find((i) => i.id === inv.id) };

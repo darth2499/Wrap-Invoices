@@ -28,7 +28,7 @@ function shell({ business, preheader, body, footer }) {
   const initial = esc((business.name || 'W').trim().charAt(0).toUpperCase());
   return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><title>${esc(preheader)}</title>
-<style>summary{list-style:none}summary::-webkit-details-marker{display:none}</style></head>
+<style>summary{list-style:none}summary::-webkit-details-marker{display:none}details[open]{display:flex;flex-direction:column-reverse}details[open] .more-closed,details:not([open]) .more-open{display:none}</style></head>
 <body style="margin:0;padding:0;background:${C.bg};-webkit-text-size-adjust:100%">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.bg}">
@@ -52,13 +52,14 @@ ${body}
 
 /**
  * The rest of a long list, folded: tap "+ 14 more items" to open it (Apple Mail, iPhone, the preview in Wrap).
+ * Once open, the rows sit where that line was and "Show less" moves to the bottom.
  * Email apps that can't fold (Gmail, Outlook) simply show the whole list under that line.
  */
 function moreBlock(rowsHtml, count, word, cols) {
   if (count <= 0) return '';
   return `<details style="margin:0">
     <summary style="display:block;cursor:pointer;padding:10px 0;border-top:1px solid ${C.line2};font-size:13px;font-weight:600;color:${C.ink2}">
-      + ${plural(count, word)} &#9662;
+      <span class="more-closed">+ ${plural(count, word)} &#9662;</span><span class="more-open">Show less &#9652;</span>
     </summary>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rowsHtml.replace(/colspan="\d"/g, `colspan="${cols}"`)}</table>
   </details>`;

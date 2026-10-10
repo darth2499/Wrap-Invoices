@@ -452,28 +452,43 @@ function BasicLines({ lines, setLines, db, issueDate, openPicker }) {
   });
   const cols = `minmax(140px,1.2fr) minmax(170px,1.6fr) 64px 96px ${hasTax ? '86px ' : ''}92px 60px`;
   // Drag the grip to reorder lines (mouse or finger): the line follows the pointer over the others.
+  // Drop it onto the middle of another line to make it that line's add-on (e.g. parking under the day's work).
   const [dragKey, setDragKey] = useState(null);
+  const [nestKey, setNestKey] = useState(null);
   const startDrag = (key, e) => {
     e.preventDefault();
     setDragKey(key);
+    let target = null;
     const onMove = (ev) => {
       const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-line-key]');
       const over = el?.getAttribute('data-line-key');
-      if (!over || over === key) return;
+      if (!over || over === key) { if (!over) { target = null; setNestKey(null); } return; }
+      const r = el.getBoundingClientRect();
+      const y = (ev.clientY - r.top) / r.height; // 0 = top edge of that line, 1 = bottom edge
+      if (y > 0.28 && y < 0.72) { target = over; setNestKey(over); return; }
+      target = null;
+      setNestKey(null);
       setLines((ls) => {
         const from = ls.findIndex((x) => x.key === key);
         const to = ls.findIndex((x) => x.key === over);
         if (from < 0 || to < 0) return ls;
+        // Only swap once you're past the middle: moving up, at its top edge; moving down, at its bottom edge.
+        if ((from > to && y >= 0.28) || (from < to && y <= 0.72)) return ls;
         const c = [...ls];
         const [m] = c.splice(from, 1);
         c.splice(to, 0, m);
         return c;
       });
     };
-    const onUp = () => { setDragKey(null); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); window.removeEventListener('pointercancel', onUp); };
+    const onUp = () => {
+      if (target) nestInto(key, target);
+      setDragKey(null); setNestKey(null);
+      window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); window.removeEventListener('pointercancel', onCancel);
+    };
+    const onCancel = () => { target = null; onUp(); };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    window.addEventListener('pointercancel', onCancel);
   };
 
   // Everything you can add: saved items first, then anything you've billed before (newest price wins).
@@ -508,16 +523,22 @@ function BasicLines({ lines, setLines, db, issueDate, openPicker }) {
     }),
   };
   // Folds a line into the one above as an add-on (e.g. a billed parking receipt into the shoot day it belongs to).
-  const nest = (key) => setLines((ls) => {
+  // A line becomes an add-on of another line (its own add-ons come along).
+  const nestInto = (key, intoKey) => setLines((ls) => {
     const i = ls.findIndex((x) => x.key === key);
-    if (i < 1) return ls;
+    const t = ls.findIndex((x) => x.key === intoKey);
+    if (i < 0 || t < 0 || i === t) return ls;
     const l = ls[i];
     const own = { id: uid(), label: l.item || 'Expense', qty: num(l.qty) || 1, rate: num(l.rate), receipt_id: l.receipt_id || null, unit: null };
     const c = [...ls];
-    c[i - 1] = { ...c[i - 1], addons: [...(c[i - 1].addons || []), own, ...(l.addons || [])] };
+    c[t] = { ...c[t], addons: [...(c[t].addons || []), own, ...(l.addons || [])] };
     c.splice(i, 1);
     return c;
   });
+  const nest = (key) => {
+    const i = lines.findIndex((x) => x.key === key);
+    if (i > 0) nestInto(key, lines[i - 1].key);
+  };
   const addChoice = (c) => setLines((ls) => [...ls.filter((l) => l.item || num(l.rate) || l.description || l.addons?.length), blankLine({ kind: c.kind || 'labor', item: c.name, description: c.desc || '', rate: c.rate || 0, base_rate: c.rate || 0, day_type: c.day ? 'Full day' : null, focus: true })]);
 
   return (
@@ -528,7 +549,7 @@ function BasicLines({ lines, setLines, db, issueDate, openPicker }) {
             <span>Item</span><span>Description</span><span>Qty</span><span>Price</span>{hasTax && <span>Tax</span>}<span className="right">Amount</span><span />
           </div>}
           {lines.map((l, i) => (
-            <BasicLine key={l.key} l={l} nest={i > 0 ? () => nest(l.key) : null} issueDate={issueDate} cols={cols} dragging={dragKey === l.key} onGrip={(e) => startDrag(l.key, e)} catalog={catalog} db={db} hasTax={hasTax} addonRates={addonRates} addonCtx={addonCtx} upd={upd} move={move} remove={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} dup={() => setLines((ls) => { const i = ls.findIndex((x) => x.key === l.key); const c = [...ls]; c.splice(i + 1, 0, { ...l, key: uid(), receipt_id: null }); return c; })} />
+            <BasicLine key={l.key} l={l} nest={i > 0 ? () => nest(l.key) : null} issueDate={issueDate} cols={cols} dragging={dragKey === l.key} nestTarget={nestKey === l.key} onGrip={(e) => startDrag(l.key, e)} catalog={catalog} db={db} hasTax={hasTax} addonRates={addonRates} addonCtx={addonCtx} upd={upd} move={move} remove={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} dup={() => setLines((ls) => { const i = ls.findIndex((x) => x.key === l.key); const c = [...ls]; c.splice(i + 1, 0, { ...l, key: uid(), receipt_id: null }); return c; })} />
           ))}
         </div>
       </div>
@@ -602,7 +623,7 @@ const ADDONS = [
   { label: '', name: 'Other' },
 ];
 
-function BasicLine({ l, nest, cols, catalog, db, hasTax, addonRates, addonCtx, upd, move, remove, dup, dragging, onGrip, issueDate }) {
+function BasicLine({ l, nest, cols, catalog, db, hasTax, addonRates, addonCtx, upd, move, remove, dup, dragging, nestTarget, onGrip, issueDate }) {
   const [calOpen, setCalOpen] = useState(false);
   // Shoot dates are saved on the line (they show on the Calendar); older lines fall back to the dates in the description.
   const [calDates, setCalDates] = useState(() => (Array.isArray(l.dates) && l.dates.length ? l.dates : (() => { const m = String(l.description || '').match(/\((\d{2}\/\d{2}(?:-\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:-\d{2}\/\d{2})?)*)\)/); return m ? datesFromCode(m[1], issueDate) : []; })()));
@@ -620,7 +641,7 @@ function BasicLine({ l, nest, cols, catalog, db, hasTax, addonRates, addonCtx, u
     upd(l.key, { dates, description: code ? `${desc}${desc ? ' ' : ''}(${code})` : desc, qty: isDay && dates.length ? dates.length : l.qty });
   };
   return (
-    <div className={`line basic-line ${dragging ? 'dragging' : ''}`} data-line-key={l.key} style={{ gridTemplateColumns: cols }}>
+    <div className={`line basic-line ${dragging ? 'dragging' : ''} ${nestTarget ? 'nest-target' : ''}`} data-line-key={l.key} style={{ gridTemplateColumns: cols }}>
       <div className="col c-item" style={{ gap: 6 }}>
         <input className="input" list={listId} value={l.item} placeholder="Item" onChange={(e) => pickItem(e.target.value)} aria-label="Item" style={{ fontWeight: 500 }} />
         <datalist id={listId}>{catalog.map((c) => <option key={c.id} value={c.name} />)}</datalist>
@@ -663,7 +684,7 @@ function BasicLine({ l, nest, cols, catalog, db, hasTax, addonRates, addonCtx, u
         </select>
       )}
       <span className="num right c-amt" style={{ paddingTop: 10 }}>{money(lineAmount(l.qty, l.rate))}</span>
-      <div className="c-menu row" style={{ gap: 0, flexWrap: 'nowrap' }}><span className="grip" onPointerDown={onGrip} aria-label="Drag to reorder" role="button" tabIndex={-1}><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg></span><Menu label="" icon="more" variant="ghost icon" items={[
+      <div className="c-menu row" style={{ gap: 0, flexWrap: 'nowrap' }}><span className="grip" onPointerDown={onGrip} aria-label="Drag to reorder, or onto another line to make it an add-on" role="button" tabIndex={-1}><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg></span><Menu label="" icon="more" variant="ghost icon" items={[
         { label: 'Move up', icon: 'chevL', onClick: () => move(l.key, -1) },
         { label: 'Move down', icon: 'chevR', onClick: () => move(l.key, 1) },
         nest && { label: 'Make it an add-on of the line above', icon: 'chevL', onClick: nest },

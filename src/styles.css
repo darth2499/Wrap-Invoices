@@ -390,6 +390,8 @@ tr.row-drop td, .m-card.row-drop { background: var(--accent-bg) !important; box-
 .grip { display: grid; place-items: center; width: 24px; height: 40px; color: var(--faint); cursor: grab; touch-action: none; border-radius: 6px; flex: none; }
 .grip:hover { color: var(--ink-2); background: var(--hover); }
 .line.dragging { background: var(--surface); box-shadow: 0 8px 24px rgba(20,20,26,.12); border-radius: 12px; position: relative; z-index: 2; }
+.line.nest-target { background: var(--accent-bg); box-shadow: inset 0 0 0 2px var(--accent); border-radius: 12px; position: relative; }
+.line.nest-target::after { content: '+ add-on'; position: absolute; right: 12px; bottom: 6px; font-size: 11px; font-weight: 600; color: var(--accent-ink); pointer-events: none; }
 .line.dragging .grip { cursor: grabbing; color: var(--accent); }
 @media (max-width: 800px) { .basic-line { grid-template-columns: 1fr 1fr 72px !important; } }
 /* desktop sidebar stays put, so sign out / exit demo is always in the bottom-left corner */
