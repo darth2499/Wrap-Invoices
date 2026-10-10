@@ -1,14 +1,20 @@
 // The full "add a receipt" pipeline: duplicate check → scan → upload → read with AI → duplicate check again → save.
 import { sha256, extFor } from './files.js';
-import { scanReceipt, shrinkOriginal, compressPhoto, orientationChoices, turnedFile } from './scan.js';
+import { scanReceipt, shrinkOriginal, compressPhoto, orientationChoices, turnedFile, textDirection } from './scan.js';
 import { round2 } from './format.js';
 import { pdfText, pdfFirstPageImage, pdfToJpeg, blobToBase64 } from './pdftext.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-/** Degrees to turn a photo clockwise so its text is upright (0 when unsure). */
-export async function uprightTurn(api, file) {
+/**
+ * Degrees to turn a photo clockwise so its text is upright (0 when unsure).
+ * Most photos are already upright, so first a free on-device check: if the printed lines run across, it's left
+ * as is (no reader call). Only a sideways or unclear photo goes to the reader to pick which way is up.
+ * force: skip the free check (used when reading came back empty, e.g. an upside-down photo).
+ */
+export async function uprightTurn(api, file, { force = false } = {}) {
   try {
+    if (!force && (await textDirection(file)) === 'horizontal') return 0;
     const { options, picture } = await orientationChoices(file);
     const res = await api.readReceipt(null, 'image/jpeg', { mode: 'upright', image_b64: await blobToBase64(picture), image_mime: 'image/jpeg' });
     return options['ABCD'.indexOf(res?.upright)] || 0;
@@ -71,6 +77,7 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
     let readWith = {};
     let scanned = null;
     let photo = file;
+    let turn = 0;
     if (isPdf) {
       onStep('Reading the PDF…');
       try {
@@ -89,7 +96,8 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
       }
     } else {
       onStep('Turning it the right way up…');
-      photo = await turnedFile(file, await uprightTurn(api, file)).catch(() => file);
+      turn = await uprightTurn(api, file);
+      photo = await turnedFile(file, turn).catch(() => file);
       onStep('Straightening and cleaning up…');
       let scan;
       try {
@@ -109,6 +117,21 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
       ai = await api.readReceipt(fileKey, mime, readWith);
     } catch (e) {
       ai = { error: e.message };
+    }
+    // Nothing readable on a photo the free check called upright: it may be upside down. Ask which way is up
+    // (only now, so most receipts cost one reader call), and if it should turn, read it again.
+    if (!isPdf && !ai?.error && turn === 0 && (ai?.total_paid == null || ai?.is_receipt === false)) {
+      const again = await uprightTurn(api, file, { force: true });
+      if (again) {
+        onStep('Turning it the right way up…');
+        photo = await turnedFile(file, again).catch(() => file);
+        try {
+          scanned = await scanReceipt(photo, { mode });
+          cropped = scanned.cropped;
+          onStep('Reading the receipt…');
+          ai = await api.readReceipt(null, mime, { image_b64: await blobToBase64(scanned.read), image_mime: 'image/jpeg' });
+        } catch (e) { ai = { error: e.message }; }
+      }
     }
     if (!store) mime = null; // nothing kept
     if (!isPdf && store) {

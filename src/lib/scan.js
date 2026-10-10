@@ -397,6 +397,41 @@ function turned(src, deg) {
 }
 
 /**
+ * Free, on-device check of which way the printed lines run. Lines of text leave gaps that run the whole width
+ * (rows with no ink); a sideways photo has those gaps running top to bottom instead.
+ * Returns 'horizontal' (upright, or upside down), 'vertical' (sideways) or 'unknown'.
+ */
+export async function textDirection(file) {
+  const c = toCanvas(await decode(file), 360);
+  const { width: w, height: h } = c;
+  const px = c.getContext('2d').getImageData(0, 0, w, h).data;
+  const g = new Float32Array(w * h);
+  let mean = 0;
+  for (let i = 0; i < w * h; i++) { g[i] = px[i * 4] * 0.3 + px[i * 4 + 1] * 0.59 + px[i * 4 + 2] * 0.11; mean += g[i]; }
+  mean /= w * h;
+  const dark = mean < 100; // light text on a dark background: the text is the bright part
+  const rows = new Float32Array(h);
+  const cols = new Float32Array(w);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const v = g[y * w + x];
+    if (dark ? v > mean + 40 : v < mean - 40) { rows[y]++; cols[x]++; }
+  }
+  const gaps = (a) => {
+    let lo = 0; let hi = a.length - 1;
+    while (lo < hi && a[lo] === 0) lo++;
+    while (hi > lo && a[hi] === 0) hi--;
+    let peak = 0; for (let i = lo; i <= hi; i++) peak = Math.max(peak, a[i]);
+    let n = 0; for (let i = lo; i <= hi; i++) if (a[i] <= peak * 0.04) n++;
+    return hi > lo ? n / (hi - lo + 1) : 0;
+  };
+  const r = gaps(rows);
+  const k = gaps(cols);
+  if (r > k * 1.5 + 0.04) return 'horizontal';
+  if (k > r * 1.5 + 0.04) return 'vertical';
+  return 'unknown';
+}
+
+/**
  * Which way is up, step 1 (in the browser): the photo drawn four ways (as is, and turned a quarter, half and
  * three quarters), labeled A–D in a 2×2 grid, for the reader to pick the one that reads normally.
  * Picking from four is far more reliable than asking a model how many degrees a photo is off.
