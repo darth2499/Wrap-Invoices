@@ -822,3 +822,16 @@ h2 .count-badge { vertical-align: 3px; font-family: var(--font); }
 /* A field the checks flagged */
 .input.is-bad, .is-bad-wrap .input { border-color: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 14%, transparent); }
 .is-bad-wrap { display: block; }
+
+/* Inputs with a unit after them (%) */
+.input-suffix { position: relative; display: block; }
+.input-suffix .input { padding-right: 30px; }
+.input-suffix .suffix { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+/* What a purchase saves */
+.savings { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: flex-end; justify-content: space-between; padding: 14px 16px; border-radius: 12px; background: var(--good-bg); }
+.savings-big { font-size: 30px; font-weight: 500; letter-spacing: -0.02em; color: var(--good); }
+.savings-parts { display: flex; flex-direction: column; gap: 4px; min-width: 200px; }
+.savings-parts > span { display: flex; justify-content: space-between; gap: 16px; }
+.savings-more summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); }
+.savings-more summary::-webkit-details-marker { display: none; }
+.savings-more[open] summary svg { transform: rotate(180deg); }

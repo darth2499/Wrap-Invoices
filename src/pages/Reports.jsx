@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 // jszip loads only when a zip is made or opened.
 const loadZip = () => import('jszip').then((m) => m.default);
 import { useStore } from '../store.jsx';
@@ -10,6 +10,7 @@ import { money, fmtDate, fmtLong, num, todayISO, daysBetween, round2 } from '../
 import { toCSV, downloadBlob, receiptNames } from '../lib/files.js';
 import { go } from '../router.js';
 import { shootDays } from '../lib/shoots.js';
+import { savingsFor, guessStateRate } from '../lib/taxEstimate.js';
 
 const TABS = [
   { value: 'overview', label: 'Profit & loss' },
@@ -181,7 +182,7 @@ function Quarterly({ year }) {
       <div className="banner info"><Icon name="sparkle" /><span>A planning helper, not tax advice. Set aside part of every payment so quarterly estimated taxes aren’t a surprise. Your tax preparer can tell you the right percentage and exact amounts.</span></div>
       <div className="row wrap" style={{ alignItems: 'flex-end' }}>
         <Field label="Set aside this % of profit" style={{ width: 200 }}>
-          <MoneyInput value={pct} onChange={(v) => s.updateProfile({ tax_set_aside_pct: v })} />
+          <PercentInput value={pct} onSave={(v) => s.updateProfile({ tax_set_aside_pct: v })} />
         </Field>
         <Field label="Count income by">
           <Seg value={basis} onChange={setBasis} label="Count income by" options={[{ value: 'billed', label: 'Billed' }, { value: 'received', label: 'Received' }]} />
@@ -220,7 +221,93 @@ function Quarterly({ year }) {
         </div>
       </section>
       <p className="small muted">California estimated payments follow their own schedule (April, June and January — no September payment). Self-employment tax applies on top of income tax.</p>
+      <PurchaseSavings year={year} profitSoFar={rows.reduce((t, r) => t + r.net, 0)} />
     </>
+  );
+}
+
+/**
+ * A percent you can type freely (clear it, retype it) on any phone: it's saved a moment after you stop typing,
+ * and only when it's a real number. Leaving it empty puts the saved value back.
+ */
+function PercentInput({ value, onSave, min = 0, max = 100 }) {
+  const [text, setText] = useState(String(value ?? ''));
+  const timer = useRef(null);
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setText(String(value ?? '')); }, [value]);
+  const commit = (t) => {
+    const n = Number(String(t).replace(',', '.'));
+    if (t !== '' && Number.isFinite(n) && n >= min && n <= max && n !== Number(value)) onSave(n);
+  };
+  return (
+    <span className="input-suffix">
+      <input className="input num" type="text" inputMode="decimal" value={text}
+        onFocus={() => { focused.current = true; }}
+        onChange={(e) => { const t = e.target.value.replace(/[^\d.,]/g, ''); setText(t); clearTimeout(timer.current); timer.current = setTimeout(() => commit(t), 700); }}
+        onBlur={() => { focused.current = false; clearTimeout(timer.current); if (text === '') setText(String(value ?? '')); else commit(text); }} />
+      <span className="suffix">%</span>
+    </span>
+  );
+}
+
+/** "How much would my taxes go down if I buy this?" — a rough 2026 estimate from this year's profit. */
+function PurchaseSavings({ year, profitSoFar }) {
+  const s = useStore();
+  const today = todayISO();
+  const thisYear = String(year) === today.slice(0, 4);
+  // A full-year guess: this year's profit so far, stretched to 12 months (past years: what it was).
+  const dayOfYear = thisYear ? Math.max(30, daysBetween(`${year}-01-01`, today) + 1) : 365;
+  const guess = Math.max(0, Math.round((profitSoFar * 365) / dayOfYear / 100) * 100);
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('wrap_taxcalc')) || {}; } catch { return {}; } })();
+  const [o, setO] = useState({ status: saved.status || 'single', other: saved.other ?? '', stateRate: saved.stateRate ?? guessStateRate(s.db.profile.address), profit: '' });
+  const [price, setPrice] = useState('');
+  const [kind, setKind] = useState('equipment');
+  const [use, setUse] = useState(100);
+  const set = (k, v) => setO((x) => {
+    const next = { ...x, [k]: v };
+    try { localStorage.setItem('wrap_taxcalc', JSON.stringify({ status: next.status, other: next.other, stateRate: next.stateRate })); } catch { /* not saved */ }
+    return next;
+  });
+  const profit = o.profit === '' ? guess : num(o.profit);
+  const deductible = num(price) * (kind === 'meal' ? 0.5 : 1) * Math.min(100, Math.max(0, num(use))) / 100;
+  const r = savingsFor(deductible, profit, { status: o.status, other: num(o.other), stateRate: num(o.stateRate) });
+  const cost = num(price) - r.total;
+  return (
+    <section className="card card-pad col" style={{ gap: 14 }}>
+      <div className="col" style={{ gap: 2 }}>
+        <h2>What would a purchase save?</h2>
+        <span className="small muted">How much less tax you’d owe for {year} if you buy something for the business.</span>
+      </div>
+      <div className="row wrap" style={{ gap: 12, alignItems: 'flex-end' }}>
+        <Field label="It costs" style={{ flex: '1 1 140px' }}><MoneyInput value={price} onChange={setPrice} placeholder="2,000" /></Field>
+        <Field label="Used for work" style={{ flex: '1 1 110px', maxWidth: 160 }}><PercentInput value={use} onSave={setUse} /></Field>
+        <Seg value={kind} onChange={setKind} label="Kind of purchase" options={[{ value: 'equipment', label: 'Gear / other' }, { value: 'meal', label: 'A meal' }]} />
+      </div>
+      {num(price) > 0 && (
+        <div className="savings">
+          <div className="col" style={{ gap: 2 }}>
+            <span className="muted small">Your taxes go down by about</span>
+            <span className="num savings-big">{money(r.total, { cents: false })}</span>
+            <span className="small muted">so it really costs you about <b className="num" style={{ color: 'var(--ink)' }}>{money(cost, { cents: false })}</b> ({Math.round(r.rate * (deductible / num(price)) * 100)}% back)</span>
+          </div>
+          <div className="savings-parts small">
+            <span><span className="muted">Federal income tax</span><b className="num">{money(r.federal, { cents: false })}</b></span>
+            <span><span className="muted">Self-employment tax</span><b className="num">{money(r.se, { cents: false })}</b></span>
+            {num(o.stateRate) > 0 && <span><span className="muted">State ({num(o.stateRate)}%)</span><b className="num">{money(r.state, { cents: false })}</b></span>}
+          </div>
+        </div>
+      )}
+      <details className="savings-more">
+        <summary className="small">Based on {money(profit, { cents: false })} profit for {year} · {o.status === 'married' ? 'married filing jointly' : 'single'}{num(o.stateRate) ? ` · ${num(o.stateRate)}% state` : ''}<Icon name="chevD" size={14} /></summary>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', alignItems: 'end', marginTop: 10 }}>
+          <Field label={`Profit for ${year}`} hint={thisYear ? '(guessed from so far)' : ''}><MoneyInput value={o.profit} onChange={(v) => set('profit', v)} placeholder={guess.toLocaleString('en-US')} /></Field>
+          <Field label="Filing"><Seg value={o.status} onChange={(v) => set('status', v)} label="Filing status" options={[{ value: 'single', label: 'Single' }, { value: 'married', label: 'Married' }]} /></Field>
+          <Field label="Other income" hint="(W-2, spouse)"><MoneyInput value={o.other} onChange={(v) => set('other', v)} placeholder="0" /></Field>
+          <Field label="State tax"><PercentInput value={o.stateRate} onSave={(v) => set('stateRate', v)} /></Field>
+        </div>
+      </details>
+      <p className="small muted" style={{ lineHeight: 1.5 }}>A rough estimate, not tax advice (2026 federal brackets, QBI deduction, self-employment tax). Gear is written off the year you buy it; meals count 50%. Spending $1 always saves less than $1, so it only pays off if you need it anyway.</p>
+    </section>
   );
 }
 
