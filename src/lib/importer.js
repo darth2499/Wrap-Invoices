@@ -1,9 +1,9 @@
 import { DEMO } from '../config.js';
 // Import clients and past invoices from CSV (e.g. Wave exports) or from Wave invoice PDFs.
-import { num, round2, todayISO, addDays } from './format.js';
+import { num, round2, todayISO, addDays, datesCode } from './format.js';
+import { normalizeDates } from './dateText.js';
 import { totals } from './calc.js';
 import { looksSame } from './receipts.js';
-import { datesFromCode } from './shoots.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -327,33 +327,23 @@ export function withAddons(l) {
  * A line covering several days, e.g. "Google (10/05-10/07)" at $2,250 × 1, comes in as 3 × $750
  * (only when it divides evenly to the cent). With add-ons, the base price is split instead.
  */
-// Newer Wave PDFs put the dates on their own line, without brackets: "09/26-09/27 (2 Days)".
-const BARE_DATES = /^(\d{2}\/\d{2}(?:\s*-\s*\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:\s*-\s*\d{2}\/\d{2})?)*)(?:\s*\(\s*\d+(?:\.\d+)?\s*days?\s*\))?$/i;
-
+/**
+ * Finds the work dates in a line's description, in any format (09/30, 2026-09-30, Sep 30, ranges, lists,
+ * "(2 Days)" …: see dateText.js), and writes them the way Wrap does, "Google (09/30)", so the Calendar,
+ * receipt suggestions and price checks all see them.
+ */
 export function withDays(l, issueDate) {
-  // Rewrite those the way Wrap writes dates ("(09/26-09/27)"), so the Calendar and receipt suggestions see them.
-  const fix = (text) => {
-    const rows = String(text || '').split('\n');
-    const m = rows[0].trim().match(BARE_DATES);
-    if (!m) return null;
-    rows[0] = `(${m[1].replace(/\s+/g, '')})`;
-    return rows.join('\n');
-  };
-  const fixed = fix(l.extras ? l.extras.desc : l.description);
-  if (fixed != null) {
-    l = l.extras ? { ...l, extras: { ...l.extras, desc: fixed } } : { ...l, description: fixed };
-  }
-  const first = String(l.extras ? l.extras.desc : l.description || '').split('\n')[0];
-  const m = first.match(/\((\d{2}\/\d{2}(?:-\d{2}\/\d{2})?(?:,\s*\d{2}\/\d{2}(?:-\d{2}\/\d{2})?)*)\)/);
-  if (!m) return l;
-  const dates = datesFromCode(m[1], issueDate);
+  const desc = l.extras ? l.extras.desc : l.description;
+  const found = normalizeDates(desc, issueDate, datesCode);
+  if (!found) return l;
+  const dates = found.dates;
   const n = dates.length;
-  const out = { ...l, dates };
+  const out = l.extras ? { ...l, dates, extras: { ...l.extras, desc: found.text } } : { ...l, dates, description: found.text };
   if (n < 2 || num(l.qty) !== 1) return out;
   const split = (total) => { const per = round2(total / n); return Math.abs(per * n - total) < 0.005 ? per : null; };
   if (l.extras) {
     const per = num(l.extras.qty) === 1 && split(num(l.extras.rate));
-    if (per) out.extras = { ...l.extras, qty: n, rate: per, base_rate: per };
+    if (per) out.extras = { ...out.extras, qty: n, rate: per, base_rate: per };
     return out;
   }
   const per = split(num(l.amount));
