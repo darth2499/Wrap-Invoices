@@ -36,6 +36,7 @@ export default function PublicInvoice({ token: rawToken }) {
   const [imp, setImp] = useState(null); // { state: new | changed | imported, id }
   useEffect(() => {
     if (data?.state !== 'open' || data.kind !== 'invoice' || !storedAccessToken() || isDemoLink(token)) return;
+    if (data.import !== undefined && data.import !== null) { setImp(['new', 'changed', 'imported'].includes(data.import.state) ? data.import : null); return; }
     import('../api/supabase.js').then(({ api: me }) => me.importBill('import_status', token)).then((r) => setImp(['new', 'changed', 'imported'].includes(r.state) ? r : null)).catch(() => {});
   }, [data, token]);
   const doImport = async () => {

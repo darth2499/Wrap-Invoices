@@ -113,6 +113,11 @@ serve(async (req) => {
 /** The client page: everything in one round of parallel queries; the view is counted after the reply. */
 // deno-lint-ignore no-explicit-any
 async function view(db: ReturnType<typeof admin>, inv: any, body: any) {
+  // Someone else signed in to Wrap on this browser: check their sign-in alongside everything else, so
+  // "Import to Wrap" arrives with the page instead of a moment later.
+  const viewer = body.viewer_token && userIdOf(body.viewer_token) !== inv.owner_id && inv.kind === "invoice" && inv.status === "sent"
+    ? db.auth.getUser(String(body.viewer_token)).then(({ data }) => (data.user ? importState(db, inv, data.user.id) : null)).catch(() => null)
+    : Promise.resolve(undefined);
   const [{ data: prof }, { data: lines }, { data: client }, { data: pays }, { data: receipts }] = await Promise.all([
     db.from("profiles").select("*").eq("id", inv.owner_id).single(),
     db.from("invoice_lines").select("item, description, note, qty, rate, amount, tax_rate, kind, receipt_id, extras").eq("invoice_id", inv.id).order("position"),
@@ -145,9 +150,11 @@ async function view(db: ReturnType<typeof admin>, inv: any, body: any) {
     url: r.file_key ? await presign(r.file_key, "GET", 3600) : null,
   })));
 
+  const imp = await viewer; // undefined: not checked · null: sign-in expired (the page checks again itself)
   return json({
     ...base,
     state: "open",
+    import: imp === undefined ? undefined : imp && { state: imp.state, id: imp.mine?.id ?? null },
     invoice: {
       number: inv.number, kind: inv.kind, status: inv.status, issue_date: inv.issue_date, due_date: inv.due_date,
       terms: inv.terms, notes: inv.notes, subtotal: inv.subtotal, discount_total: inv.discount_total,
@@ -171,8 +178,17 @@ async function sha256(s: string) {
 // deno-lint-ignore no-explicit-any
 async function importBill(db: ReturnType<typeof admin>, req: Request, inv: any, token: string, doIt: boolean) {
   const user = await requireUser(req); // their own sign-in, checked by the server (not just read from the page)
-  if (inv.owner_id === user.id) return json({ state: "own" });
-  if (inv.kind !== "invoice" || inv.status !== "sent") return json({ state: "none" });
+  const r = await importState(db, inv, user.id);
+  if (!doIt || r.state !== "new" && r.state !== "changed") return json({ state: r.state, id: r.mine?.id ?? null });
+  return json(await doImport(db, inv, token, user.id, r));
+}
+
+/** Where this invoice stands for one signed-in person: own | none | new | changed | imported. */
+// deno-lint-ignore no-explicit-any
+// deno-lint-ignore no-explicit-any
+async function importState(db: ReturnType<typeof admin>, inv: any, userId: string): Promise<any> {
+  if (inv.owner_id === userId) return { state: "own" };
+  if (inv.kind !== "invoice" || inv.status !== "sent") return { state: "none" };
 
   const [{ data: pays }, { data: lines }, { data: prof }] = await Promise.all([
     db.from("payments").select("amount").eq("invoice_id", inv.id),
@@ -180,19 +196,24 @@ async function importBill(db: ReturnType<typeof admin>, req: Request, inv: any, 
     db.from("profiles").select("business_name, business_email, phone, address").eq("id", inv.owner_id).single(),
   ]);
   const due = Math.round((Number(inv.total) - (pays ?? []).reduce((t, p) => t + Number(p.amount), 0)) * 100) / 100;
-  if (due <= 0) return json({ state: "none" });
+  if (due <= 0) return { state: "none" };
   // Their copy is found again by a fingerprint of the invoice (the sender's ids never leave the server).
   const key = await sha256(`wrap-import:${inv.id}`);
   const version = `${inv.version ?? 1}:${due}:${inv.due_date ?? ""}`;
   // One import per invoice in all of Wrap: once someone has it, anyone else with the link just sees the PDF button.
   const { data: held } = await db.from("crew_payouts").select("id, owner_id, source_version, paid_on").eq("source_key", key).limit(1);
-  if (held?.[0] && held[0].owner_id !== user.id) return json({ state: "none" });
+  if (held?.[0] && held[0].owner_id !== userId) return { state: "none" };
   const mine = held?.[0] ?? null;
   const state = !mine ? "new" : mine.source_version !== version && !mine.paid_on ? "changed" : "imported";
-  if (!doIt || state === "imported") return json({ state, id: mine?.id ?? null });
+  return { state, mine, due, key, version, lines, prof };
+}
+
+// deno-lint-ignore no-explicit-any
+async function doImport(db: ReturnType<typeof admin>, inv: any, token: string, userId: string, r: any) {
+  const { mine, due, key, version, lines, prof } = r;
 
   const from = String(prof?.business_name || "").trim() || "Unknown sender";
-  const items = [...new Set((lines ?? []).map((l) => String(l.item || "").trim()).filter(Boolean))];
+  const items = [...new Set((lines ?? []).map((l: { item: string }) => String(l.item || "").trim()).filter(Boolean))];
   const row = {
     amount: due,
     due_date: inv.due_date,
@@ -202,22 +223,23 @@ async function importBill(db: ReturnType<typeof admin>, req: Request, inv: any, 
     source_version: version,
   };
   if (mine) {
-    const { error } = await db.from("crew_payouts").update(row).eq("id", mine.id).eq("owner_id", user.id);
+    const { error } = await db.from("crew_payouts").update(row).eq("id", mine.id).eq("owner_id", userId);
     if (error) throw new HttpError(500, error.message);
-    return json({ state: "imported", id: mine.id, updated: true });
+    return { state: "imported", id: mine.id, updated: true };
   }
 
   // The sender as one of their payees: an existing one with the same email or name, otherwise a new one.
-  const { data: crew } = await db.from("crew_members").select("id, name, email").eq("owner_id", user.id);
+  const { data: crew } = await db.from("crew_members").select("id, name, email").eq("owner_id", userId);
   const email = String(prof?.business_email || "").trim().toLowerCase();
-  let member = (crew ?? []).find((c) => email && String(c.email || "").trim().toLowerCase() === email)
+  // deno-lint-ignore no-explicit-any
+  let member: any = (crew ?? []).find((c) => email && String(c.email || "").trim().toLowerCase() === email)
     || (crew ?? []).find((c) => String(c.name || "").trim().toLowerCase() === from.toLowerCase());
   if (!member) {
-    const { data, error } = await db.from("crew_members").insert({ owner_id: user.id, name: from, email: email || null, phone: prof?.phone || null, address: prof?.address || null }).select("id").single();
+    const { data, error } = await db.from("crew_members").insert({ owner_id: userId, name: from, email: email || null, phone: prof?.phone || null, address: prof?.address || null }).select("id").single();
     if (error) throw new HttpError(500, error.message);
     member = data;
   }
-  const { data: made, error } = await db.from("crew_payouts").insert({ ...row, owner_id: user.id, crew_id: member!.id, work_date: inv.issue_date, source_key: key }).select("id").single();
+  const { data: made, error } = await db.from("crew_payouts").insert({ ...row, owner_id: userId, crew_id: member!.id, work_date: inv.issue_date, source_key: key }).select("id").single();
   if (error) throw new HttpError(error.code === "23505" ? 409 : 500, error.code === "23505" ? "Already in your Wrap" : error.message);
-  return json({ state: "imported", id: made.id });
+  return { state: "imported", id: made.id };
 }
