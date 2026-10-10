@@ -41,8 +41,13 @@ export default function Calendar() {
       day.push({ ...s, inv, st, items: s.item ? [s.item] : [], labels: [s.label], client: derived.clients[inv.client_id]?.name || '' });
     }
     for (const list of Object.values(map)) for (const x of list) { x.label = x.labels.join(' · '); x.what = x.items.join('/'); }
+    // Bills you need to pay, on their due date (both views), in their own color.
+    for (const p of db.crew_payouts.filter((x) => x.due_date)) {
+      const name = derived.crew?.[p.crew_id]?.name || 'Crew';
+      (map[p.due_date] ||= []).push({ payout: p, label: `Pay ${name}`, name, st: { key: p.paid_on ? 'paid' : 'pay' } });
+    }
     return map;
-  }, [db.invoices, derived, today, view]);
+  }, [db.invoices, db.crew_payouts, derived, today, view]);
 
   const [y, m] = ym.split('-').map(Number);
   const first = new Date(y, m - 1, 1);
@@ -85,7 +90,7 @@ export default function Calendar() {
             const items = byDate[d] || [];
             if (!items.length) return <span key={d} className={`cal-cell ${d === today ? 'today' : ''}`}><span className="cal-num">{Number(d.slice(8))}</span></span>;
             return (
-              <button type="button" key={d} className={`cal-cell has ${d === today ? 'today' : ''}`} onClick={() => open(d, items)} aria-label={`${d}: ${items.length ? items.map((x) => `${x.label} (#${x.inv.number})`).join(', ') : 'no shoots'}`}>
+              <button type="button" key={d} className={`cal-cell has ${d === today ? 'today' : ''}`} onClick={() => open(d, items)} aria-label={`${d}: ${items.length ? items.map((x) => (x.payout ? x.label : `${x.label} (#${x.inv.number})`)).join(', ') : 'no shoots'}`}>
                 <span className="cal-num">{Number(d.slice(8))}</span>
                 <span className="cal-chips">
                   {items.slice(0, 3).map((x, k) => (
@@ -111,23 +116,40 @@ function DayPreview({ day, setDay }) {
   const s = useStore();
   const { db, derived } = s;
   const x = day.items[day.i];
-  const inv = x.inv;
+  const inv = x.inv || {};
   const [logoUrl, setLogoUrl] = useState(null);
   useEffect(() => { if (db.profile.logo_key) s.api.files.urls([db.profile.logo_key]).then((u) => setLogoUrl(u[db.profile.logo_key])).catch(() => {}); }, [db.profile.logo_key]); // eslint-disable-line react-hooks/exhaustive-deps
   const close = () => setDay(null);
   const when = new Date(`${day.date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const tabs = day.items.length > 1 && (
+    <div className="row wrap" style={{ gap: 6 }}>
+      {day.items.map((it, k) => (
+        <button key={k} type="button" className={`ed-opt ${k === day.i ? 'on' : ''}`} onClick={() => setDay({ ...day, i: k })}>{it.payout ? it.label : `#${it.inv.number} ${it.client || it.label}${it.what ? ` · ${it.what}` : ''}`}</button>
+      ))}
+    </div>
+  );
+  if (x.payout) {
+    const p = x.payout;
+    return (
+      <Modal title={when} onClose={close} footer={<>
+        {p.source_token && <Button icon="link" onClick={() => window.open(`#/i/${p.source_token}`, '_blank', 'noopener')}>Their invoice</Button>}
+        {!p.paid_on && <Button icon="check" onClick={async () => { await s.update('crew_payouts', p.id, { paid_on: todayISO() }); close(); }}>Paid today</Button>}
+        <Button variant="primary" onClick={() => go(`/expenses/crew?payout=${p.id}`)}>Open</Button>
+      </>}>
+        {tabs}
+        <div className="row between" style={{ gap: 10 }}>
+          <span className="col" style={{ gap: 2, minWidth: 0 }}><b className="ellip">{x.label}</b><span className="small muted ellip">{p.description || 'Payout'}</span></span>
+          <span className="col" style={{ alignItems: 'flex-end', gap: 4 }}><span className="num" style={{ fontSize: 18 }}>{money(p.amount)}</span><span className={`pill ${p.paid_on ? 'paid' : p.due_date < todayISO() ? 'overdue' : 'sent'}`}>{p.paid_on ? 'Paid' : p.due_date < todayISO() ? 'Overdue' : 'To pay'}</span></span>
+        </div>
+      </Modal>
+    );
+  }
   return (
     <Modal wide title={when} onClose={close} footer={<>
       {inv.status !== 'void' && <Button icon="edit" onClick={() => go(`/invoices/${inv.id}/edit`)}>Edit</Button>}
       <Button variant="primary" onClick={() => go(`/invoices/${inv.id}`)}>Open {inv.kind === 'quote' ? 'quote' : 'invoice'}</Button>
     </>}>
-      {day.items.length > 1 && (
-        <div className="row wrap" style={{ gap: 6 }}>
-          {day.items.map((it, k) => (
-            <button key={k} type="button" className={`ed-opt ${k === day.i ? 'on' : ''}`} onClick={() => setDay({ ...day, i: k })}>#{it.inv.number} {it.client || it.label}{it.what ? ` · ${it.what}` : ''}</button>
-          ))}
-        </div>
-      )}
+      {tabs}
       <div className="row between" style={{ gap: 10 }}>
         <span className="row" style={{ gap: 8, minWidth: 0 }}><b className="ellip">#{inv.number}{x.client ? ` · ${x.client}` : ''}{x.what ? ` · ${x.what}` : ''}</b><StatusPill st={x.st} /></span>
         <span className="num muted">{money(inv.total)}</span>

@@ -82,7 +82,7 @@ export default function Expenses({ tab, query }) {
         <h1>Expenses</h1>
         <Seg value={tab} onChange={(t) => go(`/expenses${t === 'receipts' ? '' : `/${t}`}`)} label="Expense type" options={[{ value: 'receipts', label: 'Receipts' }, { value: 'mileage', label: 'Mileage' }, { value: 'crew', label: 'Crew payouts' }]} />
       </div>
-      {tab === 'mileage' ? <Mileage /> : tab === 'crew' ? <Crew /> : <Receipts query={query} />}
+      {tab === 'mileage' ? <Mileage /> : tab === 'crew' ? <Crew query={query} /> : <Receipts query={query} />}
     </div>
   );
 }
@@ -609,11 +609,16 @@ function TripModal({ trip, onClose }) {
 /* ================================================================== */
 const NEC_THRESHOLD = 2000; // 1099-NEC filing threshold for payments made in 2026+ (was $600 before). Check with your tax preparer.
 
-function Crew() {
+function Crew({ query = {} }) {
   const s = useStore();
   const { db, derived } = s;
   const [year, setYear] = useState(todayISO().slice(0, 4));
   const [edit, setEdit] = useState(null);
+  // Opened from the heads up, the calendar or "In your Wrap" on a client link.
+  useEffect(() => {
+    const p = query.payout && db.crew_payouts.find((x) => x.id === query.payout);
+    if (p) { setEdit(p); go('/expenses/crew'); }
+  }, [query.payout, db.crew_payouts]); // eslint-disable-line react-hooks/exhaustive-deps
   const [member, setMember] = useState(null);
   const pays = db.crew_payouts.filter((p) => (p.paid_on || p.work_date)?.startsWith(year)).sort((a, b) => (a.work_date < b.work_date ? 1 : -1));
   const unpaid = db.crew_payouts.filter((p) => !p.paid_on);
@@ -636,7 +641,7 @@ function Crew() {
           {pays.map((p) => (
             <button key={p.id} className="list-row" style={{ gridTemplateColumns: '1fr auto' }} onClick={() => setEdit(p)}>
               <span className="col" style={{ gap: 0 }}><b style={{ fontWeight: 500 }}>{derived.crew[p.crew_id]?.name} · {p.description || 'Work'}</b><span className="small muted">{fmtDate(p.work_date)}{p.client_id ? ` · ${derived.clients[p.client_id]?.name}` : ''}</span></span>
-              <span className="col" style={{ alignItems: 'flex-end', gap: 2 }}><span className="num">{money(p.amount)}</span>{p.paid_on ? <span className="pill paid">Paid {fmtShort(p.paid_on)}</span> : <span className="pill overdue">Unpaid</span>}</span>
+              <span className="col" style={{ alignItems: 'flex-end', gap: 2 }}><span className="num">{money(p.amount)}</span>{p.paid_on ? <span className="pill paid">Paid {fmtShort(p.paid_on)}</span> : <PayDue p={p} />}</span>
             </button>
           ))}
         </section>
@@ -658,12 +663,21 @@ function Crew() {
   );
 }
 
+/** Unpaid, with its due date when it has one: "Due Oct 20" / "Due today" / "Overdue". */
+function PayDue({ p }) {
+  const today = todayISO();
+  if (!p.due_date) return <span className="pill overdue">Unpaid</span>;
+  if (p.due_date < today) return <span className="pill overdue">Overdue · {fmtShort(p.due_date)}</span>;
+  return <span className={`pill ${p.due_date === today ? 'partial' : 'sent'}`}>{p.due_date === today ? 'Due today' : `Due ${fmtShort(p.due_date)}`}</span>;
+}
+
 function PayoutModal({ p, onClose }) {
   const s = useStore();
   const isNew = !p.id;
-  const [f, setF] = useState({ crew_id: p.crew_id || s.db.crew_members[0]?.id, work_date: p.work_date || todayISO(), description: p.description || '', client_id: p.client_id || null, amount: p.amount ?? '', paid_on: p.paid_on || '', method: p.method || '' });
+  const [f, setF] = useState({ crew_id: p.crew_id || s.db.crew_members[0]?.id, work_date: p.work_date || todayISO(), description: p.description || '', client_id: p.client_id || null, amount: p.amount ?? '', paid_on: p.paid_on || '', method: p.method || '', due_date: p.due_date || '' });
   const save = async () => {
-    const row = { ...f, amount: num(f.amount), paid_on: f.paid_on || null, method: f.method || null };
+    const row = { ...f, amount: num(f.amount), paid_on: f.paid_on || null, method: f.method || null, due_date: f.due_date || null };
+    if (!row.due_date && p.due_date === undefined) delete row.due_date; // works before 016 is run, too
     if (isNew) await s.insert('crew_payouts', row);
     else await s.update('crew_payouts', p.id, row);
     onClose();
@@ -675,7 +689,9 @@ function PayoutModal({ p, onClose }) {
         <Field label="Work date"><DateInput value={f.work_date} onChange={(v) => setF({ ...f, work_date: v })} /></Field>
         <Field label="Amount"><MoneyInput value={f.amount} onChange={(v) => setF({ ...f, amount: v })} /></Field>
         <Field label="What for"><input className="input" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="e.g. AC, 2 days" /></Field>
+        <Field label="Due" hint="(optional)"><DateInput clearable value={f.due_date} onChange={(v) => setF({ ...f, due_date: v })} /></Field>
       </div>
+      {p.source_token && <a className="small" href={`#/i/${p.source_token}`} target="_blank" rel="noreferrer" style={{ alignSelf: 'flex-start' }}><Icon name="link" size={13} /> Their invoice #{p.source_number}</a>}
       <Combobox label="Client / job (optional)" value={f.client_id} options={s.db.clients.map((c) => ({ value: c.id, label: c.name }))} onChange={(v) => setF({ ...f, client_id: v })} placeholder="Search clients" />
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
         <Field label="Paid on" hint="(leave empty if unpaid)"><DateInput clearable value={f.paid_on} onChange={(v) => setF({ ...f, paid_on: v })} /></Field>

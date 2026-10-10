@@ -432,6 +432,8 @@ tr.row-drop td, .m-card.row-drop { background: var(--accent-bg) !important; box-
 .st-partial { background: var(--warn-bg); color: var(--warn); }
 .st-overdue { background: var(--bad-bg); color: #a8231a; }
 .st-paid, .st-accepted { background: var(--good-bg); color: var(--good); }
+.st-pay { background: #f1e8fb; color: #6b2fae; box-shadow: inset 2px 0 0 #8b4fd0; }
+:root[data-theme='dark'] .st-pay { background: #3a2a52; color: #d6b8ff; box-shadow: inset 2px 0 0 #b07cf0; }
 .cal-dots { display: none; }
 @media (max-width: 700px) {
   .scal { padding: 6px; }
@@ -446,6 +448,7 @@ tr.row-drop td, .m-card.row-drop { background: var(--accent-bg) !important; box-
   .cal-dots { display: none !important; }
   .cal-dots i { width: 6px; height: 6px; border-radius: 50%; }
   .cal-dots .st-sent { background: var(--accent); } .cal-dots .st-paid, .cal-dots .st-accepted { background: var(--good); }
+  .cal-dots .st-pay { background: #8b4fd0; }
   .cal-dots .st-overdue { background: var(--bad); } .cal-dots .st-partial { background: var(--warn); } .cal-dots .st-draft { background: var(--faint); }
 }
 .expander { all: unset; cursor: pointer; align-self: stretch; display: grid; place-items: center; height: 28px; border-radius: 8px; color: var(--muted); }

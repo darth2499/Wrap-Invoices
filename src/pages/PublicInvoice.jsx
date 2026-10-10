@@ -7,7 +7,7 @@ import { pdfFileName } from '../lib/format.js';
 import { buildInvoiceZip, downloadBlob } from '../lib/files.js';
 import { money, fmtLong, fmtShort, fmtTsDate, num } from '../lib/format.js';
 import { useRoute } from '../router.js';
-import { linkToken } from '../lib/publicFast.js';
+import { linkToken, storedAccessToken, isDemoLink } from '../lib/publicFast.js';
 
 export default function PublicInvoice({ token: rawToken }) {
   const token = linkToken(rawToken) || rawToken;
@@ -30,6 +30,18 @@ export default function PublicInvoice({ token: rawToken }) {
     setError('');
     get(false);
   }, [token, tries]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Import to Wrap: only for someone signed in to Wrap on this browser (checked by the server with their own
+  // sign-in). Everyone else, and the sender, never sees it. Loaded after the invoice, so the page isn't slowed down.
+  const [imp, setImp] = useState(null); // { state: new | changed | imported, id }
+  useEffect(() => {
+    if (data?.state !== 'open' || data.kind !== 'invoice' || !storedAccessToken() || isDemoLink(token)) return;
+    import('../api/supabase.js').then(({ api: me }) => me.importBill('import_status', token)).then((r) => setImp(['new', 'changed', 'imported'].includes(r.state) ? r : null)).catch(() => {});
+  }, [data, token]);
+  const doImport = async () => {
+    const { api: me } = await import('../api/supabase.js');
+    setImp(await me.importBill('import', token));
+  };
 
   useEffect(() => {
     if (data?.business?.business_name) document.title = `${data.kind === 'quote' ? 'Quote' : 'Invoice'} #${data.number} · ${data.business.business_name}`;
@@ -69,6 +81,8 @@ export default function PublicInvoice({ token: rawToken }) {
             </span>
           </div>
           <div className="row wrap">
+            {imp?.state === 'imported' && <Button icon="check" onClick={() => { window.location.hash = `#/expenses/crew?payout=${imp.id}`; }}>In your Wrap</Button>}
+            {imp && imp.state !== 'imported' && <Button icon={imp.state === 'changed' ? 'rotate' : 'plus'} busy={busy === 'imp'} onClick={() => run('imp', doImport)}>{imp.state === 'changed' ? 'Update in Wrap' : 'Import to Wrap'}</Button>}
             <Button icon="download" busy={busy === 'pdf'} onClick={() => run('pdf', async () => downloadBlob(new Blob([await pdf()], { type: 'application/pdf' }), pdfFileName(inv)))}>Download PDF</Button>
             {data.receipts.some((r) => r.url) && <Button variant="primary" icon="zip" busy={busy === 'zip'} onClick={() => run('zip', async () => downloadBlob(await buildInvoiceZip(await pdf(), pdfFileName(inv), data.receipts, data.lines), pdfFileName(inv).replace(/\.pdf$/, '_with_receipts.zip')))}>Download all (.zip)</Button>}
           </div>

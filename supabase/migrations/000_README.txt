@@ -13,3 +13,5 @@ Run these in the Supabase SQL Editor, in this order:
  12. 012_contacts.sql       (only if you set up before Oct 9, 2026 — already included in 001)
  13. 013_remove_public_page.sql (only if you ran 013_public_page.sql — removes it again)
  14. 014_plans.sql          (only if you set up before Oct 10, 2026 — already included in 001)
+ 15. 015_date_style.sql     (only if you set up before Oct 10, 2026 — already included in 001)
+ 16. 016_import_bills.sql   (only if you set up before Oct 10, 2026 — already included in 001)

@@ -143,6 +143,16 @@ export function buildFeed({ db, derived, statusOf, today }) {
     }
   }
 
+  // Bills you need to pay (imported invoices and payouts with a due date): coming up, due today, overdue.
+  for (const p of db.crew_payouts.filter((x) => !x.paid_on && x.due_date)) {
+    const name = derived.crew?.[p.crew_id]?.name || 'Crew';
+    const what = `${name} · ${money(p.amount)}${p.source_number ? ` · their #${p.source_number}` : ''}`;
+    const to = `/expenses/crew?payout=${p.id}`;
+    if (p.due_date === today) items.push({ key: `bd${p.id}`, icon: 'cash', tone: 'warn', title: `Pay ${name} today`, sub: what, at: `${today}T00:00:00`, when: 'Today', go: to, urgent: true });
+    else if (p.due_date < today) items.push({ key: `bo${p.id}`, icon: 'cash', tone: 'bad', title: `Payment to ${name} is overdue`, sub: `${what} · due ${daysBetween(p.due_date, today)} day${daysBetween(p.due_date, today) === 1 ? '' : 's'} ago`, todo: true, when: '', go: to });
+    else if (p.due_date <= addDays(today, 3)) items.push({ key: `bs${p.id}`, icon: 'cash', tone: 'muted', title: `Pay ${name} soon`, sub: what, at: null, when: ahead(p.due_date, today), go: to, upcoming: p.due_date });
+  }
+
   // Payments in
   for (const p of db.payments.filter((x) => x.paid_on && x.paid_on >= cutoff)) {
     const inv = derived.invoices[p.invoice_id];

@@ -172,6 +172,10 @@ export const api = {
     if (action === 'invoice') return takeEarly(payload.token, !!payload.preview) || publicRequest(payload.token, !!payload.preview);
     return call('public', { action, ...payload }, { auth: false });
   },
+  /** "Import to Wrap" on a client link: your own sign-in (refreshed if needed) goes along. action: import_status | import */
+  importBill(action, token) {
+    return call('public', { action, token });
+  },
   /** The invoice PDF, made on the server from the saved invoice. */
   async publicPdf(token) {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/public`, {

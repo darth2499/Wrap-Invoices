@@ -39,6 +39,7 @@ create table if not exists public.profiles (
   footer_note          text,
   next_invoice_number  integer not null default 1,
   next_quote_number    integer not null default 1,
+  date_style           text not null default 'mmdd' check (date_style in ('mmdd','mon_d','mon_dd','d_mon','ddmm','iso')),
   default_terms_days   integer not null default 30,
   ot_base_hours        numeric(5,2) not null default 10,
   ot_mult1             numeric(5,2) not null default 1.5,
@@ -292,11 +293,18 @@ create table if not exists public.crew_payouts (
   amount      numeric(12,2) not null default 0,
   paid_on     date,
   method      text,
+  due_date       date,
+  source_number  text,
+  source_token   text,
+  source_key     text,
+  source_version text,
   created_at  timestamptz not null default now(),
   foreign key (crew_id, owner_id) references public.crew_members(id, owner_id) on delete restrict,
   foreign key (client_id, owner_id) references public.clients(id, owner_id) on delete set null (client_id),
   foreign key (invoice_id, owner_id) references public.invoices(id, owner_id) on delete set null (invoice_id)
 );
+
+create unique index if not exists crew_payouts_source_key on public.crew_payouts (source_key) where source_key is not null;
 
 create table if not exists public.form1099 (
   id              uuid primary key default gen_random_uuid(),
