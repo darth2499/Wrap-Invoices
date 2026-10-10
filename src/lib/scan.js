@@ -134,12 +134,13 @@ export function findPaper(canvas) {
   for (let i = 0; i < g.length; i++) mask[i] = g[i] > t ? 1 : 0;
   // Largest bright connected region.
   const label = new Int32Array(w * h).fill(-1);
-  let bestId = -1, bestSize = 0, bestTouches = 0;
+  let bestId = -1, bestSize = 0, bestTouches = 0, bestSides = null;
   const stack = new Int32Array(w * h);
   let id = 0;
   for (let s = 0; s < mask.length; s++) {
     if (!mask[s] || label[s] !== -1) continue;
     let sp = 0, size = 0, touches = 0;
+    const sides = [0, 0, 0, 0]; // top, right, bottom, left: how much of each frame edge the region runs along
     stack[sp++] = s;
     label[s] = id;
     while (sp) {
@@ -147,18 +148,26 @@ export function findPaper(canvas) {
       size++;
       const x = i % w, y = (i / w) | 0;
       if (x === 0 || y === 0 || x === w - 1 || y === h - 1) touches++;
+      if (y === 0) sides[0]++;
+      if (x === w - 1) sides[1]++;
+      if (y === h - 1) sides[2]++;
+      if (x === 0) sides[3]++;
       if (x > 0 && mask[i - 1] && label[i - 1] === -1) { label[i - 1] = id; stack[sp++] = i - 1; }
       if (x < w - 1 && mask[i + 1] && label[i + 1] === -1) { label[i + 1] = id; stack[sp++] = i + 1; }
       if (y > 0 && mask[i - w] && label[i - w] === -1) { label[i - w] = id; stack[sp++] = i - w; }
       if (y < h - 1 && mask[i + w] && label[i + w] === -1) { label[i + w] = id; stack[sp++] = i + w; }
     }
-    if (size > bestSize) { bestSize = size; bestId = id; bestTouches = touches; }
+    if (size > bestSize) { bestSize = size; bestId = id; bestTouches = touches; bestSides = sides; }
     id++;
   }
   const area = w * h;
   if (bestId < 0 || bestSize < area * 0.08) return null;
   // A region hugging the whole border is the background, not a receipt.
   if (bestTouches > 2 * (w + h) * 0.6) return null;
+  // Paper running along three or more edges of the photo means it fills the frame (a close-up, or a ticket
+  // shot flat): there's no edge to crop to, and "cropping" would only cut part of it off (e.g. at a fold's shadow).
+  const along = bestSides.map((n, i) => n / (i % 2 ? h : w));
+  if (along.filter((f) => f > 0.25).length >= 3) return null;
   const pts = [];
   for (let y = 0; y < h; y++) {
     let minX = -1, maxX = -1;

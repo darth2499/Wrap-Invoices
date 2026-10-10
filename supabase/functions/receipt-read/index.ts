@@ -23,11 +23,14 @@ Find the amount that was ACTUALLY PAID. Rules:
 - For hotel folios, use the total charges paid (payments line), not the remaining balance (often 0.00).
 - For parking stubs, use the amount paid.
 - If two totals disagree, choose the one at the payment step and set confidence to "low".
-- Write the date as YYYY-MM-DD. US receipts write MM/DD/YY; most other countries write DD/MM/YY. Decide from the receipt's country, address, currency or language (a number over 12 is always the day); if nothing tells you, assume US.
+- A price with a quantity (e.g. "2x 50.00", "2 @ $50") is a per-item price, not the total: the total is the amount charged (e.g. "USD 100.00").
+- Tickets and airline/baggage receipts: the total is the currency amount line (e.g. "USD 100.00"), not a fee or per-bag price.
+- Copy the date exactly as printed into "date_printed" (e.g. "10/09/2026 8:48 pm"). Don't reorder it; it's worked out afterwards.
+- "country": the 2-letter country of the business, from its address, phone number, currency or language (e.g. "US"), or null.
 Pick the best tax category for the expense from this list: ${CATEGORIES.join("; ")}.`;
 
 const RECEIPT_JSON = `Reply with ONLY one JSON object, no other text, in exactly this shape (use null when unknown):
-{"is_receipt": true, "vendor": "Business name", "date": "YYYY-MM-DD", "total_paid": 0.00, "subtotal": null, "tax": null, "tip": null,
+{"is_receipt": true, "vendor": "Business name", "date_printed": "as printed", "date": "YYYY-MM-DD", "country": "US", "total_paid": 0.00, "subtotal": null, "tax": null, "tip": null,
  "currency": "USD", "reasoning": "one short sentence: which line is the total and why",
  "amounts": [{"label": "Subtotal", "amount": 0.00}], "category": "one of the categories", "confidence": "high|medium|low"}
 "amounts" lists every OTHER money amount someone might confuse with the total (subtotal, tax, tip, items, tendered, change).`;
@@ -62,6 +65,51 @@ function toDate(v: unknown): string | null {
   return null;
 }
 
+/**
+ * The receipt's date, worked out here from the date exactly as printed (models often swap month and day).
+ *   - written with a month name or as 2026-10-09: no doubt
+ *   - 25/09 or 09/25: the number over 12 is the day
+ *   - otherwise month first (US) unless the business is in a country that writes the day first
+ *   - and never a date in the future when the other reading isn't
+ */
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const MONTH_FIRST = ["US", "PH", "FM", "MH", "PW", "AS", "GU", "PR", "VI", "MP", "UM", "CA"];
+function receiptDate(printed: unknown, fallback: unknown, country: unknown): string | null {
+  const s = String(printed ?? "").trim();
+  const iso = (y: number, m: number, d: number) => {
+    const t = new Date(Date.UTC(y, m - 1, d));
+    return t.getUTCMonth() === m - 1 && t.getUTCDate() === d ? `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null;
+  };
+  const year = (y: string | undefined) => (!y ? new Date().getUTCFullYear() : y.length === 2 ? 2000 + Number(y) : Number(y));
+  let m = s.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) return iso(+m[1], +m[2], +m[3]) ?? toDate(fallback);
+  m = s.match(/\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4}|\d{2})\b/) || s.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{4}|\d{2})\b/);
+  if (m) {
+    const [mon, day] = /^\d/.test(m[1]) ? [m[2], m[1]] : [m[1], m[2]];
+    const mi = MONTHS.indexOf(mon.toLowerCase().slice(0, 3));
+    if (mi >= 0) return iso(year(m[3]), mi + 1, +day) ?? toDate(fallback);
+  }
+  m = s.match(/\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{4}|\d{2}))?\b/);
+  if (m) {
+    const a = +m[1];
+    const b = +m[2];
+    const y = year(m[3]);
+    const md = iso(y, a, b);
+    const dm = iso(y, b, a);
+    if (md && !dm) return md;
+    if (dm && !md) return dm;
+    if (md && dm) {
+      const first = String(country ?? "").toUpperCase();
+      let pick = first && !MONTH_FIRST.includes(first) ? dm : md;
+      const other = pick === md ? dm : md;
+      const soon = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+      if (pick > soon && other <= soon) pick = other;
+      return pick;
+    }
+  }
+  return toDate(fallback);
+}
+
 /** Pulls the first JSON object out of a model reply (handles ```json fences and chatter). */
 function parseJson(raw: unknown): Record<string, unknown> {
   if (raw && typeof raw === "object") return raw as Record<string, unknown>;
@@ -78,7 +126,7 @@ function cleanReceipt(r: Record<string, any>) {
   const out = {
     is_receipt: r.is_receipt !== false,
     vendor: r.vendor ? String(r.vendor).slice(0, 120) : null,
-    date: toDate(r.date),
+    date: receiptDate(r.date_printed, r.date, r.country),
     total_paid: toNum(r.total_paid ?? r.total),
     subtotal: toNum(r.subtotal),
     tax: toNum(r.tax),
