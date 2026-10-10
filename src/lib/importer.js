@@ -345,6 +345,49 @@ export function withDays(l, issueDate) {
   return per ? { ...out, qty: n, rate: per } : out;
 }
 
+/**
+ * Rejects anything that isn't clearly a real invoice before it's imported. Each check names what was wrong.
+ *   - an invoice number, an invoice date, a total above $0
+ *   - at least one line with an amount above $0, and every line's qty × rate = its amount
+ *   - the lines add up to the total (allowing for a discount, and tax up to 30%)
+ *   - payments aren't more than the total
+ *   - when the PDF has text: the total really appears in it (so a misread or made-up number can't get through)
+ * Returns null when it's fine, or the reason it was rejected.
+ */
+export function invoiceProblem(r, text = '') {
+  if (!r || typeof r !== 'object') return 'Nothing could be read from it';
+  if (r.is_invoice === false) return 'This doesn’t look like an invoice';
+  const fin = (v) => typeof v === 'number' ? Number.isFinite(v) : v !== null && v !== undefined && v !== '' && Number.isFinite(Number(String(v).replace(/[$,\s]/g, '')));
+  const n = (v) => Number(String(v ?? '').replace(/[$,\s]/g, ''));
+  const number = String(r.number ?? '').replace(/^#/, '').trim();
+  if (!number) return 'No invoice number found';
+  if (!toDate(r.issue_date)) return 'No invoice date found';
+  if (!fin(r.total) || n(r.total) <= 0) return 'The total is $0 or missing';
+  const total = n(r.total);
+  const lines = Array.isArray(r.lines) ? r.lines : [];
+  if (!lines.length) return 'It has no line items';
+  let sum = 0;
+  for (const l of lines) {
+    if (!fin(l.amount)) return `A line (${l.item || 'unnamed'}) has no amount`;
+    const amt = n(l.amount);
+    sum += amt;
+    if (fin(l.qty) && fin(l.rate) && n(l.rate) !== 0) {
+      const calc = n(l.qty) * n(l.rate);
+      if (Math.abs(calc - amt) > Math.max(0.011, Math.abs(amt) * 0.01)) return `A line (${l.item || 'unnamed'}) doesn’t add up: ${n(l.qty)} × ${n(l.rate)} isn’t ${amt}`;
+    }
+  }
+  if (!lines.some((l) => n(l.amount) > 0)) return 'Every line is $0';
+  const net = round2(sum - (fin(r.discount) ? Math.abs(n(r.discount)) : 0));
+  if (net <= 0 || total < net - 0.011 - net * 0.005 || total > net * 1.3 + 0.011) return `The lines add up to ${net.toFixed(2)}, but the total says ${total.toFixed(2)}`;
+  const paid = (Array.isArray(r.payments) ? r.payments : []).reduce((t, p) => t + (fin(p?.amount) ? n(p.amount) : 0), 0);
+  if (paid > total + 0.011) return 'The payments are more than the total';
+  if (String(text).replace(/\s/g, '').length > 30) {
+    const flat = String(text).replace(/[\s,$]/g, '');
+    if (!flat.includes(total.toFixed(2))) return `The total (${total.toFixed(2)}) doesn’t appear anywhere in the PDF`;
+  }
+  return null;
+}
+
 /** Reads a Wave invoice PDF (its text, pulled out in the browser) and returns an import-ready invoice. */
 export async function invoiceFromPdf(file, api) {
   const { pdfText, pdfFirstPageImage, blobToBase64 } = await import('./pdftext.js');
@@ -358,6 +401,8 @@ export async function invoiceFromPdf(file, api) {
       : { image_b64: await blobToBase64(await pdfFirstPageImage(file, 2000)), image_mime: 'image/jpeg' };
     r = await api.readInvoicePdf(payload);
   }
+  const problem = invoiceProblem(r, text);
+  if (problem) throw new Error(`Not imported — ${problem.charAt(0).toLowerCase()}${problem.slice(1)}.`);
   return {
     number: String(r.number || '').replace(/^#/, ''),
     client: r.client_name,

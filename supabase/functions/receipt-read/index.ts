@@ -41,10 +41,11 @@ Reply with ONLY this JSON: {"upright": "A"} (or "B", "C", "D").`;
 const INVOICE_RULES = `This is an invoice the user sent to a client (for example exported from Wave). Read every line item across all pages, keeping each item's description lines.`;
 
 const INVOICE_JSON = `Reply with ONLY one JSON object, no other text, in exactly this shape (use null when unknown):
-{"number": "193", "client_name": "Bill-to name", "client_email": null, "client_address": "line 1\\nline 2",
+{"is_invoice": true, "number": "193", "client_name": "Bill-to name", "client_email": null, "client_address": "line 1\\nline 2",
  "issue_date": "YYYY-MM-DD", "due_date": "YYYY-MM-DD",
  "lines": [{"item": "Camera Operator", "description": "Felicis (04/06)", "note": null, "qty": 1, "rate": 750.00, "amount": 750.00}],
- "total": 0.00, "payments": [{"date": "YYYY-MM-DD", "amount": 0.00, "method": "bank payment"}], "amount_due": 0.00, "notes": "Month of April"}`;
+ "total": 0.00, "payments": [{"date": "YYYY-MM-DD", "amount": 0.00, "method": "bank payment"}], "amount_due": 0.00, "notes": "Month of April"}
+"is_invoice" is false if this is not an invoice (a receipt, a letter, a blank page…). Never guess numbers: use null for anything not printed on it.`;
 
 // ---------------------------------------------------------------- helpers
 const toNum = (v: unknown): number | null => {
@@ -103,6 +104,7 @@ function cleanReceipt(r: Record<string, any>) {
 
 function cleanInvoice(r: Record<string, any>) {
   return {
+    is_invoice: r.is_invoice !== false,
     number: String(r.number ?? "").replace(/^#/, ""),
     client_name: r.client_name ?? "",
     client_email: r.client_email ?? null,
@@ -111,9 +113,9 @@ function cleanInvoice(r: Record<string, any>) {
     due_date: toDate(r.due_date),
     lines: (Array.isArray(r.lines) ? r.lines : []).map((l: any) => ({
       item: String(l?.item ?? "Item"), description: l?.description ?? null, note: l?.note ?? null,
-      qty: toNum(l?.qty) ?? 1, rate: toNum(l?.rate) ?? 0, amount: toNum(l?.amount) ?? 0,
+      qty: toNum(l?.qty) ?? 1, rate: toNum(l?.rate), amount: toNum(l?.amount),
     })),
-    total: toNum(r.total) ?? 0,
+    total: toNum(r.total),
     payments: (Array.isArray(r.payments) ? r.payments : []).map((p: any) => ({ date: toDate(p?.date), amount: toNum(p?.amount) ?? 0, method: p?.method ?? null })),
     amount_due: toNum(r.amount_due) ?? 0,
     notes: r.notes ?? null,
