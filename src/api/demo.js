@@ -328,6 +328,7 @@ export const api = {
 
   // In demo mode there's no AI: fake a plausible read so the review screen can be tried.
   async readReceipt(key, mime, extra = {}) {
+    if (extra.mode === 'upright') return { upright: 'A' };
     await delay(700);
     if (extra.text) {
       // PDF receipts: a simple text read so the demo shows real values.

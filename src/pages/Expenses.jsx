@@ -12,13 +12,53 @@ import { takeFiles, onFiles } from '../lib/scanQueue.js';
 import { rateFor, followsIrs } from '../lib/mileage.js';
 import { suggestContext, receiptScore } from '../lib/suggest.js';
 
+/**
+ * Click a vendor, date, category or amount in the table to change it right there (Enter or click away saves,
+ * Esc cancels). A receipt billed on an invoice updates that invoice's line too.
+ */
+function EditCell({ r, field, children }) {
+  const s = useStore();
+  const [editing, setEditing] = useState(false);
+  const [v, setV] = useState('');
+  const start = (e) => {
+    e.stopPropagation();
+    setV(field === 'total' ? (r.total ?? '') : (r[field] ?? ''));
+    setEditing(true);
+  };
+  const save = async (val = v) => {
+    setEditing(false);
+    const next = field === 'total' ? (String(val).trim() === '' ? null : round2(String(val).replace(/[$,\s]/g, ''))) : (val || null);
+    if (next === (r[field] ?? null) || (field === 'total' && Number.isNaN(next))) return;
+    try {
+      await s.update('receipts', r.id, { [field]: next });
+      if (r.invoice_id && r.billable) await setBillable(s, s.derived.invoices[r.invoice_id], { ...r, [field]: next }, true);
+    } catch (e) { s.toast(e.message, { error: true }); }
+  };
+  const key = (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') setEditing(false); };
+  if (!editing) return <span className="cell-edit" role="button" tabIndex={0} onClick={start} onKeyDown={(e) => e.key === 'Enter' && start(e)}>{children}</span>;
+  return (
+    <span className="cell-editing" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      {field === 'category' ? (
+        <select className="input" autoFocus value={v} onChange={(e) => save(e.target.value)} onBlur={() => setEditing(false)} onKeyDown={key} aria-label="Category">
+          <option value="">Uncategorized</option>
+          {categoryList(s.db.profile).map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+        </select>
+      ) : field === 'receipt_date' ? (
+        <DateInput value={v} defaultOpen onChange={(d) => save(d)} onDismiss={() => setEditing(false)} aria-label="Date" />
+      ) : (
+        <input className={`input${field === 'total' ? ' num right' : ''}`} autoFocus value={v} inputMode={field === 'total' ? 'decimal' : undefined} onChange={(e) => setV(e.target.value)} onBlur={() => save()} onKeyDown={key} onFocus={(e) => e.target.select()} aria-label={field === 'total' ? 'Amount' : 'Vendor'} />
+      )}
+    </span>
+  );
+}
+
 // Receipt table columns (drag a header to reorder, click to sort).
 const RCOLS = {
-  vendor: { label: 'Vendor', sort: (r) => String(r.vendor || '').toLowerCase(), cell: (r) => <><div style={{ fontWeight: 500 }}>{r.vendor || <span className="muted">Unknown vendor</span>}</div>{r.status === 'review' && <Pill kind="review">Check</Pill>}</> },
-  date: { label: 'Date', sort: (r) => r.receipt_date || '', cell: (r) => <span className="muted">{fmtDate(r.receipt_date) || '—'}</span> },
-  category: { label: 'Category', sort: (r) => categoryLabel(r.category), cell: (r) => <span className="muted small">{categoryLabel(r.category)}</span> },
+  vendor: { label: 'Vendor', sort: (r) => String(r.vendor || '').toLowerCase(), cell: (r) => <><EditCell r={r} field="vendor"><span style={{ fontWeight: 500 }}>{r.vendor || <span className="muted">Unknown vendor</span>}</span></EditCell>{r.status === 'review' && <div><Pill kind="review">Check</Pill></div>}</> },
+  date: { label: 'Date', sort: (r) => r.receipt_date || '', cell: (r) => <EditCell r={r} field="receipt_date"><span className="muted">{fmtDate(r.receipt_date) || '—'}</span></EditCell> },
+  category: { label: 'Category', sort: (r) => categoryLabel(r.category), cell: (r) => <EditCell r={r} field="category"><span className="muted small">{categoryLabel(r.category)}</span></EditCell> },
   invoice: { label: 'Invoice', sort: (r) => r.invoice_id || '', cell: (r, derived) => (r.invoice_id ? <a href={`#/invoices/${r.invoice_id}`} onClick={(e) => e.stopPropagation()} className="pill sent" style={{ textDecoration: 'none' }}>#{derived.invoices[r.invoice_id]?.number}{r.billable ? ' · billed' : ''}</a> : <span className="small muted">—</span>) },
-  amount: { label: 'Amount', right: true, sort: (r) => num(r.total), cell: (r) => (r.total != null ? money(r.total) : '—') },
+  amount: { label: 'Amount', right: true, sort: (r) => num(r.total), cell: (r) => <EditCell r={r} field="total">{r.total != null ? money(r.total) : '—'}</EditCell> },
 };
 
 export default function Expenses({ tab, query }) {
@@ -87,7 +127,7 @@ function Receipts({ query }) {
       const id = items[i].id;
       const setItem = (patch) => setQueue((qq) => qq.map((x) => (x.id === id ? { ...x, ...patch } : x)));
       setItem({ status: 'working' });
-      const res = await addReceiptFile(f, { api: s.api, receipts: known, onStep: (step) => setItem({ step }) });
+      const res = await addReceiptFile(f, { api: s.api, receipts: known, confirm: s.confirm, onStep: (step) => setItem({ step }) });
       if (res.status === 'added') {
         known.push(res.receipt);
         added.push(res.receipt);
@@ -380,7 +420,6 @@ export function ReceiptModal({ id, onClose, onNext }) {
             {r.file_key && url && (
               <div className="rv-tools">
                 {!isPdf && <button type="button" className="icon-btn" onClick={rotate} disabled={fileBusy} title="Rotate" aria-label="Rotate"><Icon name="rotate" size={16} /></button>}
-                <a className="icon-btn" href={isPdf ? pdf?.url : url} target="_blank" rel="noreferrer" title="Open full size" aria-label="Open full size"><Icon name="expand" size={16} /></a>
                 <button type="button" className="icon-btn" onClick={() => attachFile()} disabled={fileBusy} title="Replace file" aria-label="Replace file"><Icon name="upload" size={16} /></button>
               </div>
             )}

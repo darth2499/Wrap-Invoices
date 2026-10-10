@@ -28,21 +28,27 @@ export function receiptFileName(r, ext) {
   return `${r.receipt_date || 'undated'}-${vendor}.${ext}`;
 }
 
+/** File names for a set of receipts, with " (2)", " (3)"… added when two would share a name. Map: receipt → name. */
+export function receiptNames(list) {
+  const used = new Set();
+  const out = new Map();
+  for (const r of [...list].sort((a, b) => String(a.receipt_date || a.date || '').localeCompare(String(b.receipt_date || b.date || '')) || String(a.id || '').localeCompare(String(b.id || '')))) {
+    let name = receiptFileName({ ...r, receipt_date: r.receipt_date || r.date }, extFor(r.mime, 'jpg'));
+    for (let i = 2; used.has(name.toLowerCase()); i++) name = name.replace(/( \(\d+\))?(\.\w+)$/, ` (${i})$2`);
+    used.add(name.toLowerCase());
+    out.set(r, name);
+  }
+  return out;
+}
+
 /** Zip of the invoice PDF plus every attached receipt. receipts: [{ url, vendor, receipt_date|date, total, mime }] */
 export async function buildInvoiceZip(pdfBytes, pdfName, receipts) {
   const zip = new (await loadZip())();
   zip.file(pdfName, pdfBytes);
-  const used = new Set();
   const withFiles = receipts.filter((r) => r.url);
+  const names = receiptNames(withFiles);
   const folder = withFiles.length ? zip.folder('Receipts') : null;
-  for (const r of withFiles) {
-    const blob = await (await fetch(r.url)).blob();
-    let name = receiptFileName({ ...r, receipt_date: r.receipt_date || r.date }, extFor(r.mime || blob.type, 'jpg'));
-    let i = 2;
-    while (used.has(name)) name = name.replace(/(\.\w+)$/, ` (${i++})$1`);
-    used.add(name);
-    folder.file(name, blob);
-  }
+  for (const r of withFiles) folder.file(names.get(r), await (await fetch(r.url)).blob());
   return zip.generateAsync({ type: 'blob' });
 }
 

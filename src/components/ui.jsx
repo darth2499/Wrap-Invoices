@@ -46,7 +46,6 @@ const PATHS = {
   user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
   convert: <><path d="M4 7h13l-3-3M20 17H7l3 3" /></>,
   rotate: <><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></>,
-  expand: <><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" /></>,
   database: <><ellipse cx="12" cy="6" rx="8" ry="3" /><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" /></>,
 };
 
@@ -375,8 +374,9 @@ export function MonthGrid({ year, month, onPick }) {
 }
 
 /** A date field that opens the same calendar used everywhere else (tap the month to jump months/years). */
-export function DateInput({ value, onChange, placeholder = 'Pick a date', clearable = false, align = 'left', 'aria-label': aria }) {
-  const [open, setOpen] = useState(false);
+export function DateInput({ value, onChange, placeholder = 'Pick a date', clearable = false, align = 'left', 'aria-label': aria, defaultOpen = false, onDismiss }) {
+  const [open, setOpenRaw] = useState(defaultOpen);
+  const setOpen = (v) => setOpenRaw((o) => { const n = typeof v === 'function' ? v(o) : v; if (o && !n && onDismiss) setTimeout(onDismiss); return n; });
   const label = value ? parseISO(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
   return (
     <Popover open={open} setOpen={setOpen} align={align} width={310}

@@ -7,7 +7,7 @@ import { MonthBars, MONTHS } from '../components/charts.jsx';
 import { lineFor } from '../lib/categories.js';
 import { statusOf } from '../lib/calc.js';
 import { money, fmtDate, fmtLong, num, todayISO, daysBetween, round2 } from '../lib/format.js';
-import { toCSV, downloadBlob, receiptFileName, extFor } from '../lib/files.js';
+import { toCSV, downloadBlob, receiptNames } from '../lib/files.js';
 import { go } from '../router.js';
 import { shootDays } from '../lib/shoots.js';
 
@@ -262,11 +262,12 @@ function TaxExport({ year }) {
   const [busy, setBusy] = useState('');
   const { derived } = s;
   const csvs = () => {
+    const names = receiptNames(d.receipts.filter((r) => r.file_key));
     const receipts = toCSV([...d.receipts].sort((a, b) => (a.receipt_date < b.receipt_date ? -1 : 1)), [
       { label: 'Date', get: 'receipt_date' }, { label: 'Vendor', get: 'vendor' }, { label: 'Category', get: 'category' },
       { label: 'Schedule C line', get: (r) => (r.category ? lineFor(r.category) : '') }, { label: 'Amount', get: (r) => num(r.total).toFixed(2) },
       { label: 'Billed to client', get: (r) => (r.billable ? `Invoice #${derived.invoices[r.invoice_id]?.number}` : '') }, { label: 'Notes', get: 'notes' },
-      { label: 'File', get: (r) => (r.file_key ? `receipts/${receiptFileName(r, extFor(r.mime, 'jpg'))}` : '') },
+      { label: 'File', get: (r) => (names.has(r) ? `receipts/${names.get(r)}` : '') },
     ]);
     const income = toCSV([...d.payments].sort((a, b) => (a.paid_on < b.paid_on ? -1 : 1)), [
       { label: 'Date received', get: 'paid_on' }, { label: 'Invoice', get: (p) => derived.invoices[p.invoice_id]?.number },
@@ -303,6 +304,7 @@ function TaxExport({ year }) {
       if (d.trips.length) zip.file(`${year} mileage log.csv`, c.mileage);
       if (d.crew.length) zip.file(`${year} crew payouts.csv`, c.crew);
       const withFiles = d.receipts.filter((r) => r.file_key);
+      const names = receiptNames(withFiles);
       const urls = await s.api.files.urls(withFiles.map((r) => r.file_key));
       const folder = zip.folder('receipts');
       let n = 0;
@@ -310,7 +312,7 @@ function TaxExport({ year }) {
         setBusy(`Receipts ${++n}/${withFiles.length}`);
         try {
           const blob = await (await fetch(urls[r.file_key])).blob();
-          folder.file(receiptFileName(r, extFor(r.mime, 'jpg')), blob);
+          folder.file(names.get(r), blob);
         } catch { /* skip missing file */ }
       }
       downloadBlob(await zip.generateAsync({ type: 'blob' }), `Taxes ${year} — ${s.db.profile.business_name || 'Wrap'}.zip`);

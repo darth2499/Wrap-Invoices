@@ -1,10 +1,21 @@
 // The full "add a receipt" pipeline: duplicate check → scan → upload → read with AI → duplicate check again → save.
 import { sha256, extFor } from './files.js';
-import { scanReceipt, shrinkOriginal, compressPhoto, readingCopy } from './scan.js';
+import { scanReceipt, shrinkOriginal, compressPhoto, orientationChoices, turnedFile } from './scan.js';
 import { round2 } from './format.js';
-import { pdfText, pdfFirstPageImage, blobToBase64 } from './pdftext.js';
+import { pdfText, pdfFirstPageImage, pdfToJpeg, blobToBase64 } from './pdftext.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** Degrees to turn a photo clockwise so its text is upright (0 when unsure). */
+export async function uprightTurn(api, file) {
+  try {
+    const { options, picture } = await orientationChoices(file);
+    const res = await api.readReceipt(null, 'image/jpeg', { mode: 'upright', image_b64: await blobToBase64(picture), image_mime: 'image/jpeg' });
+    return res?.upright === 'B' ? options[1] : options[0];
+  } catch {
+    return 0;
+  }
+}
 
 /** True if two receipts look like the same purchase (same day, same total, similar vendor). */
 export function looksSame(a, b) {
@@ -20,7 +31,27 @@ export function looksSame(a, b) {
  * Adds one receipt file. Returns { status: 'added'|'duplicate'|'error', receipt?, message }.
  * ctx: { api, receipts (existing list), onStep(text) }
  */
-export async function addReceiptFile(file, { api, receipts, onStep = () => {}, invoiceId = null, billable = false, mode = 'clean' }) {
+export const BIG_PDF = 5 * 1024 * 1024;
+const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
+
+/** A PDF over 5 MB: offer to keep a JPEG of its pages instead. Returns the JPEG blob, or null to keep the PDF. */
+async function maybeShrinkPdf(file, confirm) {
+  if (file.size <= BIG_PDF || !confirm) return null;
+  try {
+    const { blob, pages, total } = await pdfToJpeg(file);
+    if (!blob || blob.size >= file.size * 0.7) return null;
+    const ok = await confirm({
+      title: `Save ${file.name} as a picture?`,
+      body: `This PDF is ${mb(file.size)}. As a JPG it's ${mb(blob.size)}${total > pages ? ` (first ${pages} of ${total} pages)` : ''}. It's already been read either way.`,
+      ok: 'Save as JPG', cancel: 'Keep the PDF',
+    });
+    return ok ? blob : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function addReceiptFile(file, { api, receipts, onStep = () => {}, invoiceId = null, billable = false, mode = 'clean', confirm = null }) {
   const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
   const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp)$/i.test(file.name);
   if (!isPdf && !isImage) return { status: 'error', message: `${file.name}: only photos and PDFs can be added` };
@@ -38,6 +69,7 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
     let cropped = false;
     let readWith = {};
     let scanned = null;
+    let photo = file;
     if (isPdf) {
       onStep('Reading the PDF…');
       try {
@@ -47,15 +79,18 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
       } catch (e) {
         console.warn('PDF read failed', e);
       }
-      onStep('Uploading PDF…');
-      mime = 'application/pdf';
-      fileKey = await api.files.upload(file, { folder: 'receipts', ext: 'pdf' });
+      const jpg = await maybeShrinkPdf(file, confirm);
+      onStep('Uploading…');
+      mime = jpg ? 'image/jpeg' : 'application/pdf';
+      fileKey = await api.files.upload(jpg || file, { folder: 'receipts', ext: jpg ? 'jpg' : 'pdf' });
       uploaded.push(fileKey);
     } else {
+      onStep('Turning it the right way up…');
+      photo = await turnedFile(file, await uprightTurn(api, file)).catch(() => file);
       onStep('Straightening and cleaning up…');
       let scan;
       try {
-        scan = await scanReceipt(file, { mode });
+        scan = await scanReceipt(photo, { mode });
       } catch (e) {
         return { status: 'error', message: `${file.name}: this photo format can't be opened here. Try a JPEG or PNG. (${e.message})` };
       }
@@ -75,15 +110,9 @@ export async function addReceiptFile(file, { api, receipts, onStep = () => {}, i
     if (!isPdf) {
       // Read first (from the sharp copy), then store the compressed copies.
       onStep('Uploading…');
-      let scanBlob = scanned.scan;
-      let original = await shrinkOriginal(file);
-      if (ai?.rotation) {
-        // The reader says the photo is sideways or upside down: store it upright.
-        const t = await compressPhoto(scanned.scan, { maxSide: 1600, quality: 0.72, turn: ai.rotation }).catch(() => null);
-        if (t?.turned) { scanBlob = t.blob; original = (await compressPhoto(file, { turn: t.turned })).blob; }
-      }
+      const original = await shrinkOriginal(photo);
       [fileKey, originalKey] = await Promise.all([
-        api.files.upload(scanBlob, { folder: 'receipts', ext: 'jpg' }),
+        api.files.upload(scanned.scan, { folder: 'receipts', ext: 'jpg' }),
         api.files.upload(original, { folder: 'originals', ext: extFor(original.type, 'jpg') }),
       ]);
       uploaded.push(fileKey, originalKey);
@@ -147,17 +176,17 @@ export async function attachToReceipt(s, r, file) {
   const hash = await sha256(file);
   const up = (blob, folder, ext) => s.api.files.upload(blob, { folder, ext });
   let patch;
+  const twin = s.db.receipts.find((x) => x.id !== r.id && x.file_hash === hash);
+  if (twin) throw new Error(`This file is already on another receipt (${twin.vendor || 'no vendor'}${twin.receipt_date ? `, ${twin.receipt_date}` : ''}).`);
   if (isPdf) {
-    patch = { file_key: await up(file, 'receipts', 'pdf'), original_key: null, mime: 'application/pdf' };
+    const jpg = await maybeShrinkPdf(file, s.confirm);
+    patch = jpg
+      ? { file_key: await up(jpg, 'receipts', 'jpg'), original_key: null, mime: 'image/jpeg' }
+      : { file_key: await up(file, 'receipts', 'pdf'), original_key: null, mime: 'application/pdf' };
   } else {
-    // Kept as the photo (no cleanup), just upright and compressed. The reader is asked only which way is up.
-    let turn = 0;
+    // Kept as the photo (no cleanup), just turned upright and compressed.
     try {
-      const copy = await readingCopy(file, 1000);
-      turn = (await s.api.readReceipt(null, 'image/jpeg', { image_b64: await blobToBase64(copy), image_mime: 'image/jpeg' }))?.rotation || 0;
-    } catch { /* keep it as taken */ }
-    try {
-      const { blob } = await compressPhoto(file, { turn });
+      const blob = await compressPhoto(file, { turn: await uprightTurn(s.api, file) });
       patch = { file_key: await up(blob, 'receipts', 'jpg'), original_key: null, mime: 'image/jpeg' };
     } catch {
       // A format this browser can't open (e.g. HEIC outside Safari): store as is.

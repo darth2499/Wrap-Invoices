@@ -398,16 +398,40 @@ function looksSideways(src) {
 }
 
 /**
- * The photo as it will be stored: upright (camera orientation, plus the reader's suggested turn when the text
- * really is sideways or upside down), at most `maxSide` px, JPEG. `turn` = degrees clockwise.
+ * Which way is up, step 1 (in the browser): printed lines show whether the photo is sideways, which leaves two
+ * possible turns (0 or 180, or 90 or 270). Both are drawn side by side, labeled A and B, for the reader to pick from.
  */
+export async function orientationChoices(file) {
+  const bmp = await decode(file);
+  const options = looksSideways(bmp) ? [90, 270] : [0, 180];
+  const [a, b] = options.map((d) => turned(toCanvas(bmp, 640), d));
+  const band = 56;
+  const c = document.createElement('canvas');
+  c.width = a.width + b.width + 24;
+  c.height = Math.max(a.height, b.height) + band;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(a, 0, band);
+  ctx.drawImage(b, a.width + 24, band);
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 40px sans-serif';
+  ctx.fillText('A', 12, 44);
+  ctx.fillText('B', a.width + 36, 44);
+  return { options, picture: await blobOf(c, 'image/jpeg', 0.8) };
+}
+
+/** The photo turned clockwise by `turn` degrees, at full quality (for the scan pipeline to work on). */
+export async function turnedFile(file, turn) {
+  if (!turn) return file;
+  const blob = await blobOf(turned(toCanvas(await decode(file), 3000), turn), 'image/jpeg', 0.92);
+  return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
+}
+
+/** The photo as it will be stored: turned, at most `maxSide` px, JPEG. */
 export async function compressPhoto(file, { maxSide = 2000, quality = 0.8, turn = 0 } = {}) {
   const bmp = await decode(file);
-  let deg = [90, 180, 270].includes(turn) ? turn : 0;
-  if (deg % 180 !== 0 && !looksSideways(bmp)) deg = 0; // the reader can be wrong about sideways; check the picture
-  if (deg === 180 && looksSideways(bmp)) deg = 0;
-  const out = await blobOf(turned(toCanvas(bmp, maxSide), deg), 'image/jpeg', quality);
-  return { blob: out, turned: deg };
+  return blobOf(turned(toCanvas(bmp, maxSide), turn), 'image/jpeg', quality);
 }
 
 /** A stored photo turned by hand (the rotate button). */
@@ -416,7 +440,3 @@ export async function rotatePhoto(blob, deg = 90) {
   return blobOf(turned(toCanvas(bmp, 2400), deg), 'image/jpeg', 0.82);
 }
 
-/** A small copy for the reader. */
-export async function readingCopy(file, maxSide = 1600) {
-  return blobOf(toCanvas(await decode(file), maxSide), 'image/jpeg', 0.82);
-}

@@ -29,9 +29,13 @@ Pick the best tax category for the expense from this list: ${CATEGORIES.join("; 
 const RECEIPT_JSON = `Reply with ONLY one JSON object, no other text, in exactly this shape (use null when unknown):
 {"is_receipt": true, "vendor": "Business name", "date": "YYYY-MM-DD", "total_paid": 0.00, "subtotal": null, "tax": null, "tip": null,
  "currency": "USD", "reasoning": "one short sentence: which line is the total and why",
- "amounts": [{"label": "Subtotal", "amount": 0.00}], "category": "one of the categories", "confidence": "high|medium|low", "rotation": 0}
-"rotation" is how many degrees the picture must be turned clockwise so its text reads upright: 0, 90, 180 or 270.
+ "amounts": [{"label": "Subtotal", "amount": 0.00}], "category": "one of the categories", "confidence": "high|medium|low"}
 "amounts" lists every OTHER money amount someone might confuse with the total (subtotal, tax, tip, items, tendered, change).`;
+
+// Which way is up: the browser sends one picture with the receipt shown twice, turned opposite ways, labeled A and B.
+const UPRIGHT = `This picture shows the same document twice, side by side: on the left labeled A, on the right labeled B. One copy is turned 180 degrees from the other.
+Look at the printed words and numbers. In which copy can the text be read normally, right side up (not upside down)?
+Reply with ONLY this JSON: {"upright": "A"} or {"upright": "B"}`;
 
 const INVOICE_RULES = `This is an invoice the user sent to a client (for example exported from Wave). Read every line item across all pages, keeping each item's description lines.`;
 
@@ -86,7 +90,6 @@ function cleanReceipt(r: Record<string, any>) {
     category: cat,
     confidence: ["high", "medium", "low"].includes(r.confidence) ? r.confidence : "medium",
     check: "unknown" as "ok" | "mismatch" | "unknown",
-    rotation: [90, 180, 270].includes(Number(r.rotation)) ? Number(r.rotation) : 0,
   };
   // Sanity check: subtotal + tax + tip should equal the total. Flag it if not.
   if (out.total_paid != null && out.subtotal != null) {
@@ -118,7 +121,7 @@ function cleanInvoice(r: Record<string, any>) {
 
 // ---------------------------------------------------------------- readers
 interface Input {
-  mode: "receipt" | "invoice";
+  mode: "receipt" | "invoice" | "upright";
   text?: string; // text pulled from a PDF in the browser
   image?: { mime: string; b64: string };
   pdf?: string; // base64 PDF (Anthropic only)
@@ -130,7 +133,7 @@ async function readWithCloudflare(inp: Input) {
   if (!inp.text && !inp.image) throw new HttpError(400, "Nothing to read");
   const rules = inp.mode === "invoice" ? INVOICE_RULES : RECEIPT_RULES;
   const shape = inp.mode === "invoice" ? INVOICE_JSON : RECEIPT_JSON;
-  const content: unknown[] = [{ type: "text", text: `${rules}\n\n${shape}${inp.text ? `\n\nDocument text:\n"""\n${inp.text.slice(0, 24000)}\n"""` : ""}` }];
+  const content: unknown[] = [{ type: "text", text: inp.mode === "upright" ? UPRIGHT : `${rules}\n\n${shape}${inp.text ? `\n\nDocument text:\n"""\n${inp.text.slice(0, 24000)}\n"""` : ""}` }];
   if (inp.image) content.push({ type: "image_url", image_url: { url: `data:${inp.image.mime};base64,${inp.image.b64}` } });
 
   const call = async (jsonMode: boolean) => {
@@ -166,7 +169,7 @@ async function readWithAnthropic(inp: Input) {
   if (inp.image) content.push({ type: "image", source: { type: "base64", media_type: inp.image.mime, data: inp.image.b64 } });
   const rules = inp.mode === "invoice" ? INVOICE_RULES : RECEIPT_RULES;
   const shape = inp.mode === "invoice" ? INVOICE_JSON : RECEIPT_JSON;
-  content.push({ type: "text", text: `${rules}\n\n${shape}${inp.text && !inp.pdf ? `\n\nDocument text:\n"""\n${inp.text.slice(0, 60000)}\n"""` : ""}` });
+  content.push({ type: "text", text: inp.mode === "upright" ? UPRIGHT : `${rules}\n\n${shape}${inp.text && !inp.pdf ? `\n\nDocument text:\n"""\n${inp.text.slice(0, 60000)}\n"""` : ""}` });
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": env("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -195,7 +198,7 @@ serve(async (req) => {
   const user = await requireUser(req);
   const { key, mime, mode = "receipt", text, image_b64, image_mime } = await req.json();
   const p = provider();
-  const inp: Input = { mode: mode === "invoice" ? "invoice" : "receipt" };
+  const inp: Input = { mode: mode === "invoice" ? "invoice" : mode === "upright" ? "upright" : "receipt" };
 
   if (typeof text === "string" && text.trim().length > 20) {
     inp.text = text;
@@ -220,5 +223,6 @@ serve(async (req) => {
   if (!inp.text && !inp.image && !inp.pdf) throw new HttpError(400, "This PDF has no readable text. Upload a photo or screenshot of it instead.");
 
   const raw = p === "cloudflare" ? await readWithCloudflare(inp) : await readWithAnthropic(inp);
+  if (inp.mode === "upright") return json({ upright: String(raw?.upright ?? "A").trim().toUpperCase().startsWith("B") ? "B" : "A" });
   return json(inp.mode === "invoice" ? cleanInvoice(raw) : { ...cleanReceipt(raw), reader: p });
 });
