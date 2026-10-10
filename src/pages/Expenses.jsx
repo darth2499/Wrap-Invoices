@@ -684,7 +684,8 @@ function BillModal({ p, onClose }) {
   const copy = async (text, what) => {
     try { await navigator.clipboard.writeText(text); s.toast(`${what} copied`); } catch { s.toast('Couldn’t copy', { error: true }); }
   };
-  const all = d ? [`${from} · Invoice #${p.source_number}`, ...d.lines.map(lineText), `Total ${money(d.total)}`].join('\n\n') : '';
+  const all = d ? [`${from} · Invoice #${p.source_number}`, ...(d.lines || []).map(lineText),
+    [num(d.discount) > 0 && `Discount −${money(d.discount)}`, num(d.tax) > 0 && `Tax ${money(d.tax)}`, `Total ${money(d.total)}`].filter(Boolean).join('\n')].join('\n\n') : '';
   const save = async () => { await s.update('crew_payouts', p.id, { paid_on: f.paid_on || null, method: f.method || null }); onClose(); };
   const st = p.paid_on ? ['paid', `Paid ${fmtShort(p.paid_on)}`] : !p.due_date ? ['overdue', 'Unpaid'] : p.due_date < today ? ['overdue', 'Overdue'] : p.due_date === today ? ['partial', 'Due today'] : ['sent', `Due ${fmtShort(p.due_date)}`];
   return (
@@ -702,8 +703,8 @@ function BillModal({ p, onClose }) {
       </div>
       {d ? (
         <section className="bill-lines">
-          <div className="bill-head"><span className="small muted">{plural(d.lines.length, 'item')}</span><Button size="sm" icon="copy" onClick={() => copy(all, 'All items')}>Copy all</Button></div>
-          {d.lines.map((l, i) => (
+          <div className="bill-head"><span className="small muted">{plural((d.lines || []).length, 'item')}</span><Button size="sm" icon="copy" onClick={() => copy(all, 'All items')}>Copy all</Button></div>
+          {(d.lines || []).map((l, i) => (
             <div key={i} className="bill-line">
               <span className="col" style={{ gap: 2, minWidth: 0 }}>
                 <b style={{ fontWeight: 500 }}>{l.item || 'Item'}</b>
@@ -715,7 +716,10 @@ function BillModal({ p, onClose }) {
               <button type="button" className="bill-copy" aria-label={`Copy ${l.item || 'item'}`} onClick={() => copy(lineText(l), l.item || 'Item')}><Icon name="copy" size={15} /></button>
             </div>
           ))}
+          {num(d.discount) > 0 && <div className="bill-line bill-sum"><span className="muted">Discount</span><span className="num">−{money(d.discount)}</span><span /></div>}
+          {num(d.tax) > 0 && <div className="bill-line bill-sum"><span className="muted">Tax</span><span className="num">{money(d.tax)}</span><span /></div>}
           <div className="bill-line bill-total"><b>Total</b><span className="num">{money(d.total)}</span><span /></div>
+          {num(d.total) - num(d.due) > 0.004 && <div className="bill-line bill-sum"><span className="muted">Already paid</span><span className="num">−{money(num(d.total) - num(d.due))}</span><span /></div>}
         </section>
       ) : p.source_token && <p className="small muted">Open <a href={`#/i/${p.source_token}`} target="_blank" rel="noreferrer">their invoice</a> and tap Update in Wrap to bring the items in here.</p>}
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>

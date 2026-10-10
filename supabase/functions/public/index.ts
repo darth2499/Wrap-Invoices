@@ -8,11 +8,7 @@
 //   ping:         keeps the free Supabase project awake
 import { admin, cors, HttpError, json, presign, requireUser, serve } from "../_shared/util.ts";
 import { invoicePdf, verifyCode } from "../_shared/invoicePdf.ts";
-// @ts-ignore: plain JS shared with the app (copied by scripts/sync-shared.mjs)
-import * as shared from "../_shared/web/format.js";
-// Never let the client page fail to start over this: without it, dates are just kept as written.
-// deno-lint-ignore no-explicit-any
-const styleDates: (t: string, style: unknown, iso: unknown) => string = (shared as any).styleDates ?? ((t: string) => t);
+import { doImport, importState } from "../_shared/importBill.ts";
 
 const TOKEN_RE = /^[a-f0-9]{48,64}$/;
 
@@ -174,23 +170,7 @@ async function view(db: ReturnType<typeof admin>, inv: any, body: any) {
   });
 }
 
-// ---------- Import to Wrap: the person you billed adds your invoice to their own crew payouts ----------
-async function sha256(s: string) {
-  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-const UNKNOWN = "Unknown sender";
-/** Who sent the invoice: their business name, else their name, else an email they bill from. */
-// deno-lint-ignore no-explicit-any
-function senderName(p: any): string {
-  for (const v of [p?.business_name, p?.full_name, p?.name, p?.business_email, p?.gmail_email, p?.email]) {
-    const t = String(v ?? "").trim();
-    if (t) return t;
-  }
-  return UNKNOWN;
-}
-
+// ---------- Import to Wrap (the work is in _shared/importBill.ts) ----------
 // deno-lint-ignore no-explicit-any
 async function importBill(db: ReturnType<typeof admin>, req: Request, inv: any, token: string, doIt: boolean) {
   const user = await requireUser(req); // their own sign-in, checked by the server (not just read from the page)
@@ -199,75 +179,3 @@ async function importBill(db: ReturnType<typeof admin>, req: Request, inv: any, 
   return json(await doImport(db, inv, token, user.id, r));
 }
 
-/** Where this invoice stands for one signed-in person: own | none | new | changed | imported. */
-// deno-lint-ignore no-explicit-any
-// deno-lint-ignore no-explicit-any
-async function importState(db: ReturnType<typeof admin>, inv: any, userId: string): Promise<any> {
-  if (inv.owner_id === userId) return { state: "own" };
-  if (inv.kind !== "invoice" || inv.status !== "sent") return { state: "none" };
-
-  const [{ data: pays }, { data: lines }, { data: prof }] = await Promise.all([
-    db.from("payments").select("amount").eq("invoice_id", inv.id),
-    db.from("invoice_lines").select("item, description, note, qty, rate, amount").eq("invoice_id", inv.id).order("position"),
-    db.from("profiles").select("*").eq("id", inv.owner_id).single(), // all columns: a missing newer one must not hide who sent it
-  ]);
-  const due = Math.round((Number(inv.total) - (pays ?? []).reduce((t, p) => t + Number(p.amount), 0)) * 100) / 100;
-  if (due <= 0) return { state: "none" };
-  // Their copy is found again by a fingerprint of the invoice (the sender's ids never leave the server).
-  const key = await sha256(`wrap-import:${inv.id}`);
-  const version = `${inv.version ?? 1}:${due}:${inv.due_date ?? ""}`;
-  // One import per invoice in all of Wrap: once someone has it, anyone else with the link just sees the PDF button.
-  const { data: held } = await db.from("crew_payouts").select("id, owner_id, source_version, paid_on, source_detail").eq("source_key", key).limit(1);
-  if (held?.[0] && held[0].owner_id !== userId) return { state: "none" };
-  const mine = held?.[0] ?? null;
-  const stale = !mine?.source_detail || mine.source_detail.from === UNKNOWN; // missing items, or imported while the sender's name couldn't be read
-  const state = !mine ? "new" : (mine.source_version !== version || stale) && !mine.paid_on ? "changed" : "imported";
-  return { state, mine, due, key, version, lines, prof };
-}
-
-// deno-lint-ignore no-explicit-any
-async function doImport(db: ReturnType<typeof admin>, inv: any, token: string, userId: string, r: any) {
-  const { mine, due, key, version, lines, prof } = r;
-
-  const from = senderName(prof);
-  const items = [...new Set((lines ?? []).map((l: { item: string }) => String(l.item || "").trim()).filter(Boolean))];
-  const row = {
-    amount: due,
-    due_date: inv.due_date,
-    description: `Invoice #${inv.number}${items.length ? ` · ${items.slice(0, 3).join(", ")}${items.length > 3 ? "…" : ""}` : ""}`.slice(0, 200),
-    source_number: String(inv.number),
-    source_token: token,
-    source_version: version,
-    // A copy of what they billed, so you can read and copy every line without opening the link again.
-    source_detail: {
-      from: from, issue_date: inv.issue_date, due_date: inv.due_date, total: Number(inv.total), due,
-      lines: (lines ?? []).map((l: Record<string, unknown>) => ({
-        item: l.item ?? "", description: styleDates(String(l.description ?? ""), prof?.date_style, inv.issue_date), note: l.note ?? "",
-        qty: Number(l.qty), rate: Number(l.rate), amount: Number(l.amount),
-      })),
-    },
-  };
-  if (mine) {
-    const { data: was } = await db.from("crew_payouts").select("crew_id").eq("id", mine.id).eq("owner_id", userId).single();
-    const { error } = await db.from("crew_payouts").update(row).eq("id", mine.id).eq("owner_id", userId);
-    if (error) throw new HttpError(500, error.message);
-    // Fix a payee that was saved as "Unknown sender" before.
-    if (was?.crew_id && from !== UNKNOWN) await db.from("crew_members").update({ name: from }).eq("id", was.crew_id).eq("owner_id", userId).eq("name", UNKNOWN);
-    return { state: "imported", id: mine.id, updated: true };
-  }
-
-  // The sender as one of their payees: an existing one with the same email or name, otherwise a new one.
-  const { data: crew } = await db.from("crew_members").select("id, name, email").eq("owner_id", userId);
-  const email = String(prof?.business_email || "").trim().toLowerCase();
-  // deno-lint-ignore no-explicit-any
-  let member: any = (crew ?? []).find((c) => email && String(c.email || "").trim().toLowerCase() === email)
-    || (crew ?? []).find((c) => String(c.name || "").trim().toLowerCase() === from.toLowerCase());
-  if (!member) {
-    const { data, error } = await db.from("crew_members").insert({ owner_id: userId, name: from, email: email || null, phone: prof?.phone || null, address: prof?.address || null }).select("id").single();
-    if (error) throw new HttpError(500, error.message);
-    member = data;
-  }
-  const { data: made, error } = await db.from("crew_payouts").insert({ ...row, owner_id: userId, crew_id: member!.id, work_date: inv.issue_date, source_key: key }).select("id").single();
-  if (error) throw new HttpError(error.code === "23505" ? 409 : 500, error.code === "23505" ? "Already in your Wrap" : error.message);
-  return { state: "imported", id: made.id };
-}
