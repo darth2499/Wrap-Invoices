@@ -1,6 +1,5 @@
 // public — what clients see through a shared link (no sign-in).
-//   invoice:      /#/i/<token>   → invoice/quote, its lines and attached receipts (fallback; the page reads the database directly)
-//   files:        links for the logo and receipts, plus the verification code (the slow part, loaded alongside)
+//   invoice:      /#/i/<token>   → invoice/quote, its lines and attached receipts
 //   pdf:          the invoice PDF, made here from the saved invoice (never from what's on the client's screen)
 //   accept_quote: client approves a quote
 //   statement:    /#/s/<token>   → every open invoice for one client
@@ -102,22 +101,6 @@ serve(async (req) => {
     await db.from("invoices").update({ status: "accepted" }).eq("id", inv.id);
     await db.from("invoice_events").insert({ owner_id: inv.owner_id, invoice_id: inv.id, type: "accepted", detail: name ? `Accepted by ${name}` : "Accepted by client" });
     return json({ ok: true });
-  }
-
-  if (body.action === "files") {
-    if (inv.status === "void" || inv.status === "paid") return json({});
-    const [{ data: prof }, { data: receipts }, { data: pays }] = await Promise.all([
-      db.from("profiles").select("logo_key").eq("id", inv.owner_id).single(),
-      db.from("receipts").select("id, file_key").eq("invoice_id", inv.id),
-      db.from("payments").select("amount").eq("invoice_id", inv.id),
-    ]);
-    const urls: Record<string, string | null> = {};
-    await Promise.all((receipts ?? []).map(async (r) => { urls[r.id] = r.file_key ? await presign(r.file_key, "GET", 3600) : null; }));
-    return json({
-      logo_url: prof?.logo_key ? await presign(prof.logo_key, "GET", 3600) : null,
-      receipt_urls: urls,
-      verify_code: await verifyCode(inv, (pays ?? []).reduce((t, p) => t + Number(p.amount), 0)),
-    });
   }
 
   // ----- view an invoice or quote -----

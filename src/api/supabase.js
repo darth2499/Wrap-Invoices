@@ -165,7 +165,6 @@ export const api = {
     return call('gmail', { action, ...payload });
   },
   async publicCall(action, payload = {}) {
-    // Client page: { page, files } promises (see publicFast.js).
     if (action === 'invoice') return takeEarly(payload.token, !!payload.preview) || publicRequest(payload.token, !!payload.preview);
     return call('public', { action, ...payload }, { auth: false });
   },

@@ -17,19 +17,7 @@ export default function PublicInvoice({ token }) {
   const [name, setName] = useState('');
 
   useEffect(() => {
-    // The invoice shows as soon as it arrives; logo and receipt links fill in when they do (requested at the same time).
-    Promise.resolve(api.publicCall('invoice', { token, preview: route.query.preview === '1' })).then((r) => {
-      if (!r?.page) { setData(r); return; } // demo: everything at once
-      r.page.then((d) => {
-        setData(d);
-        r.files.then((f) => f && setData((cur) => cur && ({
-          ...cur,
-          business: cur.business && { ...cur.business, logo_url: f.logo_url ?? cur.business.logo_url ?? null },
-          invoice: cur.invoice && { ...cur.invoice, verify_code: f.verify_code ?? cur.invoice.verify_code },
-          receipts: (cur.receipts || []).map((x) => ({ ...x, url: f.receipt_urls?.[x.id] ?? x.url ?? null })),
-        })));
-      }).catch((e) => setError(e.message));
-    }).catch((e) => setError(e.message));
+    api.publicCall('invoice', { token, preview: route.query.preview === '1' }).then(setData).catch((e) => setError(e.message));
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
