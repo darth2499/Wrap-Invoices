@@ -147,7 +147,17 @@ export function invoicesFromCsv(rows, map, { assume = 'unpaid' } = {}) {
  *             or replace everything ('overwrite'). `removed` says how many lines that affects.
  * Payments always stay.
  */
-const lineKey = (l) => [String(l.item || '').trim().toLowerCase(), String(l.description || '').trim(), String(l.note || '').trim(), num(l.qty), round2(num(l.rate))].join('|');
+// What makes two lines "the same" when a PDF is imported again: the item, its words and dates, and its amount.
+// Formatting doesn't count (9/21 vs 09/21, "(1 Day)", spacing, a line split as 2 × $750 vs 1 × $1,500), so a
+// re-import of an unchanged invoice is recognised even if Wrap now writes dates or add-ons a little differently.
+const squash = (t, issue) => {
+  const txt = String(t || '');
+  return String(normalizeDates(txt, issue, datesCode)?.text ?? txt).toLowerCase().replace(/[^a-z0-9$.]+/g, '');
+};
+const lineKey = (l, issue) => [
+  squash(l.item, issue), squash(l.description, issue), squash(l.note, issue),
+  round2(num(l.amount) || num(l.qty) * num(l.rate)).toFixed(2),
+].join('|');
 export function pdfMatch(inv, db, choice) {
   const ex = db.invoices.find((i) => i.kind === 'invoice' && String(i.number) === String(inv.number));
   if (!ex) return { action: 'new' };
@@ -160,8 +170,8 @@ export function pdfMatch(inv, db, choice) {
     if (Math.abs(withDiscount.total - num(ex.total)) < 0.01) return { action: 'fill', ex, t: withDiscount, discount: num(ex.discount_total) };
     if (Math.abs(sum - num(ex.total)) < 0.01) return { action: 'fill', ex, t: totals(inv.lines, 'amount', 0), discount: 0 };
   }
-  const pdfKeys = inv.lines.map(lineKey);
-  const exKeys = exLines.map(lineKey);
+  const pdfKeys = inv.lines.map((l) => lineKey(l, inv.date));
+  const exKeys = exLines.map((l) => lineKey(l, ex.issue_date));
   const pdfTotal = totals(inv.lines, 'amount', inv.discount || 0).total;
   const same = pdfKeys.length === exKeys.length && pdfKeys.every((k, i) => k === exKeys[i])
     && Math.abs(pdfTotal - num(ex.total)) < 0.01
@@ -230,7 +240,7 @@ export async function importInvoices(list, { db, api, onStep = () => {}, fill = 
 async function updateInvoice({ ex, exLines, mode }, inv, { db, api }) {
   const strip = ({ id, owner_id, invoice_id, position, ...l }) => l;
   const lines = mode === 'append'
-    ? [...exLines.map(strip), ...inv.lines.filter((l) => !exLines.some((x) => lineKey(x) === lineKey(l)))]
+    ? [...exLines.map(strip), ...inv.lines.filter((l) => !exLines.some((x) => lineKey(x, ex.issue_date) === lineKey(l, inv.date)))]
     : inv.lines;
   const discount = round2(inv.discount || 0);
   const t = totals(lines, 'amount', discount);
@@ -305,14 +315,15 @@ export function withAddons(l) {
   if (num(l.qty) !== 1) return l;
   const rows = [l.description, l.note].filter(Boolean).join('\n').split('\n').map((x) => x.trim()).filter(Boolean);
   const MI = /^(.+?)\s*\(\s*([\d,.]+)\s*mi(?:les)?\s*[x×@]\s*\$([\d.]+)\s*\)$/i;
-  const ADD = /^(.+?)\s*\(\s*\$([\d,]+(?:\.\d+)?)\s*(?:[x×]\s*(\d+(?:\.\d+)?))?\s*\)$/i;
+  // "Hotel ($1200)", "Per Diem ($80 x3)", and sums like "Baggage ($100+$110+$100+$100)"
+  const ADD = /^(.+?)\s*\(\s*(\$[\d,]+(?:\.\d+)?(?:\s*\+\s*\$?[\d,]+(?:\.\d+)?)*)\s*(?:[x×]\s*(\d+(?:\.\d+)?))?\s*\)$/i;
   const keep = [];
   const items = [];
   for (const row of rows) {
     const mi = row.match(MI);
     const a = !mi && row.match(ADD);
     if (mi) items.push({ label: mi[1].trim(), qty: num(mi[2]), rate: num(mi[3]), unit: 'mi' });
-    else if (a) items.push({ label: a[1].trim(), qty: a[3] ? num(a[3]) : 1, rate: num(a[2]) });
+    else if (a) items.push({ label: a[1].trim(), qty: a[3] ? num(a[3]) : 1, rate: round2(a[2].split('+').reduce((t, x) => t + num(x.replace(/[$,\s]/g, '')), 0)) });
     else keep.push(row);
   }
   if (!items.length) return l;

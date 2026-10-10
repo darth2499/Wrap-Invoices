@@ -70,9 +70,12 @@ export function parseWaveInvoiceText(text) {
   let cur = null;
   const totalsAt = [];
   for (const [i, l] of all.entries()) {
-    if (/^Items\s{2,}Quantity\s{2,}Price\s{2,}Amount$/i.test(l)) { inItems = true; cur = null; continue; }
+    // The item list can continue on the next page, even partway through one item's description lines
+    // ("Uber to EWR ($127.98)" at the top of page 2 still belongs to the item above it), so the current item
+    // carries over the page break and the next page's header.
+    if (/^Items\s{2,}Quantity\s{2,}Price\s{2,}Amount$/i.test(l)) { inItems = true; continue; }
     if (!inItems) continue;
-    if (/^Page \d+ of \d+/i.test(l) || l.startsWith('--- page break')) { inItems = false; cur = null; continue; }
+    if (/^Page \d+ of \d+/i.test(l) || l.startsWith('--- page break')) { inItems = false; continue; }
     const row = l.match(ROW);
     if (row) {
       cur = { kind: 'labor', item: row[1].trim(), qty: Number(row[2]), rate: amt(row[3]), amount: amt(row[4]), extra: [] };
