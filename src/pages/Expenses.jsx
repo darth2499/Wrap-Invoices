@@ -43,11 +43,13 @@ function EditCell({ r, field, children }) {
   };
   const key = (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') setEditing(false); };
   const cls = `cell-edit${field === 'total' ? ' right' : ''}${field === 'category' ? ' small' : ''}${field === 'vendor' ? ' strong' : ''}`;
-  if (!editing) return <span className={cls} role="button" tabIndex={0} onClick={start} onKeyDown={(e) => e.key === 'Enter' && start(e)}>{children}</span>;
+  // A pencil shows on hover (like the categories in Settings), so you can tell it's editable.
+  const pen = <span className="cell-pen" aria-hidden="true"><Icon name="edit" size={13} /></span>;
+  if (!editing) return <span className={cls} role="button" tabIndex={0} onClick={start} onKeyDown={(e) => e.key === 'Enter' && start(e)}><span className="cell-text">{children}</span>{pen}</span>;
   return (
     <span className={`${cls} editing`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       {/* The text stays (invisible) to hold the cell's size; the field sits right on top, so nothing moves. */}
-      <span className="cell-ghost" aria-hidden="true">{children}</span>
+      <span className="cell-ghost" aria-hidden="true"><span className="cell-text">{children}</span>{pen}</span>
       <span className="cell-ctl">
       {field === 'category' ? (
         <select autoFocus value={v} onChange={(e) => save(e.target.value)} onBlur={() => setEditing(false)} onKeyDown={key} aria-label="Category">

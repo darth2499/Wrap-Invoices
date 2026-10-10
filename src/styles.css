@@ -345,8 +345,13 @@ textarea.input { padding: 10px 12px; min-height: 80px; resize: vertical; line-he
 .rv-page img { display: block; max-width: 100%; height: auto; }
 .cell-edit { display: block; margin: -5px -8px; padding: 5px 8px; border-radius: 7px; cursor: text; min-height: 1.4em; transition: background .12s; }
 .cell-edit:hover { background: var(--hover); }
+.cell-edit:not(.editing), .cell-ghost { display: flex; align-items: center; gap: 6px; }
+.cell-edit.right:not(.editing), .cell-edit.right .cell-ghost { flex-direction: row-reverse; }
+.cell-text { min-width: 0; }
+.cell-pen { display: inline-flex; color: var(--faint); opacity: 0; transition: opacity .15s; flex: none; }
+.cell-edit:hover .cell-pen, .cell-edit:focus-visible .cell-pen { opacity: 1; }
 .cell-edit.editing { position: relative; }
-.cell-ghost { visibility: hidden; display: block; }
+.cell-ghost { visibility: hidden; }
 .cell-edit.strong { font-weight: 500; }
 .cell-ctl { position: absolute; inset: 0; }
 .cell-ctl > div { height: 100%; }
