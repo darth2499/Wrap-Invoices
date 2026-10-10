@@ -2,6 +2,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../config.js';
 import { TABLES } from './tables.js';
+import { takeEarly, publicRequest } from '../lib/publicFast.js';
 
 let client = null;
 const sb = () =>
@@ -157,6 +158,17 @@ export const api = {
   readReceipt(key, mime, extra = {}) {
     return call('receipt-read', { key, mime, ...extra });
   },
+  /** About once a day while signed in: lets the server know this network is yours (so your own link visits don't count). */
+  async rememberNetwork() {
+    try {
+      const day = new Date().toISOString().slice(0, 10);
+      if (localStorage.getItem('wrap_net_day') === day) return;
+      const { data } = await sb().auth.getSession();
+      if (!data.session) return;
+      await call('public', { action: 'me', viewer_token: data.session.access_token }, { auth: false });
+      localStorage.setItem('wrap_net_day', day);
+    } catch { /* not important */ }
+  },
   readInvoicePdf(extra) {
     return call('receipt-read', { mode: 'invoice', ...extra });
   },
@@ -164,10 +176,7 @@ export const api = {
     return call('gmail', { action, ...payload });
   },
   async publicCall(action, payload = {}) {
-    // Opening a client link while signed in to Wrap (it's you, not the client): sent along so it isn't counted as a view.
-    if (action === 'invoice') {
-      try { const { data } = await sb().auth.getSession(); if (data.session) payload = { ...payload, viewer_token: data.session.access_token }; } catch { /* not signed in */ }
-    }
+    if (action === 'invoice') return takeEarly(payload.token, !!payload.preview) || publicRequest(payload.token, !!payload.preview);
     return call('public', { action, ...payload }, { auth: false });
   },
   /** The invoice PDF, made on the server from the saved invoice. */

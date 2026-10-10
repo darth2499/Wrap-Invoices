@@ -11,3 +11,4 @@ Run these in the Supabase SQL Editor, in this order:
  10. 010_line_extras.sql    (only if you set up before Oct 9, 2026 — already included in 001)
  11. 011_logo_live.sql      (only if you set up before Oct 9, 2026 — already included in 001)
  12. 012_contacts.sql       (only if you set up before Oct 9, 2026 — already included in 001)
+ 13. 013_own_ips.sql        (only if you set up before Oct 9, 2026 — already included in 001)

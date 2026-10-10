@@ -11,16 +11,53 @@ const buildInvoicePdf = buildPdfJs as unknown as (opts: Record<string, unknown>)
 
 const TOKEN_RE = /^[a-f0-9]{48,64}$/;
 
-async function business(db: ReturnType<typeof admin>, ownerId: string) {
-  const { data: p } = await db.from("profiles")
-    .select("business_name, business_email, address, phone, website, logo_key, template, accent, payment_instructions, footer_note")
-    .eq("id", ownerId).single();
+const BIZ_FIELDS = ["business_name", "business_email", "address", "phone", "website", "template", "accent", "payment_instructions", "footer_note"];
+
+/** What a client sees about the business, from a profiles row (one query: select *). */
+// deno-lint-ignore no-explicit-any
+async function bizFrom(p: any) {
   if (!p) return null;
-  // Logo options (011/012): ignored if those haven't been run yet.
-  const { data: lm } = await db.from("profiles").select("logo_mode, logo_preset").eq("id", ownerId).maybeSingle();
-  const logo_url = p.logo_key ? await presign(p.logo_key, "GET", 3600) : null;
-  const extra = (lm ?? {}) as { logo_mode?: string; logo_preset?: string | null };
-  return { ...p, logo_mode: extra.logo_mode ?? "logo", logo_preset: extra.logo_preset ?? null, logo_key: undefined, logo_url };
+  const out: Record<string, unknown> = {};
+  for (const k of BIZ_FIELDS) out[k] = p[k] ?? null;
+  out.logo_mode = p.logo_mode ?? "logo"; // 011/012 columns: defaults if those migrations haven't run
+  out.logo_preset = p.logo_preset ?? null;
+  out.logo_url = p.logo_key ? await presign(p.logo_key, "GET", 3600) : null;
+  return out;
+}
+async function business(db: ReturnType<typeof admin>, ownerId: string) {
+  const { data: p } = await db.from("profiles").select("*").eq("id", ownerId).single();
+  return bizFrom(p);
+}
+
+// ----- "is this you?" — so your own visits to a client link don't count as the client opening it -----
+// The sign-in on this browser (whose account it is), or a network you've used Wrap from (013_own_ips).
+// Networks are stored only as a hash, and forgotten after 60 days.
+const DAY = 86400_000;
+function userIdOf(jwt: unknown): string | null {
+  try {
+    const part = String(jwt).split(".")[1];
+    const json = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof json.sub === "string" ? json.sub : null;
+  } catch { return null; }
+}
+async function ipHash(req: Request, ownerId: string) {
+  const ip = (req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for")?.split(",")[0] || "").trim();
+  if (!ip) return null;
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${ownerId}|${ip}`));
+  return [...new Uint8Array(buf).slice(0, 12)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+type Seen = { h: string; at: string };
+const fresh = (list: unknown): Seen[] => (Array.isArray(list) ? list as Seen[] : []).filter((x) => x?.h && Date.now() - Date.parse(x.at) < 60 * DAY);
+async function rememberNetwork(db: ReturnType<typeof admin>, ownerId: string, hash: string, list: unknown) {
+  const next = [{ h: hash, at: new Date().toISOString() }, ...fresh(list).filter((x) => x.h !== hash)].slice(0, 12);
+  await db.from("profiles").update({ own_ips: next }).eq("id", ownerId); // fails quietly before 013 runs
+}
+/** Runs after the reply is sent when the runtime allows it (so the client's page isn't kept waiting). */
+function later(p: Promise<unknown>) {
+  // deno-lint-ignore no-explicit-any
+  const rt = (globalThis as any).EdgeRuntime;
+  if (rt?.waitUntil) rt.waitUntil(p.catch(() => {}));
+  else return p.catch(() => {});
 }
 
 /**
@@ -44,6 +81,16 @@ serve(async (req) => {
   if (body.action === "ping") {
     await db.from("profiles").select("id", { count: "exact", head: true });
     return json({ ok: true, at: new Date().toISOString() });
+  }
+
+  if (body.action === "me") {
+    // The app calls this (about once a day) while you're signed in, so links you open from this network don't count.
+    const { data } = await db.auth.getUser(String(body.viewer_token ?? ""));
+    if (!data?.user) throw new HttpError(401, "Not signed in");
+    const hash = await ipHash(req, data.user.id);
+    const { data: p } = await db.from("profiles").select("*").eq("id", data.user.id).single();
+    if (hash && p && !fresh(p.own_ips).some((x) => x.h === hash && Date.now() - Date.parse(x.at) < DAY)) await rememberNetwork(db, data.user.id, hash, p.own_ips);
+    return json({ ok: true });
   }
 
   const token = String(body.token ?? "");
@@ -82,10 +129,9 @@ serve(async (req) => {
   }
 
   // ----- view an invoice or quote -----
+  if (body.action !== "pdf") return view(req, db, inv, body);
   const biz = await business(db, inv.owner_id);
-  const base = { business: biz, kind: inv.kind, number: inv.number };
-  if (inv.status === "void") return json({ ...base, state: "void" });
-  if (inv.status === "paid") return json({ ...base, state: "paid", total: inv.total });
+  if (inv.status === "void" || inv.status === "paid") throw new HttpError(400, "This invoice is closed");
 
   if (body.action === "pdf") {
     const [{ data: lines }, { data: client }, { data: pays }, { data: prof }] = await Promise.all([
@@ -112,33 +158,38 @@ serve(async (req) => {
       },
     });
   }
+  throw new HttpError(400, "Unknown action");
+});
 
-  // Anyone signed in to Wrap opening the link is you (or someone you invited), not the client: don't count it.
-  let insider = false;
-  if (!body.preview && typeof body.viewer_token === "string" && body.viewer_token.length > 20) {
-    try { insider = !!(await db.auth.getUser(body.viewer_token)).data?.user; } catch { insider = false; }
-  }
-  if (!body.preview && !insider) {
-    const now = new Date().toISOString();
-    await db.from("invoices").update({
-      first_viewed_at: inv.first_viewed_at ?? now,
-      last_viewed_at: now,
-      view_count: (inv.view_count ?? 0) + 1,
-    }).eq("id", inv.id);
-    // Only log a "viewed" event once per hour so the history stays readable.
-    const last = inv.last_viewed_at ? new Date(inv.last_viewed_at).getTime() : 0;
-    if (Date.now() - last > 3600_000) {
-      await db.from("invoice_events").insert({ owner_id: inv.owner_id, invoice_id: inv.id, type: "viewed", detail: null });
-    }
-  }
-
-  const [{ data: lines }, { data: client }, { data: pays }, { data: receipts }] = await Promise.all([
+/** The client page: everything in one round of parallel queries; the view is counted after the reply. */
+// deno-lint-ignore no-explicit-any
+async function view(req: Request, db: ReturnType<typeof admin>, inv: any, body: any) {
+  const [{ data: prof }, { data: lines }, { data: client }, { data: pays }, { data: receipts }, hash] = await Promise.all([
+    db.from("profiles").select("*").eq("id", inv.owner_id).single(),
     db.from("invoice_lines").select("item, description, note, qty, rate, amount, tax_rate, kind, receipt_id, extras").eq("invoice_id", inv.id).order("position"),
     inv.client_id ? db.from("clients").select("name, email, address").eq("id", inv.client_id).single() : Promise.resolve({ data: null }),
     db.from("payments").select("paid_on, amount, method").eq("invoice_id", inv.id).order("paid_on"),
-    db.from("receipts").select("id, vendor, receipt_date, total, file_key, original_key, mime, billable").eq("invoice_id", inv.id).order("receipt_date"),
+    db.from("receipts").select("id, vendor, receipt_date, total, file_key, mime, billable").eq("invoice_id", inv.id).order("receipt_date"),
+    ipHash(req, inv.owner_id),
   ]);
+  const biz = await bizFrom(prof);
+  const base = { business: biz, kind: inv.kind, number: inv.number };
+  if (inv.status === "void") return json({ ...base, state: "void" });
+  if (inv.status === "paid") return json({ ...base, state: "paid", total: inv.total });
 
+  // You, not the client: signed in to this account on this browser, or on a network you use Wrap from.
+  const you = userIdOf(body.viewer_token) === inv.owner_id;
+  const known = !!hash && fresh(prof?.own_ips).some((x) => x.h === hash);
+  if (you && hash && !known) later(rememberNetwork(db, inv.owner_id, hash, prof?.own_ips));
+  if (!body.preview && !you && !known) {
+    const now = new Date().toISOString();
+    const last = inv.last_viewed_at ? new Date(inv.last_viewed_at).getTime() : 0;
+    later(Promise.all([
+      db.from("invoices").update({ first_viewed_at: inv.first_viewed_at ?? now, last_viewed_at: now, view_count: (inv.view_count ?? 0) + 1 }).eq("id", inv.id),
+      // Only log a "viewed" event once per hour so the history stays readable.
+      Date.now() - last > 3600_000 ? db.from("invoice_events").insert({ owner_id: inv.owner_id, invoice_id: inv.id, type: "viewed", detail: null }) : null,
+    ]));
+  }
   const files = await Promise.all((receipts ?? []).map(async (r) => ({
     id: r.id,
     vendor: r.vendor,
@@ -164,4 +215,4 @@ serve(async (req) => {
     payments: pays ?? [],
     receipts: files,
   });
-});
+}

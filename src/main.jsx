@@ -1,9 +1,10 @@
+import { startEarly } from './lib/publicFast.js';
 import { createRoot } from 'react-dom/client';
-import App from './App.jsx';
 import './styles.css';
 import { applyTheme, initialTheme } from './components/ThemeToggle.jsx';
 import { startAuto } from './lib/autoTheme.js';
 
+startEarly(); // a client link: ask for the invoice right away
 applyTheme(initialTheme());
 try { if (localStorage.getItem('wrap_theme') === 'auto') startAuto(); } catch { /* private mode */ }
 // Until you pick a theme yourself, Wrap follows the system (and switches when it does).
@@ -26,4 +27,21 @@ document.addEventListener('mouseover', (e) => {
   el.addEventListener('mouseleave', () => el.removeAttribute('title'), { once: true });
 }, { passive: true });
 
-createRoot(document.getElementById('root')).render(<App />);
+// Client links (#/i/…, #/s/…) load only their own page, not the whole app, so they open fast.
+const pub = window.location.hash.match(/^#\/(i|s)\/([^/?]+)/);
+const root = createRoot(document.getElementById('root'));
+// After an update, an old page can ask for code that's gone: reload once to get the new version.
+const loaded = (p) => p.then((m) => { sessionStorage.removeItem('wrap_reloaded'); return m; }).catch((e) => {
+  if (sessionStorage.getItem('wrap_reloaded')) throw e;
+  sessionStorage.setItem('wrap_reloaded', '1');
+  window.location.reload();
+  return new Promise(() => {});
+});
+if (pub) {
+  const load = pub[1] === 'i' ? import('./pages/PublicInvoice.jsx') : import('./pages/PublicStatement.jsx');
+  loaded(load).then(({ default: Page }) => root.render(<Page token={pub[2]} />));
+  // Leaving the client page for the app itself: load the app.
+  window.addEventListener('hashchange', () => { if (!/^#\/(i|s)\//.test(window.location.hash)) window.location.reload(); });
+} else {
+  loaded(import('./App.jsx')).then(({ default: App }) => root.render(<App />));
+}

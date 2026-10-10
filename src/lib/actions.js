@@ -225,7 +225,7 @@ export async function invoiceBundle(s, inv) {
   const client = s.derived.clients[inv.client_id] || null;
   const lines = s.derived.linesFor(inv.id);
   const payments = s.db.payments.filter((x) => x.invoice_id === inv.id).sort((a, b) => (a.paid_on < b.paid_on ? -1 : 1));
-  const receipts = s.db.receipts.filter((r) => r.invoice_id === inv.id);
+  const receipts = s.db.receipts.filter((r) => r.invoice_id === inv.id).sort((a, b) => String(a.receipt_date || '').localeCompare(String(b.receipt_date || '')));
   const keys = [p.logo_key, ...receipts.map((r) => r.file_key)].filter(Boolean);
   const urls = keys.length ? await s.api.files.urls(keys) : {};
   return { business: p, client, lines, payments, receipts: receipts.map((r) => ({ ...r, url: urls[r.file_key] })), logoUrl: p.logo_key ? urls[p.logo_key] : null };

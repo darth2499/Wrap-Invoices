@@ -25,7 +25,7 @@ export default function InvoiceDetail({ id }) {
   const [modal, setModal] = useState(() => ({ pay: { type: 'pay' }, send: { type: 'email', reminder: false }, remind: { type: 'email', reminder: true } }[route.query.do] || null));
   const [busy, setBusy] = useState('');
 
-  const receipts = inv ? db.receipts.filter((r) => r.invoice_id === inv.id) : [];
+  const receipts = inv ? db.receipts.filter((r) => r.invoice_id === inv.id).sort((a, b) => String(a.receipt_date || '').localeCompare(String(b.receipt_date || ''))) : [];
   const withFiles = receipts.filter((r) => r.file_key).length; // only these can go in the zip
   useEffect(() => {
     const keys = [db.profile.logo_key, ...receipts.map((r) => r.file_key)].filter(Boolean);

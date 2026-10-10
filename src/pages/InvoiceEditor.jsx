@@ -884,7 +884,7 @@ function JobCard({ job, rule, db, busy, companies, roles, gearItems, upd, remove
 /* ------------------------------------------------------------------ */
 function ReceiptsPanel({ db, attachIds, setAttachIds, billed, openPicker, bill }) {
   const all = new Set([...attachIds, ...billed]);
-  const list = db.receipts.filter((r) => all.has(r.id));
+  const list = db.receipts.filter((r) => all.has(r.id)).sort((a, b) => String(a.receipt_date || '').localeCompare(String(b.receipt_date || ''))); // oldest first, like the work
   return (
     <>
       {list.map((r) => (

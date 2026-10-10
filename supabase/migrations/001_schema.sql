@@ -50,6 +50,7 @@ create table if not exists public.profiles (
   tax_set_aside_pct    numeric(5,2) not null default 25,
   logo_mode            text not null default 'logo',
   logo_preset          text,
+  own_ips              jsonb not null default '[]'::jsonb,
   gmail_email          text,
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now()
