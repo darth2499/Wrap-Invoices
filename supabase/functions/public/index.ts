@@ -180,6 +180,17 @@ async function sha256(s: string) {
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+const UNKNOWN = "Unknown sender";
+/** Who sent the invoice: their business name, else their name, else an email they bill from. */
+// deno-lint-ignore no-explicit-any
+function senderName(p: any): string {
+  for (const v of [p?.business_name, p?.full_name, p?.name, p?.business_email, p?.gmail_email, p?.email]) {
+    const t = String(v ?? "").trim();
+    if (t) return t;
+  }
+  return UNKNOWN;
+}
+
 // deno-lint-ignore no-explicit-any
 async function importBill(db: ReturnType<typeof admin>, req: Request, inv: any, token: string, doIt: boolean) {
   const user = await requireUser(req); // their own sign-in, checked by the server (not just read from the page)
@@ -198,7 +209,7 @@ async function importState(db: ReturnType<typeof admin>, inv: any, userId: strin
   const [{ data: pays }, { data: lines }, { data: prof }] = await Promise.all([
     db.from("payments").select("amount").eq("invoice_id", inv.id),
     db.from("invoice_lines").select("item, description, note, qty, rate, amount").eq("invoice_id", inv.id).order("position"),
-    db.from("profiles").select("business_name, business_email, phone, address, date_style").eq("id", inv.owner_id).single(),
+    db.from("profiles").select("*").eq("id", inv.owner_id).single(), // all columns: a missing newer one must not hide who sent it
   ]);
   const due = Math.round((Number(inv.total) - (pays ?? []).reduce((t, p) => t + Number(p.amount), 0)) * 100) / 100;
   if (due <= 0) return { state: "none" };
@@ -209,7 +220,8 @@ async function importState(db: ReturnType<typeof admin>, inv: any, userId: strin
   const { data: held } = await db.from("crew_payouts").select("id, owner_id, source_version, paid_on, source_detail").eq("source_key", key).limit(1);
   if (held?.[0] && held[0].owner_id !== userId) return { state: "none" };
   const mine = held?.[0] ?? null;
-  const state = !mine ? "new" : (mine.source_version !== version || !mine.source_detail) && !mine.paid_on ? "changed" : "imported";
+  const stale = !mine?.source_detail || mine.source_detail.from === UNKNOWN; // missing items, or imported while the sender's name couldn't be read
+  const state = !mine ? "new" : (mine.source_version !== version || stale) && !mine.paid_on ? "changed" : "imported";
   return { state, mine, due, key, version, lines, prof };
 }
 
@@ -217,7 +229,7 @@ async function importState(db: ReturnType<typeof admin>, inv: any, userId: strin
 async function doImport(db: ReturnType<typeof admin>, inv: any, token: string, userId: string, r: any) {
   const { mine, due, key, version, lines, prof } = r;
 
-  const from = String(prof?.business_name || "").trim() || "Unknown sender";
+  const from = senderName(prof);
   const items = [...new Set((lines ?? []).map((l: { item: string }) => String(l.item || "").trim()).filter(Boolean))];
   const row = {
     amount: due,
@@ -236,8 +248,11 @@ async function doImport(db: ReturnType<typeof admin>, inv: any, token: string, u
     },
   };
   if (mine) {
+    const { data: was } = await db.from("crew_payouts").select("crew_id").eq("id", mine.id).eq("owner_id", userId).single();
     const { error } = await db.from("crew_payouts").update(row).eq("id", mine.id).eq("owner_id", userId);
     if (error) throw new HttpError(500, error.message);
+    // Fix a payee that was saved as "Unknown sender" before.
+    if (was?.crew_id && from !== UNKNOWN) await db.from("crew_members").update({ name: from }).eq("id", was.crew_id).eq("owner_id", userId).eq("name", UNKNOWN);
     return { state: "imported", id: mine.id, updated: true };
   }
 
